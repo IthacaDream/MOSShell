@@ -2,8 +2,8 @@ from abc import ABC, abstractmethod
 from typing import TypedDict, Literal, Optional, Dict, Any, Awaitable, List, Generic, TypeVar
 from ghoshell_common.helpers import uuid
 from queue import Queue
+from pydantic import BaseModel, Field
 import time
-import asyncio
 
 RESULT = TypeVar("RESULT")
 
@@ -28,7 +28,7 @@ class CommandToken(TypedDict):
     cid: str
     """command unique id"""
 
-    type: Literal['init', 'delta', 'end']
+    type: Literal['start', 'delta', 'end']
     """tokens type"""
 
     text: str
@@ -43,35 +43,27 @@ class CommandTokenStream:
     thread level iterable command token stream
     """
 
-    def __init__(self):
-        self.tokens: Queue[CommandToken | None] = Queue()
-        self.stopped = False
-
+    @abstractmethod
     def append(self, token: CommandToken | None):
-        if self.stopped:
-            return
-        if token is None:
-            self.stopped = True
-        self.tokens.put_nowait(token)
+        pass
 
     def __iter__(self):
         return self
 
-    def __next__(self):
-        if self.stopped:
-            raise StopIteration()
-        result = self.tokens.get(block=True)
-        if result is None:
-            raise StopIteration()
-        return result
+    @abstractmethod
+    def __next__(self) -> CommandToken:
+        """
+        :raise: StopIteration
+        """
+        pass
 
 
-def cmd_init(tokens: str, chan: Optional[str], name: str, attrs: Dict[str, Any], cid: str = "") -> CommandToken:
+def cmd_start(tokens: str, chan: Optional[str], name: str, attrs: Dict[str, Any], cid: str = "") -> CommandToken:
     cid = cid or uuid()
     return CommandToken(
         name=name,
         chan=chan,
-        type="init",
+        type="start",
         attrs=attrs,
         text=tokens,
         cid=cid,
@@ -103,35 +95,31 @@ def cmd_delta(tokens: str, chan: Optional[str], name: str, cid: str) -> CommandT
 CommandState = Literal['created', 'queued', 'pending', 'running', 'stopped']
 
 
+class CommandCall(BaseModel):
+    name: str = Field(description="command name")
+
+    chan: str = Field(description="the command belongs to")
+
+    cid: str = Field(description="command unique id")
+
+    args: List[Any] = Field(default_factory=list, description="command arguments")
+
+    kwargs: Dict[str, Any] = Field(default_factory=dict, description="command keyword arguments")
+
+    state: CommandState = Field('created', description="command state")
+
+    trace: Dict[CommandState, float] = Field(default_factory=dict, description="运行生命周期的时间点记录.")
+
+    #  --- result of the command --- #
+    code: int = Field(0, description="error code of the command call")
+    message: Optional[str] = Field(None, description="error message of the command call")
+
+
 class CommandTask(ABC, Awaitable[RESULT]):
     """
     大模型的输出被转化成 CmdToken 后, 再通过执行器生成的运行时对象.
     """
-
-    name: str
-    """command name"""
-
-    chan: str
-    """the command belongs to"""
-
-    cid: str
-    """command unique id"""
-
-    args: List[Any]
-    """调用时的入参. """
-
-    kwargs: Dict[str, Any]
-    """调用时的 keyword 入参. """
-
-    state: CommandState = 'created'
-
-    trace: Dict[CommandState, float] = {}
-    """运行生命周期的时间点记录. """
-
-    #  --- result of the command --- #
-    code: int = 0
-    error: Optional[str] = None
-    data: Optional[RESULT] = None
+    call: CommandCall
 
     @abstractmethod
     def is_done(self) -> bool:
@@ -139,10 +127,6 @@ class CommandTask(ABC, Awaitable[RESULT]):
         命令已经结束.
         """
         pass
-
-    def set_state(self, state: CommandState):
-        self.state = state
-        self.trace[state] = time.time()
 
     @abstractmethod
     def cancel(self):
@@ -176,29 +160,51 @@ class CommandTask(ABC, Awaitable[RESULT]):
         pass
 
 
+CommandType = Literal['function', 'policy', 'meta', 'control']
+"""
+命令的基础类型: 
+- function: 功能, 需要一段时间执行, 执行完后结束. 
+- policy:   状态变更函数. 会改变 Command 所属 Channel 的运行策略, 立刻生效. 
+            Channel 在没有 Function 执行时, 会持续执行 policy. 
+- meta:     meta-agent 可以通过 meta 类型命令, 修改这个 channel, 比如创建新的函数. 不对普通 agent 暴露.   
+- control:  control 类型的命令对 channel 有最高控制权限, 通常只向人类进行开放.  
+"""
+
+
+class CommandMeta(BaseModel):
+    """
+    命令的原始信息.
+    """
+    name: str = Field(description="the name of the command")
+    chan: str = Field(description="the channel name that the command belongs to")
+    type: CommandType = Field(description="the type of the command")
+    interface: str = Field(
+        description="大模型所看到的关于这个命令的 prompt. 类似于 FunctionCall 协议提供的 JSON Schema."
+                    "但核心思想是 Code As Prompt."
+                    "通常是一个 python async 函数的 signature. 形如:"
+                    "```python"
+                    "async def name(arg: typehint = default) -> return_type:"
+                    "    ''' docstring '''"
+                    "    pass"
+                    "```"
+    )
+
+
 class Command(ABC):
     """
     对大模型可见的命令描述. 包含几个核心功能:
     大模型通常能很好地理解, 并且使用这个函数.
 
     这个 Command 本身还会被伪装成函数, 让大模型可以直接用代码的形式去调用它.
+    Shell 也将支持一个直接执行代码的控制逻辑, 形如 <exec> ... </exec> 的方式, 用 asyncio 语法直接执行它所看到的 Command
     """
 
-    name: str
-    """命令的名字"""
-
-    chan: str
-    """命令所属的 channel. 通常 channel:name 可以构成一个全局唯一的 Command. """
-
-    type: Literal['function', 'policy', 'meta', 'control']
-    """
-    命令的基础类型: 
-    - function: 功能, 需要一段时间执行, 执行完后结束. 
-    - policy:   状态变更函数. 会改变 Command 所属 Channel 的运行策略, 立刻生效. 
-                Channel 在没有 Function 执行时, 会持续执行 policy. 
-    - meta:     meta-agent 可以通过 meta 类型命令, 修改这个 channel, 比如创建新的函数. 不对普通 agent 暴露.   
-    - control:  control 类型的命令对 channel 有最高控制权限, 通常只向人类进行开放.  
-    """
+    @abstractmethod
+    def meta(self) -> CommandMeta:
+        """
+        返回 Command 的元信息.
+        """
+        pass
 
     @abstractmethod
     def __prompt__(self) -> str:
