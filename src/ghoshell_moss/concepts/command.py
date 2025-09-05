@@ -8,10 +8,19 @@ import time
 RESULT = TypeVar("RESULT")
 
 
+class CommandError(Exception):
+
+    def __init__(self, code: int, message: str, cid: Optional[str]):
+        self.code = code
+        self.message = message
+        self.cid = cid
+        super().__init__(f"Command failed with code {code}: {message}")
+
+
 class CommandToken(TypedDict):
     """
     将大模型流式输出的文本结果, 包装为流式的 Command Token 对象.
-    整个 Command 的生命周期是: start -> ?[delta -> ... -> delta] -> stop
+    整个 Command 的生命周期是: start -> ?[delta -> ... -> delta] -> end
     在生命周期中所有被包装的 token 都带有相同的 cid.
 
     * start: 携带 command 的参数信息.
@@ -100,19 +109,44 @@ class CommandCall(BaseModel):
 
     chan: str = Field(description="the command belongs to")
 
-    cid: str = Field(description="command unique id")
+    cid: str = Field(default_factory=uuid, description="command unique id")
+
+    block: bool = Field(default=True, description="don't block")
 
     args: List[Any] = Field(default_factory=list, description="command arguments")
 
     kwargs: Dict[str, Any] = Field(default_factory=dict, description="command keyword arguments")
 
-    state: CommandState = Field('created', description="command state")
+    # state: CommandState = Field('created', description="command state")
+    #
+    # trace: Dict[CommandState, float] = Field(default_factory=dict, description="运行生命周期的时间点记录.")
+    #
+    # #  --- result of the command --- #
+    # code: int = Field(0, description="error code of the command call")
+    # message: Optional[str] = Field(None, description="error message of the command call")
 
-    trace: Dict[CommandState, float] = Field(default_factory=dict, description="运行生命周期的时间点记录.")
 
-    #  --- result of the command --- #
-    code: int = Field(0, description="error code of the command call")
-    message: Optional[str] = Field(None, description="error message of the command call")
+CommandDeltaArgType = Literal['__text__', '__json__', '__xml__', '__yaml__', '__markdown__', '__python__', '__stream__']
+
+
+class CommandMeta(BaseModel):
+    """
+    命令的原始信息.
+    """
+    name: str = Field(description="the name of the command")
+    doc: str = Field(default="", description="the doc of the command")
+    chan: str = Field(description="the channel name that the command belongs to")
+    delta_arg: Optional[CommandDeltaArgType] = Field(default=None, description="the delta arg type")
+    interface: str = Field(
+        description="大模型所看到的关于这个命令的 prompt. 类似于 FunctionCall 协议提供的 JSON Schema."
+                    "但核心思想是 Code As Prompt."
+                    "通常是一个 python async 函数的 signature. 形如:"
+                    "```python"
+                    "async def name(arg: typehint = default) -> return_type:"
+                    "    ''' docstring '''"
+                    "    pass"
+                    "```"
+    )
 
 
 class CommandTask(ABC, Awaitable[RESULT]):
@@ -120,6 +154,7 @@ class CommandTask(ABC, Awaitable[RESULT]):
     大模型的输出被转化成 CmdToken 后, 再通过执行器生成的运行时对象.
     """
     call: CommandCall
+    meta: CommandMeta
 
     @abstractmethod
     def is_done(self) -> bool:
@@ -136,12 +171,10 @@ class CommandTask(ABC, Awaitable[RESULT]):
         pass
 
     @abstractmethod
-    async def send(self, delta: str) -> None:
-        """
-        向命令发送流式的输入. 如果它需要的话.
-        """
+    async def write(self, delta: str) -> None:
         pass
 
+    @abstractmethod
     async def wait_until_done(
             self,
             timeout: float | None = None,
@@ -156,6 +189,7 @@ class CommandTask(ABC, Awaitable[RESULT]):
     def __await__(self) -> RESULT:
         """
         运行并等待
+        :raise: CommandError
         """
         pass
 
@@ -169,25 +203,6 @@ CommandType = Literal['function', 'policy', 'meta', 'control']
 - meta:     meta-agent 可以通过 meta 类型命令, 修改这个 channel, 比如创建新的函数. 不对普通 agent 暴露.   
 - control:  control 类型的命令对 channel 有最高控制权限, 通常只向人类进行开放.  
 """
-
-
-class CommandMeta(BaseModel):
-    """
-    命令的原始信息.
-    """
-    name: str = Field(description="the name of the command")
-    chan: str = Field(description="the channel name that the command belongs to")
-    type: CommandType = Field(description="the type of the command")
-    interface: str = Field(
-        description="大模型所看到的关于这个命令的 prompt. 类似于 FunctionCall 协议提供的 JSON Schema."
-                    "但核心思想是 Code As Prompt."
-                    "通常是一个 python async 函数的 signature. 形如:"
-                    "```python"
-                    "async def name(arg: typehint = default) -> return_type:"
-                    "    ''' docstring '''"
-                    "    pass"
-                    "```"
-    )
 
 
 class Command(ABC):

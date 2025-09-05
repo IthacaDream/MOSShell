@@ -21,7 +21,8 @@ class ThreadSafeResult(Generic[R]):
     Note: Written with the help from deepseek:v3.1
     """
 
-    def __init__(self):
+    def __init__(self, uid: str = ""):
+        self.uid = uid
         self._waiting: deque[Tuple[asyncio.AbstractEventLoop, asyncio.Event]] = deque()
         self._event = threading.Event()
         self._result: Optional[R] = None

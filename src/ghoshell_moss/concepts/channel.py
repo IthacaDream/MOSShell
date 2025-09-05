@@ -1,7 +1,8 @@
 from abc import ABC, abstractmethod
-from typing import Iterable, Optional, Union, Callable, Awaitable, Coroutine, List, Type, TypeVar, Dict, ClassVar, Any
+from typing import Iterable, Optional, Union, Callable, Coroutine, List, Type, TypeVar, Dict, ClassVar, Any
+from typing_extensions import Self
 from .command import Command, CommandCall, CommandType, CommandMeta, CommandTask
-from ghoshell_container import IoCContainer, INSTANCE
+from ghoshell_container import IoCContainer, INSTANCE, Provider, BINDING
 from ghoshell_common.helpers import generate_import_path
 from pydantic import BaseModel, Field
 
@@ -20,6 +21,9 @@ class State(BaseModel):
 
 
 class StateModel(BaseModel, ABC):
+    """
+    通过强类型的方式对 State 进行建模.
+    """
     state_desc: ClassVar[str] = ""
     state_name: ClassVar[str] = ""
 
@@ -32,6 +36,14 @@ class StateModel(BaseModel, ABC):
         return State(name=name, description=description, schema=schema, default=default)
 
 
+class ChannelMeta(BaseModel):
+    name: str = Field(description="The name of the channel.")
+    available: bool = Field(description="Whether the channel is available.")
+    description: str = Field(description="The description of the channel.")
+    stats: List[State] = Field(default_factory=list, description="The list of state objects.")
+    commands: List[CommandMeta] = Field(default_factory=list, description="The list of commands.")
+
+
 class Runtime(ABC):
 
     @property
@@ -42,20 +54,18 @@ class Runtime(ABC):
         """
         pass
 
-    def make(self, contract: Type[INSTANCE]) -> INSTANCE:
-        return self.container.make(contract)
-
-    def call(self, func: Callable[..., R], *args, **kwargs) -> R:
-        return self.container.call(func, *args, **kwargs)
+    @abstractmethod
+    def meta(self) -> ChannelMeta:
+        pass
 
     # --- commands --- #
 
     @abstractmethod
-    def push_tail(self, *commands: Command) -> None:
+    def append(self, *commands: CommandTask) -> None:
         pass
 
     @abstractmethod
-    def push_head(self, *commands: Command) -> None:
+    def prepend(self, *commands: CommandTask) -> None:
         pass
 
     # --- states --- #
@@ -74,6 +84,8 @@ class Runtime(ABC):
     @abstractmethod
     def set_state_model(self, model: Type[StateModel]) -> StateModel:
         pass
+
+    # --- output --- #
 
     # --- control --- #
 
@@ -124,6 +136,10 @@ class Runtime(ABC):
     def get_command_metas(self, types: Optional[CommandType] = None) -> Iterable[CommandMeta]:
         pass
 
+    @abstractmethod
+    def get_commands(self, types: Optional[CommandType] = None) -> Iterable[Command]:
+        pass
+
 
 class Channel(ABC):
 
@@ -142,18 +158,38 @@ class Channel(ABC):
     def description(self) -> str:
         pass
 
-    @abstractmethod
-    def get_commands(self, types: Optional[CommandType] = None) -> Iterable[Command]:
-        pass
+    def default_meta(self) -> ChannelMeta:
+        return ChannelMeta(
+            name=self.name(),
+            description=self.description(),
+            available=False,
+        )
 
     @abstractmethod
     def states(self) -> Iterable[State]:
         pass
 
+    # --- children --- #
+
+    @abstractmethod
+    def with_children(self, *children: "Channel") -> Self:
+        pass
+
+    @abstractmethod
+    def children(self) -> Iterable[Self]:
+        """
+        register children channel.
+        """
+        pass
+
     # --- decorators --- #
 
     @abstractmethod
-    def function(
+    def with_description(self, callback: Callable[..., str]) -> Callable[..., str]:
+        pass
+
+    @abstractmethod
+    def with_function(
             self,
             *,
             name: str = "",
@@ -168,7 +204,7 @@ class Channel(ABC):
         pass
 
     @abstractmethod
-    def policy(
+    def with_policy(
             self,
             *,
             name: str = "",
@@ -176,17 +212,38 @@ class Channel(ABC):
             interface: Optional[str] = None,
             tags: Optional[List[str]] = None,
     ) -> Callable[[PolicyCommand], PolicyCommand]:
+        """
+        register policy functions
+        """
         pass
 
     @abstractmethod
-    def with_state_model(self, model: Type[StateModel]) -> None:
+    def with_providers(self, *providers: Provider) -> None:
+        """
+        register default providers for the contracts
+        """
+        pass
+
+    @abstractmethod
+    def with_binding(self, contract: Type[INSTANCE], binding: Optional[BINDING] = None) -> None:
+        """
+        register default bindings for the given contract.
+        """
+        pass
+
+    @abstractmethod
+    def with_state_policy(self, model: StateModel) -> StateModel:
+        pass
+
+    @abstractmethod
+    def with_state_model(self, model: Type[StateModel]) -> Type[StateModel]:
         """
         register state model for channel
         """
         pass
 
     @abstractmethod
-    def with_state(self, state: State) -> None:
+    def with_state(self, state: State) -> State:
         """
         register state model for channel
         """
@@ -195,7 +252,7 @@ class Channel(ABC):
     # --- lifecycle --- #
 
     @abstractmethod
-    def bootstrap(self, container: IoCContainer) -> None:
+    def bootstrap(self, container: Optional[IoCContainer] = None) -> None:
         pass
 
     @abstractmethod
