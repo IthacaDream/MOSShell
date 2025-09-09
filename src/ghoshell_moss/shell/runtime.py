@@ -1,5 +1,5 @@
 from ghoshell_moss.concepts.channel import Channel, ChannelRuntime, ChannelMeta
-from ghoshell_moss.concepts.command import CommandTask, TaskStack
+from ghoshell_moss.concepts.command import CommandTask, CommandTaskSeq
 from ghoshell_moss.concepts.errors import StopTheLoop, FatalError
 from ghoshell_container import IoCContainer
 from typing import Dict, Optional, Set, Awaitable, List
@@ -209,7 +209,7 @@ class ChannelRuntimeImpl(ChannelRuntime):
                 running_task.cancel()
             result = await running_task
             # return a stack
-            if isinstance(result, TaskStack):
+            if isinstance(result, CommandTaskSeq):
                 return list(result.tasks)
 
             cmd_task.resolve(result)

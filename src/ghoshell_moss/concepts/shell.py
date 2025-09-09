@@ -1,48 +1,81 @@
 from abc import ABC, abstractmethod
-from typing import List, Iterable, Dict, Literal
+from typing import List, Iterable, Dict, Literal, Optional
 from typing_extensions import Self
 from .channel import Channel
 from .interpreter import Interpreter, AsyncInterpreter
-from .command import CommandTask, Command
+from .command import CommandTask, Command, CommandTaskSeq
 from ghoshell_container import IoCContainer
 from contextlib import asynccontextmanager
 
 
-class TextOutput(ABC):
+class TextStream(ABC):
+    """
+    shell 发送文本的专用模块.
+    """
+    id: str
 
     @abstractmethod
-    async def new_batch(self, batch_id: str | None = None, output: bool = False) -> str:
+    async def buffer(self, text: str) -> None:
         pass
 
     @abstractmethod
-    async def write(self, batch_id: str, output: str) -> str:
+    async def end(self) -> None:
         pass
 
     @abstractmethod
-    async def output(self, batch_id: str) -> None:
+    async def play(self) -> None:
+        """
+        设置文本允许输出, 进入输出队列.
+        """
         pass
 
     @abstractmethod
-    async def wait_batch_done(self, batch_id: str) -> None:
+    async def wait_done(self, timeout: float | None = None) -> None:
+        """
+        等待文本输出结束.
+        """
         pass
 
-    @abstractmethod
-    def clear(self) -> None:
-        pass
+    # 一个使用的示例.
+
+    async def __aenter__(self) -> Self:
+        await self.play()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        await self.end()
+        await self.wait_done()
 
 
 class Controller(ABC):
 
     @abstractmethod
-    async def loop(self, times: int, __text__: str) -> None:
+    def output(self, batch_id: Optional[str] = None, play: bool = True) -> TextStream:
+        """
+        默认需要支持 output.
+        """
         pass
 
     @abstractmethod
-    async def group(self, __text__: str) -> None:
+    async def loop(self, times: int, ct_: str) -> CommandTaskSeq:
+        """
+        解析 __text__ 里的 Command Token 语法, 返回一个 Command Task Seq
+        通常这个 Seq 由 解析出来的 CommandTask + 下一轮 Loop 构成. N + 1 个 Task.
+        """
         pass
 
     @abstractmethod
-    async def clear(self, __text__: str) -> None:
+    async def group(self, __text__: str) -> CommandTaskSeq:
+        """
+        所有的 __text__ 解析完毕后, 一次性输出.
+        """
+        pass
+
+    @abstractmethod
+    async def clear(self, __text__: str = "") -> None:
+        """
+        清空指定的 channel. 不包括自己. 如果 text 为空的话, 清空所有的子孙 channel.
+        """
         pass
 
     @abstractmethod

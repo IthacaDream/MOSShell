@@ -1,16 +1,34 @@
+import asyncio
+import threading
 from abc import ABC, abstractmethod
-from typing import TypedDict, Literal, Optional, Dict, Any, Awaitable, List, Generic, TypeVar
-from ghoshell_common.helpers import uuid
-from queue import Queue
+from typing import (
+    TypedDict, Literal, Optional, Dict, Any, Awaitable, List, Generic, TypeVar, Tuple, Callable, Coroutine, Union
+)
+from ghoshell_common.helpers import uuid, generate_import_path
+from ghoshell_moss.helpers.func_parser import parse_function_interface, prepare_kwargs_by_signature
+from .errors import CommandError
 from pydantic import BaseModel, Field
 from enum import Enum
+import inspect
 import time
 
 RESULT = TypeVar("RESULT")
 
 CommandState = Literal['created', 'queued', 'pending', 'running', 'failed', 'done', 'cancelled']
+StringType = Union[str, Callable[[], Coroutine[None, None, str]]]
 
-CommandDeltaType = Literal['_text', '_json', '_xml', '_yaml', '_markdown', '_python', '_stream']
+
+class CommandDeltaType(str, Enum):
+    """
+    拥有不同的语义的 Delta 类型. 如果一个 Command 的入参包含这些类型, 它生成 Command Token 的 Delta 应该遵循相同逻辑.
+    """
+
+    text = "the delta is any text"
+    json_ = "the delta is in json format"
+    ct_ = "the delta follows command token grammar"
+    yaml_ = "the delta is in yaml format"
+    markdown_ = "the delta is in markdown format"
+    python_ = "the delta is python code"
 
 
 class CommandType(str, Enum):
@@ -100,9 +118,11 @@ class CommandMeta(BaseModel):
     """
     name: str = Field(description="the name of the command")
     chan: str = Field(description="the channel name that the command belongs to")
-    doc: str = Field(default="", description="the doc of the command")
+    description: str = Field(default="", description="the doc of the command")
     type: CommandType = Field(description="")
     delta_arg: Optional[CommandDeltaType] = Field(default=None, description="the delta arg type")
+    call_soon: bool = Field(default=False)
+    block: bool = Field(default=True)
     interface: str = Field(
         description="大模型所看到的关于这个命令的 prompt. 类似于 FunctionCall 协议提供的 JSON Schema."
                     "但核心思想是 Code As Prompt."
@@ -113,66 +133,7 @@ class CommandMeta(BaseModel):
                     "    pass"
                     "```"
     )
-
-
-class CommandTask(ABC, Awaitable[RESULT]):
-    """
-    大模型的输出被转化成 CmdToken 后, 再通过执行器生成的运行时对象.
-    """
-    cid: str
-    args: List[Any]
-    kwargs: Dict[str, Any]
-    name: str
-    chan: str
-    meta: CommandMeta
-    state: CommandState = "created"
-    trace: Dict[CommandState, float] = {}
-    none_block: bool = False
-    errcode: Optional[int] = None
-    errmsg: Optional[str] = None
-    result: Optional[RESULT] = None
-
-    @abstractmethod
-    def is_done(self) -> bool:
-        """
-        命令已经结束.
-        """
-        pass
-
-    @abstractmethod
-    def cancel(self, reason: str = ""):
-        """
-        停止命令.
-        """
-        pass
-
-    def set_state(self, state: CommandState) -> None:
-        self.state = state
-        self.trace[state] = time.time()
-
-    @abstractmethod
-    def fail(self, error: Exception | str) -> None:
-        pass
-
-    @abstractmethod
-    def resolve(self, result: RESULT) -> None:
-        pass
-
-    @abstractmethod
-    async def wait_done(
-            self,
-            timeout: float | None = None,
-    ) -> None:
-        """
-        等待命令被执行完毕. 但不会主动运行这个任务. 仅仅是等待.
-        """
-        pass
-
-
-class TaskStack:
-
-    def __init__(self, *tasks: CommandTask) -> None:
-        self.tasks = tasks
+    args_schema: Optional[Dict[str, Any]] = Field(default=None, description="the json schema. 兼容性实现.")
 
 
 class Command(Generic[RESULT], ABC):
@@ -185,24 +146,13 @@ class Command(Generic[RESULT], ABC):
     """
 
     @abstractmethod
-    def meta(self) -> CommandMeta:
-        """
-        返回 Command 的元信息.
-        """
+    def parse(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
         pass
 
     @abstractmethod
-    def __prompt__(self) -> str:
+    async def meta(self) -> CommandMeta:
         """
-        大模型所看到的关于这个命令的 prompt. 类似于 FunctionCall 协议提供的 JSON Schema.
-        但核心思想是 Code As Prompt.
-
-        通常是一个 python async 函数的 signature. 形如:
-        ```python
-        async def name(arg: typehint = default) -> return_type:
-            ''' docstring '''
-            pass
-        ```
+        返回 Command 的元信息.
         """
         pass
 
@@ -212,3 +162,228 @@ class Command(Generic[RESULT], ABC):
         基于入参, 出参, 生成一个 CommandCall 交给调度器去执行.
         """
         pass
+
+
+class PyCommand(Generic[RESULT], Command[RESULT]):
+    """
+    将 python 的 Coroutine 函数封装成 Command
+    通过反射获取 interface.
+    """
+
+    def __init__(
+            self,
+            func: Callable[..., Coroutine[None, None, RESULT]],
+            *,
+            meta: Optional[CommandMeta] = None,
+            available: Optional[Callable[[], Coroutine[None, None, bool]]] = None,
+            interface: Optional[StringType] = None,
+            doc: Optional[StringType] = None,
+            comments: Optional[StringType] = None,
+    ):
+        self._meta = meta or CommandMeta()
+        self._name = meta.name or func.__name__
+        self._func = func
+        self._is_coroutine_func = inspect.iscoroutinefunction(func)
+        self._interface_fn = interface
+        self._doc_fn = doc
+        self._available_fn = available
+        self._comments_fn = comments
+        self._func_itf = parse_function_interface(func)
+        self._meta.description = self._meta.description or self._func_itf.docstring
+
+    async def meta(self) -> CommandMeta:
+        meta = self._meta.model_copy()
+        if self._available_fn is not None:
+            meta.available = await self._available_fn()
+        if meta.available:
+            meta.name = self._name
+            meta.interface = await self.get_interface()
+        return meta
+
+    async def _get_doc(self):
+        doc = ""
+        if self._doc_fn is not None:
+            if isinstance(self._doc_fn, str):
+                doc = self._doc_fn
+            else:
+                doc = await self._doc_fn()
+        return doc
+
+    async def get_interface(self) -> str:
+        if self._interface_fn is not None:
+            if isinstance(self._interface_fn, str):
+                return self._interface_fn
+            else:
+                return await self._interface_fn()
+
+        doc = await self._get_doc()
+        name = self._name
+        comments = ""
+        if self._comments_fn is not None:
+            comments = await self._comments_fn()
+
+        func_itf = self._func_itf
+
+        return func_itf.to_interface(
+            name=name,
+            doc=doc,
+            comments=comments,
+        )
+
+    def parse(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        real_kwargs = self._func_itf.prepare_kwargs(*args, **kwargs)
+        return real_kwargs
+
+    async def __call__(self, *args, **kwargs) -> RESULT:
+        if self._is_coroutine_func:
+            task = asyncio.create_task(self._func(*args, **kwargs))
+            return await task
+        else:
+            task = asyncio.to_thread(self._func, *args, **kwargs)
+            return await task
+
+
+class CommandTask(Generic[RESULT]):
+    """
+    大模型的输出被转化成 CmdToken 后, 再通过执行器生成的运行时对象.
+    实现一个跨线程安全的等待机制.
+    """
+
+    def __init__(
+            self,
+            *,
+            command: Command[RESULT],
+            tokens: str,
+            args: list,
+            kwargs: Dict[str, Any],
+            cid: str | None = None,
+    ) -> None:
+        self.cid: str = cid or uuid()
+        self.tokens: str = tokens
+        self.args: List = list(args)
+        self.kwargs: Dict[str, Any] = kwargs
+        self.real_kwargs: Dict[str, Any] = command.parse(*self.args, **self.kwargs)
+        self.state: CommandState = "created"
+        self.command: Command = command
+        self.errcode: int = 0
+        self.errmsg: Optional[str] = None
+        self.trace: Dict[CommandState, float] = {}
+        self.result: Optional[RESULT] = None
+        self._done_event: threading.Event = threading.Event()
+        self._done_lock = threading.Lock()
+        self._done = False
+        self._awaits: List[Tuple[asyncio.AbstractEventLoop, asyncio.Event]] = []
+
+    def is_done(self) -> bool:
+        """
+        命令已经结束.
+        """
+        return self._done_event.is_set()
+
+    def cancel(self, reason: str = ""):
+        """
+        停止命令.
+        """
+        self._set_result(None, 'cancelled', 1, reason)
+
+    def _add_await(self, loop: asyncio.AbstractEventLoop, event: asyncio.Event):
+        with self._done_lock:
+            if self._done_event.is_set():
+                loop.call_soon_threadsafe(event.set)
+            else:
+                self._awaits.append((loop, event))
+
+    def _set_result(self, result: Optional[RESULT], state: CommandState, errcode: int, errmsg: Optional[str]) -> bool:
+        with self._done_lock:
+            if self._done_event.is_set():
+                return False
+            self.result = result
+            self.errcode = errcode
+            self.errmsg = errmsg
+            self._done_event.set()
+            awaits = self._awaits.copy()
+            self._awaits.clear()
+            for loop, event in awaits:
+                loop.call_soon_threadsafe(event.set)
+            self.set_state(state)
+            return True
+
+    def set_state(self, state: CommandState) -> None:
+        self.state = state
+        self.trace[state] = time.time()
+
+    @abstractmethod
+    def fail(self, error: Exception | str) -> None:
+        if not self._done_event.is_set():
+            if isinstance(error, str):
+                errmsg = error
+                errcode = -1
+            elif isinstance(error, CommandError):
+                errcode = error.code
+                errmsg = error.message
+            elif isinstance(error, asyncio.CancelledError):
+                errcode = 1
+                errmsg = str(error)
+            elif isinstance(error, Exception):
+                errcode = -1
+                errmsg = str(error)
+            else:
+                errcode = 0
+                errmsg = ""
+            self._set_result(None, errcode, errmsg)
+            self.set_state("failed")
+
+    @abstractmethod
+    def resolve(self, result: RESULT) -> None:
+        if not self._done_event.is_set():
+            self._set_result(result, 'done', 0, None)
+
+    def raise_error(self) -> None:
+        if self.errcode is None or self.errcode == 0:
+            return None
+        elif self.errcode == 1:
+            raise asyncio.CancelledError(self.errmsg)
+        else:
+            raise CommandError(self.errcode, self.errmsg or "")
+
+    async def wait_done(
+            self,
+            *,
+            throw: bool = False,
+            timeout: float | None = None,
+    ) -> Optional[RESULT]:
+        """
+        等待命令被执行完毕. 但不会主动运行这个任务. 仅仅是等待.
+        Command Task 的 Await done 要求跨线程安全.
+        """
+        if self._done_event.is_set():
+            if throw:
+                self.raise_error()
+            return self.result
+
+        loop = asyncio.get_running_loop()
+        event = asyncio.Event()
+        self._add_await(loop, event)
+
+        await asyncio.wait_for(event.wait(), timeout=timeout)
+        if throw:
+            self.raise_error()
+        return self.result
+
+    def wait(self, *, throw: bool = False, timeout: float | None = None) -> Optional[RESULT]:
+        """
+        线程的 wait.
+        """
+        self._done_event.wait(timeout=timeout)
+        if throw:
+            self.raise_error()
+        return self.result
+
+
+class CommandTaskSeq:
+
+    def __init__(self, *tasks: CommandTask) -> None:
+        self.tasks = tasks
+
+    def __iter__(self):
+        return iter(self.tasks)

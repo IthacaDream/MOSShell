@@ -5,7 +5,7 @@ from ghoshell_container import IoCContainer, Container
 from ghoshell_moss.concepts.channel import Channel
 from ghoshell_moss.concepts.shell import MOSSShell, ShellRuntime
 from ghoshell_moss.concepts.interpreter import AsyncInterpreter, Interpreter
-from ghoshell_moss.concepts.command import CommandTask, TaskStack, Command
+from ghoshell_moss.concepts.command import CommandTask, CommandTaskSeq, Command
 from ghoshell_moss.concepts.errors import StopTheLoop, FatalError, CommandError
 from typing import Dict, Optional, Set, List, Tuple, Callable, Coroutine, Iterable
 from collections import deque
@@ -249,7 +249,7 @@ class ChannelTask:
             running_task.cancel()
         result = await running_task
         # return a stack
-        if isinstance(result, TaskStack):
+        if isinstance(result, CommandTaskSeq):
             cmd_task.resolve(None)
             return list(result.tasks)
 

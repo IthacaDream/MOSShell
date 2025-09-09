@@ -59,20 +59,23 @@ class FunctionReflection:
     def prepare_kwargs(self, *args, **kwargs) -> Dict[str, Any]:
         return prepare_kwargs_by_signature(self.signature, args, kwargs)
 
-    def to_interface(self) -> str:
+    def to_interface(self, name: str = "", doc: str = "", comments: str = "") -> str:
         def_syntax = "async def" if self.is_coroutine_function else "def"
         indent = " " * 4
-        name = self.name
+        name = name or self.name
+        docstring = doc or self.docstring
+        comments = comments or self.comments
+
         sig = str(self.signature)
         definition = f"{def_syntax} {name}{sig}:"
         lines = [definition]
-        if self.docstring:
-            docstring_lines = to_function_docstring_lines(self.docstring)
+        if docstring:
+            docstring_lines = to_function_docstring_lines(docstring)
             for line in docstring_lines:
                 lines.append(indent + line)
 
-        if self.comments:
-            for comment_line in self.comments.split("\n"):
+        if comments:
+            for comment_line in comments.split("\n"):
                 lines.append(indent + '# ' + comment_line)
         lines.append(indent + "pass")
         return "\n".join(lines)
