@@ -2,7 +2,8 @@ import asyncio
 import threading
 from abc import ABC, abstractmethod
 from typing import (
-    TypedDict, Literal, Optional, Dict, Any, Awaitable, List, Generic, TypeVar, Tuple, Callable, Coroutine, Union
+    TypedDict, Literal, Optional, Dict, Any, Awaitable, List, Generic, TypeVar, Tuple, Callable, Coroutine, Union,
+    is_typeddict,
 )
 from ghoshell_common.helpers import uuid, generate_import_path
 from ghoshell_moss.helpers.func import parse_function_interface, awaitable_caller
@@ -58,7 +59,7 @@ class CommandType(str, Enum):
         }
 
 
-class CommandToken(TypedDict):
+class CommandToken(BaseModel):
     """
     将大模型流式输出的文本结果, 包装为流式的 Command Token 对象.
     整个 Command 的生命周期是: start -> ?[delta -> ... -> delta] -> end
@@ -68,29 +69,21 @@ class CommandToken(TypedDict):
     * delta: 表示这个 command 所接受到的流式输入.
     * stop: 表示一个 command 已经结束.
     """
+    type: Literal['start', 'delta', 'end'] = Field(description="tokens type")
 
-    name: str
-    """command name"""
+    chan: Optional[str] = Field(default=None, description="the channel name that the command belongs to ")
 
-    chan: Optional[str]
-    """the channel name that the command belongs to """
+    name: str = Field(description="command name")
 
-    idx: int
-    """token index"""
+    idx: int = Field(description="token index of the stream")
 
-    part_idx: int
-    """continuous part idx of the command"""
+    part_idx: int = Field(description="continuous part idx of the command. start, delta, delta, end are four parts")
 
-    stream_id: Optional[str]
+    stream_id: Optional[str] = Field(description="the id of the stream the command belongs to")
 
-    type: Literal['start', 'delta', 'end']
-    """tokens type"""
+    content: str = Field(description="origin tokens that llm generates")
 
-    content: str
-    """origin tokens that llm generates"""
-
-    kwargs: Optional[Dict[str, Any]]
-    """attributes, only for command start"""
+    kwargs: Optional[Dict[str, Any]] = Field(default=None, description="attributes, only for command start")
 
 
 class CommandMeta(BaseModel):
