@@ -98,3 +98,14 @@ async def baz() -> int:
     # and the calling need not pass self or cls
     assert await baz_cmd() == 1
     assert await bar_cmd() == 1
+
+
+@pytest.mark.asyncio
+async def test_method_command():
+    async def bar(a: int, b: str = "hello", text_: str = "") -> int:
+        return 123
+
+    command = PyCommand(bar)
+    meta = await command.meta()
+    assert meta.name == "bar"
+    assert meta.delta_arg == "text_"

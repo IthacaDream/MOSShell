@@ -18,18 +18,17 @@ RESULT = TypeVar("RESULT")
 CommandState = Literal['created', 'queued', 'pending', 'running', 'failed', 'done', 'cancelled']
 StringType = Union[str, Callable[[], Coroutine[None, None, str]]]
 
-
-class CommandDeltaType(str, Enum):
-    """
-    拥有不同的语义的 Delta 类型. 如果一个 Command 的入参包含这些类型, 它生成 Command Token 的 Delta 应该遵循相同逻辑.
-    """
-
-    text = "the delta is any text"
-    json_ = "the delta is in json format"
-    ct_ = "the delta follows command token grammar"
-    yaml_ = "the delta is in yaml format"
-    markdown_ = "the delta is in markdown format"
-    python_ = "the delta is python code"
+CommandDeltaType = dict(
+    text_="the delta is any text",
+    json_="the delta is in json format",
+    ct_="the delta follows command token grammar",
+    yaml_="the delta is in yaml format",
+    markdown_="the delta is in markdown format",
+    python_="the delta is python code",
+)
+"""
+拥有不同的语义的 Delta 类型. 如果一个 Command 的入参包含这些类型, 它生成 Command Token 的 Delta 应该遵循相同逻辑.
+"""
 
 
 class CommandType(str, Enum):
@@ -104,7 +103,7 @@ class CommandMeta(BaseModel):
         description="",
         json_schema_extra=dict(enum=CommandType.all()),
     )
-    delta_arg: Optional[CommandDeltaType] = Field(default=None, description="the delta arg type")
+    delta_arg: Optional[str] = Field(default=None, description="the delta arg type")
     call_soon: bool = Field(default=False)
     block: bool = Field(default=True)
     interface: str = Field(
@@ -189,6 +188,13 @@ class PyCommand(Generic[RESULT], Command[RESULT]):
         # cached meta
         self._meta = meta or CommandMeta()
         self._cached_meta: Optional[CommandMeta] = None
+        for arg_name in self._func_itf.signature.parameters.keys():
+            if arg_name in CommandDeltaType:
+                if meta.delta_arg is not None:
+                    raise AttributeError(f"function {func} has more than one delta arg {meta.delta_arg} and {arg_name}")
+                meta.delta_arg = arg_name
+                # only first delta_arg type. and not allow more than 1
+                break
 
     async def meta(self) -> CommandMeta:
         if self._cached_meta is not None:
@@ -199,6 +205,7 @@ class PyCommand(Generic[RESULT], Command[RESULT]):
         meta.name = meta.name or self._name
         meta.available = await self._available_fn()
         meta.interface = await self._gen_interface(meta.name, meta.description)
+
         if not self._dynamic:
             self._cached_meta = meta
         return meta
