@@ -4,10 +4,11 @@ from xml import sax
 import logging
 import xml.sax
 from xml.sax import saxutils
-from typing import List, Iterable, Optional, Callable
+from typing import List, Iterable, Optional, Callable, Dict, Set
 from ghoshell_moss.concepts.command import CommandToken
 from ghoshell_moss.concepts.interpreter import CommandTokenParser, CommandTokenParseError
 from ghoshell_moss.concepts.errors import FatalError
+from ghoshell_moss.helpers.token_filters import SpecialTokenMatcher
 
 CommandTokenCallback = Callable[[CommandToken], None]
 
@@ -219,9 +220,10 @@ class CTMLTokenParser(CommandTokenParser):
             callback: CommandTokenCallback | None = None,
             stream_id: str = "",
             *,
-            root_tag: str = "cmtl",
+            root_tag: str = "ctml",
             default_chan: str = "",
             logger: Optional[logging.Logger] = None,
+            special_tokens: Optional[Dict[str, str]] = None,
     ):
         self.root_tag = root_tag
         self.logger = logger or logging.getLogger("CTMLParser")
@@ -242,6 +244,8 @@ class CTMLTokenParser(CommandTokenParser):
         self._stopped = False
         self._started = False
         self._ended = False
+        special_tokens = special_tokens or {}
+        self._special_tokens_matcher = SpecialTokenMatcher(special_tokens)
 
     def is_running(self) -> bool:
         return self._started and not self._stopped and not self._ended
@@ -271,7 +275,8 @@ class CTMLTokenParser(CommandTokenParser):
             raise ParserStopped()
         elif self.is_running():
             self._buffer += delta
-            self._sax_parser.feed(delta)
+            parsed = self._special_tokens_matcher.buffer(delta)
+            self._sax_parser.feed(parsed)
         else:
             return
 
@@ -281,7 +286,8 @@ class CTMLTokenParser(CommandTokenParser):
         if self._ended:
             return
         self._ended = True
-        self._sax_parser.feed(f'</{self.root_tag}>')
+        last_buffer = self._special_tokens_matcher.clear()
+        self._sax_parser.feed(f'{last_buffer}</{self.root_tag}>')
 
     def stop(self) -> None:
         """
