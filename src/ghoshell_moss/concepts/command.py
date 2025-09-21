@@ -147,11 +147,7 @@ class CommandMeta(BaseModel):
         description="the delta arg type",
         json_schema_extra={"enum": CommandDeltaType.all()},
     )
-    call_soon: bool = Field(default=False)
-    block: bool = Field(
-        default=True,
-        description="whether this command block the channel",
-    )
+
     interface: str = Field(
         default="",
         description="大模型所看到的关于这个命令的 prompt. 类似于 FunctionCall 协议提供的 JSON Schema."
@@ -166,6 +162,17 @@ class CommandMeta(BaseModel):
     args_schema: Optional[Dict[str, Any]] = Field(
         default=None,
         description="the json schema. 兼容性实现.",
+    )
+
+    # --- advance options --- #
+
+    call_soon: bool = Field(
+        default=False,
+        description="if true, this command is called soon when append to the channel",
+    )
+    block: bool = Field(
+        default=True,
+        description="whether this command block the channel. if block + call soon, will clear the channel first",
     )
 
 

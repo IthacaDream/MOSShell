@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Callable, Coroutine, Optional, Iterable
 from ghoshell_moss.concepts.command import Command, BaseCommandTask, CommandMeta, RESULT, CommandType
-from ghoshell_moss.concepts.channel import Channel, ChannelRuntime, ChannelMeta
+from ghoshell_moss.concepts.channel import Channel, ChannelController, ChannelMeta
 from ghoshell_container import set_container
 import anyio
 
@@ -22,7 +22,7 @@ class PyCommand(Command[RESULT]):
         return await self._func(*args, **kwargs)
 
 
-class PyChannelRuntime(ChannelRuntime):
+class PyChannelController(ChannelController):
 
     def __init__(
             self,
@@ -47,7 +47,7 @@ class PyChannelRuntime(ChannelRuntime):
     def defer_clear(self) -> None:
         pass
 
-    def reset(self) -> None:
+    def on_reset(self) -> None:
         pass
 
     def is_idle(self) -> bool:

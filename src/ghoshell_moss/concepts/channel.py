@@ -37,9 +37,11 @@ class ChannelMeta(BaseModel):
     context: str = Field(default="", description="the runtime context of the channel.")
 
 
-class ChannelRuntime(Protocol):
+class ChannelController(Protocol):
     """
-    channel 的运行时方法. 只有在 channel.start 之后才可使用.
+    channel 的运行时方法.
+    只有在 channel.start 之后才可使用.
+    用于控制 channel 的所有能力.
     """
 
     container: IoCContainer
@@ -101,16 +103,23 @@ class ChannelRuntime(Protocol):
         pass
 
     @abstractmethod
-    async def reset(self) -> None:
+    async def on_policy_run(self) -> None:
         """
-        要求轨道重置到最初状态.
+        回归 policy 运行. 通常在一个队列里没有 function 在运行中时, 会运行 policy. 同时 none-block 的函数也不会中断 policy 运行.
         """
         pass
 
     @abstractmethod
-    async def run_policy(self) -> None:
+    async def on_policy_pause(self) -> None:
         """
-        回归 policy 运行. 通常在一个队列里没有 function 在运行中时, 会运行 policy. 同时 none-block 的函数也不会中断 policy 运行.
+        接受到了新的命令, 要中断 policy
+        """
+        pass
+
+    @abstractmethod
+    async def on_clear(self) -> None:
+        """
+        清空所有的运行中状态.
         """
         pass
 
@@ -138,90 +147,7 @@ class ChannelRuntime(Protocol):
         await self.close()
 
 
-class Channel(ABC):
-    """
-    Shell 可以使用的命令通道.
-    """
-
-    @abstractmethod
-    def name(self) -> str:
-        pass
-
-    @abstractmethod
-    def description(self) -> str:
-        pass
-
-    @property
-    @abstractmethod
-    def runtime(self) -> ChannelRuntime:
-        """
-        Channel 在 bootstrap 之后返回的运行时.
-        :raise RuntimeError: Channel 没有运行
-        """
-        pass
-
-    # --- children --- #
-
-    @abstractmethod
-    def with_children(self, *children: "Channel") -> Self:
-        """
-        添加子 Channel 到当前 Channel. 形成树状关系.
-        :raise KeyError: 如果出现重名会发出这个异常.
-        """
-        pass
-
-    @abstractmethod
-    def children(self) -> Dict[str, "Channel"]:
-        """
-        返回所有已注册的子 Channel.
-        """
-        pass
-
-    @abstractmethod
-    def descendants(self) -> Dict[str, "Channel"]:
-        """
-        返回所有的子孙 Channel, 先序遍历.
-        """
-        pass
-
-    @abstractmethod
-    def get_channel(self, name: str) -> Optional[Self]:
-        """
-        使用 channel 名从树中获取一个 Channel 对象. 包括自身.
-        """
-        pass
-
-    # --- lifecycle --- #
-
-    @abstractmethod
-    def run(self, container: Optional[IoCContainer] = None) -> "ChannelRuntime":
-        """
-        传入一个父容器, 启动 Channel. 同时生成 Runtime.
-        真正运行的是 channel runtime.
-        """
-        pass
-
-    @abstractmethod
-    def stop(self) -> None:
-        pass
-
-    @abstractmethod
-    def is_running(self) -> bool:
-        """
-        标注 Channel 已经开始运行了, 但没有终结.
-        """
-        pass
-
-    @abstractmethod
-    async def on_idle(self) -> None:
-        pass
-
-    @abstractmethod
-    async def on_clear(self) -> None:
-        pass
-
-
-class ChannelDecorators(ABC):
+class Decorators(ABC):
 
     @abstractmethod
     def with_description(self, description: Callable[..., str]) -> Callable[..., str]:
@@ -362,6 +288,94 @@ class ChannelDecorators(ABC):
         """
         register default bindings for the given contract.
         """
+        pass
+
+
+class Channel(ABC):
+    """
+    Shell 可以使用的命令通道.
+    """
+
+    @abstractmethod
+    def name(self) -> str:
+        pass
+
+    @abstractmethod
+    def description(self) -> str:
+        pass
+
+    @property
+    @abstractmethod
+    def runtime(self) -> ChannelController:
+        """
+        Channel 在 bootstrap 之后返回的运行时.
+        :raise RuntimeError: Channel 没有运行
+        """
+        pass
+
+    # --- children --- #
+
+    @abstractmethod
+    def with_children(self, *children: "Channel") -> Self:
+        """
+        添加子 Channel 到当前 Channel. 形成树状关系.
+        :raise KeyError: 如果出现重名会发出这个异常.
+        """
+        pass
+
+    @abstractmethod
+    def children(self) -> Dict[str, "Channel"]:
+        """
+        返回所有已注册的子 Channel.
+        """
+        pass
+
+    @abstractmethod
+    def descendants(self) -> Dict[str, "Channel"]:
+        """
+        返回所有的子孙 Channel, 先序遍历.
+        """
+        pass
+
+    @abstractmethod
+    def get_channel(self, name: str) -> Optional[Self]:
+        """
+        使用 channel 名从树中获取一个 Channel 对象. 包括自身.
+        """
+        pass
+
+    # --- lifecycle --- #
+
+    @abstractmethod
+    def run(self, container: Optional[IoCContainer] = None) -> "ChannelController":
+        """
+        传入一个父容器, 启动 Channel. 同时生成 Runtime.
+        真正运行的是 channel runtime.
+        """
+        pass
+
+    @property
+    @abstractmethod
+    def decorators(self) -> Decorators:
+        pass
+
+    @abstractmethod
+    def stop(self) -> None:
+        pass
+
+    @abstractmethod
+    def is_running(self) -> bool:
+        """
+        标注 Channel 已经开始运行了, 但没有终结.
+        """
+        pass
+
+    @abstractmethod
+    async def on_idle(self) -> None:
+        pass
+
+    @abstractmethod
+    async def on_clear(self) -> None:
         pass
 
 

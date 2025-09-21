@@ -100,15 +100,6 @@ class CommandTaskElement(ABC):
     def is_end(self) -> bool:
         pass
 
-    def all_tasks(self, only_children: bool = False) -> Iterable[CommandTask]:
-        """
-        先序遍历所有子节点已经生成的 tasks.
-        """
-        if self.current is not None and not only_children:
-            yield self.current
-        for child in self.children.values():
-            yield from child.all_tasks()
-
     @abstractmethod
     def destroy(self) -> None:
         pass

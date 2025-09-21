@@ -1,12 +1,9 @@
-from ghoshell_moss.concepts.channel import Channel, ChannelRuntime, ChannelMeta
+from ghoshell_moss.concepts.channel import Channel, ChannelController, ChannelMeta
 from ghoshell_moss.concepts.command import BaseCommandTask, CommandTaskSeq
 from ghoshell_moss.concepts.errors import StopTheLoop, FatalError
-from ghoshell_container import IoCContainer
+from ghoshell_moss.concepts.shell import ChannelRuntime
 from typing import Dict, Optional, Set, Awaitable, List
-from typing_extensions import Self
 from collections import deque
-from anyio.streams.memory import MemoryObjectSendStream, MemoryObjectReceiveStream
-from anyio.abc import TaskGroup
 
 import anyio
 import asyncio
@@ -26,7 +23,7 @@ class ChannelRuntimeImpl(ChannelRuntime):
         self._is_shutdown = False
 
         # runtime properties
-        self._children: Dict[str, ChannelRuntimeImpl] = {}
+        self._children: Dict[str, ChannelRuntime] = {}
         self._running_loop: Optional[asyncio.AbstractEventLoop] = None
         self._command_task_queue: deque[BaseCommandTask] = deque()
         self._has_pending_task_event: Optional[asyncio.Event] = None
@@ -34,7 +31,7 @@ class ChannelRuntimeImpl(ChannelRuntime):
         self._shutdown_event: Optional[asyncio.Event] = None
         self._running_tasks: Set[BaseCommandTask] = set()
 
-    def get_child(self, name: str) -> Optional["ChannelRuntimeImpl"]:
+    def get_child(self, name: str) -> Optional["ChannelRuntime"]:
         self._check_running()
         if name in self._children:
             return self._children[name]

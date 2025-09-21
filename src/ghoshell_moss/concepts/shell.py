@@ -45,6 +45,7 @@ class OutputStream(ABC):
     def as_command_task(self) -> Optional[CommandTask]:
         """
         将 wait done 转化为一个 command task.
+        这个 command task 通常在主轨 (channel name == "") 中运行.
         """
         pass
 
@@ -59,15 +60,22 @@ class OutputStream(ABC):
         await self.wait_done()
 
 
-class Output(Channel, ABC):
+class Output(ABC):
     """
-    输出模块.
+    文本输出模块. 通常和语音输出模块结合.
     """
 
     @abstractmethod
     def new_stream(self, *, batch_id: Optional[str] = None) -> OutputStream:
         """
         创建一个新的输出流, 第一个 stream 应该设置为 play
+        """
+        pass
+
+    @abstractmethod
+    def clear(self) -> None:
+        """
+        清空所有输出中的 output
         """
         pass
 
@@ -112,15 +120,55 @@ class Controller(ABC):
         pass
 
 
-# @abstractmethod
-# class Stream(ABC):
-#     @abstractmethod
-#     def write(self, chars: bytes | None) -> None:
-#         pass
-#
-#     @abstractmethod
-#     def read(self, wait_until_done: bool = False) -> bytes | None:
-#         pass
+class ChannelRuntime(ABC):
+    """
+    管理 channel 的所有通讯状态.
+    """
+
+    @abstractmethod
+    def name(self) -> str:
+        pass
+
+    @abstractmethod
+    async def append(self, *tasks: CommandTask) -> None:
+        pass
+
+    @abstractmethod
+    async def clear(self) -> None:
+        pass
+
+    @abstractmethod
+    async def defer_clear(self) -> None:
+        pass
+
+    @abstractmethod
+    def is_running(self) -> bool:
+        pass
+
+    @abstractmethod
+    def is_busy(self) -> bool:
+        pass
+
+    @abstractmethod
+    async def wait_idle(self, timeout: float | None = None) -> bool:
+        pass
+
+    @abstractmethod
+    def get_child(self, name: str) -> "ChannelRuntime":
+        pass
+
+    @abstractmethod
+    def bootstrap(self) -> None:
+        pass
+
+    @abstractmethod
+    def shutdown(self) -> None:
+        pass
+
+    @abstractmethod
+    def join(self) -> None:
+        pass
+
 
 class ShellRuntime(ABC):
 
