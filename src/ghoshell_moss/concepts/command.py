@@ -12,6 +12,7 @@ from ghoshell_moss.helpers.event import ThreadSafeEvent
 from .errors import CommandError
 from pydantic import BaseModel, Field
 from enum import Enum
+import traceback
 import inspect
 import time
 
@@ -129,6 +130,9 @@ class CommandToken(BaseModel):
         the deltas before the child command and after the child command have the different part_id `n` and `n + 1`
         """
         return f"{self.stream_id}-{self.cmd_idx}-{self.part_idx}"
+
+    def __str__(self):
+        return self.content
 
 
 class CommandMeta(BaseModel):
@@ -513,6 +517,7 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
             return True
 
     def fail(self, error: Exception | str) -> None:
+        import sys
         if not self._done_event.is_set():
             if isinstance(error, str):
                 errmsg = error
@@ -522,10 +527,10 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
                 errmsg = error.message
             elif isinstance(error, asyncio.CancelledError):
                 errcode = CommandError.CANCEL_CODE
-                errmsg = str(error)
+                errmsg = "".join(traceback.format_exception(error, limit=3))
             elif isinstance(error, Exception):
                 errcode = CommandError.UNKNOWN_CODE
-                errmsg = str(error)
+                errmsg = "".join(traceback.format_exception(error, limit=3))
             else:
                 errcode = 0
                 errmsg = ""

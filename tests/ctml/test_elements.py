@@ -1,9 +1,9 @@
-from typing import Iterable
+from typing import Iterable, AsyncIterable
 import pytest
 
 from ghoshell_moss.ctml.token_parser import CTMLTokenParser
 from ghoshell_moss.ctml.elements import CommandTaskElementContext
-from ghoshell_moss.concepts.command import PyCommand, BaseCommandTask, Command
+from ghoshell_moss.concepts.command import PyCommand, BaseCommandTask, Command, CommandToken
 from ghoshell_moss.concepts.interpreter import CommandTaskElement
 from ghoshell_moss.mocks.outputs import ArrOutput
 from ghoshell_moss.helpers.event import ThreadSafeEvent
@@ -114,6 +114,8 @@ async def test_element_baseline():
     assert len(suite.queue) == 4 + 1  # 最后一个是 None
     assert suite.queue.pop() is None
     assert [c.result for c in suite.queue] == [123, 123, None, None]
+    # the <foo /> is changed to <foo/> for fewer tokens usage
+    assert "".join(c.tokens for c in suite.queue) == '<foo/><bar a="123">hello</bar>'
     suite.root.destroy()
 
 
@@ -177,3 +179,58 @@ async def test_parse_and_execute_in_parallel():
     assert len(suite.queue) == 0
 
     assert results == [123, 123, None, None]
+
+
+@pytest.mark.asyncio
+async def test_parse_text_command():
+    async def foo(text__: str) -> str:
+        return text__
+
+    suite = new_test_suite(PyCommand(foo))
+    await suite.parse(["<foo/>"], run=True)
+
+    assert len(suite.queue) == 2
+    assert suite.queue[0].result == ""
+    assert suite.queue[0].tokens == "<foo/>"
+
+    suite = new_test_suite(PyCommand(foo))
+    await suite.parse(["<foo> </foo>"], run=True)
+    assert suite.queue.pop() is None
+    assert suite.queue[0].result == " "
+    assert "".join(t.tokens for t in suite.queue) == "<foo> </foo>"
+
+
+@pytest.mark.asyncio
+async def test_parse_text_command_with_kwargs():
+    async def foo(a: str, b: str = " ", text__: str = "") -> str:
+        return a + b + text__
+
+    suite = new_test_suite(PyCommand(foo))
+    content = '<foo a="hello">world</foo>'
+    await suite.parse([content], run=True)
+    assert suite.queue.pop() is None
+    # a + b + text__
+    assert suite.queue[0].result == "hello world"
+    assert "".join(t.tokens for t in suite.queue) == content
+
+
+@pytest.mark.asyncio
+async def test_parse_token_delta_command():
+    async def foo(tokens__) -> str:
+        result = ""
+        async for token in tokens__:
+            assert isinstance(token, CommandToken)
+            result += token.content
+        return result
+
+    suite = new_test_suite(PyCommand(foo))
+    content = '<foo><![CDATA[hello<bar/>world]]></foo>'
+    await suite.parse([content], run=True)
+    assert suite.queue[0].result == "hello<bar/>world"
+
+    suite = new_test_suite(PyCommand(foo))
+    # test without CDATA
+    content = '<foo>hello<bar/>world</foo>'
+    await suite.parse([content], run=True)
+    #  once without cdata, the self-closing tag will separate to start and end token
+    assert suite.queue[0].result == "hello<bar></bar>world"

@@ -152,3 +152,11 @@ def test_token_with_recursive_cdata():
     except Exception as ex:
         e = ex
     assert isinstance(e, CommandTokenParseError)
+
+
+def test_space_only_delta():
+    content = '<foo> </foo>'
+    q = []
+    CTMLTokenParser.parse(q.append, iter(content), root_tag="speak")
+    q = q[1:-1]
+    assert "".join(t.content for t in q) == content

@@ -64,14 +64,8 @@ class CMTLElement:
             self.part_idx += 1
 
     def add_delta(self, delta: str, gen_token: bool = True) -> Optional[CommandToken]:
-        self.deltas += delta
-        if not self._has_delta:
-            self._has_delta = len(delta.strip()) > 0
-            if self._has_delta:
-                # fist none empty delta
-                delta = self.deltas
-
-        if gen_token and self._has_delta:
+        if gen_token and len(delta) > 0:
+            self.deltas += delta
             return CommandToken(
                 name=self.name,
                 cmd_idx=self.cmd_idx,
@@ -331,3 +325,8 @@ class CTMLTokenParser(CommandTokenParser):
             for element in stream:
                 parser.feed(element)
             parser.end()
+
+    @classmethod
+    def join_tokens(cls, tokens: Iterable[CommandToken]) -> str:
+        # todo: 做优化能力, 比如将空的开标记合并.
+        return ''.join([t.content for t in tokens])

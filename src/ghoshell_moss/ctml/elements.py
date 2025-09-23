@@ -434,8 +434,19 @@ class DeltaIsTextCommandTaskElement(BaseCommandTaskElement):
         if token.command_id() != self.cid:
             self._inner_content += token.content
             return None
-        if self.current is not None:
-            self.current.kwargs[CommandDeltaType.TEXT.value] = self._inner_content
+        if self._current_task is not None:
+            self._current_task.kwargs[CommandDeltaType.TEXT.value] = self._inner_content
+            if not self._inner_content:
+                attrs = self._current_task.kwargs.copy()
+                del attrs[CommandDeltaType.TEXT.value]
+                self._current_task.tokens = CMTLElement.make_start_mark(
+                    self._current_task.meta.name,
+                    attrs=attrs,
+                    self_close=True,
+                )
+            else:
+                start_tokens = self._current_task.tokens
+                self._current_task.tokens = start_tokens + self._inner_content + f"</{self._current_task.meta.name}>"
             self._send_callback(self._current_task)
         self._end = True
 

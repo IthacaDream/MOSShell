@@ -1,4 +1,5 @@
-from typing import Any, Type, Tuple, List, Dict, TypeVar, Awaitable, List, Callable, Generic, Optional
+from typing import Any, Dict, TypeVar, Awaitable, List, Callable, Optional
+from typing_extensions import is_protocol, is_typeddict
 from ast import literal_eval
 from dataclasses import dataclass
 from functools import wraps
@@ -36,14 +37,20 @@ def prepare_kwargs_by_signature(sig: inspect.Signature, args: tuple, kwargs: dic
                 if isinstance(value, str) and param.annotation is not str:
                     if param.annotation is bool:
                         value = value.lower() is 'true'
-                    elif param.annotation is dict or param.annotation is list:
+                    elif param.annotation is dict or param.annotation is list or is_typeddict(param.annotation):
                         # 支持 dict 和 list 的 python 风格默认转换.
                         # 理论上 Command Token 的协议需要先设计好转换.
                         value = literal_eval(value)
-                if callable(param.annotation):
-                    bound_args.arguments[name] = param.annotation(value)
-                else:
-                    bound_args.arguments[name] = value
+
+                # annotation the value
+                annotation = param.annotation
+                if not is_protocol(annotation) and callable(annotation):
+                    try:
+                        value = param.annotation(value)
+                    except TypeError:
+                        pass
+
+                bound_args.arguments[name] = value
             except (TypeError, ValueError) as e:
                 raise ValueError(f"argument {name} with annotation {param.annotation} is invalid: {e}")
     return bound_args.arguments
