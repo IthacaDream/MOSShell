@@ -1,7 +1,7 @@
-from typing import Generic, TypeVar, Tuple, Iterable, AsyncIterable, Iterator, AsyncIterator
+from typing import Generic, TypeVar, Tuple
 from ghoshell_common.helpers import Timeleft
-from queue import Queue
-import threading
+from ghoshell_moss.helpers.event import ThreadSafeEvent
+from collections import deque
 import asyncio
 
 I = TypeVar("I")
@@ -11,31 +11,37 @@ class ThreadSafeStreamSender(Generic[I]):
 
     def __init__(
             self,
-            failed: threading.Event,
-            completed: threading.Event,
-            queue: Queue[I | Exception],
+            added: ThreadSafeEvent,
+            completed: ThreadSafeEvent,
+            queue: deque[I | Exception | None],
     ):
+        self._added = added
         self._completed = completed
-        self._failed = failed
         self._queue = queue
 
-    def append(self, item: I) -> None:
-        if self._failed.is_set() or self._completed.is_set():
-            # todo: error type
-            raise RuntimeError("ThreadStreamSender is already done")
-        self._queue.put_nowait(item)
+    def append(self, item: I | Exception | None) -> None:
+        if self._completed.is_set():
+            return
+        if item is None or isinstance(item, Exception):
+            self.commit()
+            return
+        self._queue.append(item)
+        self._added.set()
 
-    def end(self) -> None:
-        self._completed.set()
+    def commit(self) -> None:
+        if not self._completed.is_set():
+            self._queue.append(None)
+            self._added.set()
+            self._completed.set()
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if exc_val is not None:
-            self._failed.set()
-            self._queue.put_nowait(exc_val)
-        self.end()
+            self.append(exc_val)
+        else:
+            self.commit()
 
 
 class ThreadSafeStreamReceiver(Generic[I]):
@@ -45,13 +51,13 @@ class ThreadSafeStreamReceiver(Generic[I]):
 
     def __init__(
             self,
-            failed: threading.Event,
-            completed: threading.Event,
-            queue: Queue[I],
+            added: ThreadSafeEvent,
+            completed: ThreadSafeEvent,
+            queue: deque[I | Exception | None],
             timeout: float | None = None,
     ):
         self._completed = completed
-        self._failed = failed
+        self._added = added
         self._queue = queue
         self._timeleft = Timeleft(timeout or 0)
 
@@ -59,61 +65,76 @@ class ThreadSafeStreamReceiver(Generic[I]):
         return self
 
     def __next__(self) -> I:
-        if self._failed.is_set():
-            # todo
-            raise RuntimeError("ThreadSafeStreamReceiver is already failed")
-        if self._completed.is_set() and self._queue.empty():
+        if len(self._queue) > 0:
+            item = self._queue.popleft()
+            if isinstance(item, Exception):
+                raise item
+            elif item is None:
+                raise StopIteration
+            else:
+                return item
+        elif self._completed.is_set():
+            # 已经拿到了所有的结果.
             raise StopIteration
+        else:
+            left = self._timeleft.left() or None
+            if not self._added.wait_sync(left):
+                raise TimeoutError(f'Timeout waiting for {self._timeleft.timeout}')
+            item = self._queue.popleft()
+            if len(self._queue) == 0:
+                self._added.clear()
 
-        if not self._timeleft.alive():
-            raise TimeoutError(self._timeleft.timeout)
-
-        left = self._timeleft.left()
-        left = left if left > 0 else None
-        item = self._queue.get(block=True, timeout=left)
-        if isinstance(item, Exception):
-            raise item
-        return item
+            if isinstance(item, Exception):
+                raise item
+            elif item is None:
+                raise StopIteration
+            else:
+                return item
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if exc_val is not None:
-            self._failed.set()
         self._completed.set()
 
     def __aiter__(self):
         return self
 
     async def __anext__(self) -> I:
-        if self._failed.is_set():
-            # todo
-            raise RuntimeError("ThreadSafeStreamReceiver is already failed")
-        if self._completed.is_set() and self._queue.empty():
+        if len(self._queue) > 0:
+            item = self._queue.popleft()
+            if isinstance(item, Exception):
+                raise item
+            elif item is None:
+                raise StopAsyncIteration
+            else:
+                return item
+        elif self._completed.is_set():
+            # 已经拿到了所有的结果.
             raise StopAsyncIteration
+        else:
+            left = self._timeleft.left() or None
+            await asyncio.wait_for(self._added.wait(), timeout=left)
+            item = self._queue.popleft()
+            if len(self._queue) == 0:
+                self._added.clear()
 
-        if not self._timeleft.alive():
-            raise TimeoutError(self._timeleft.timeout)
-
-        left = self._timeleft.left()
-        left = left if left > 0 else None
-        item = await asyncio.to_thread(self._queue.get, block=True, timeout=left)
-        if isinstance(item, Exception):
-            raise item
-        return item
+            if isinstance(item, Exception):
+                raise item
+            elif item is None:
+                raise StopAsyncIteration
+            else:
+                return item
 
     async def __aenter__(self):
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        if exc_val is not None:
-            self._failed.set()
         self._completed.set()
 
 
 def create_thread_safe_stream(timeout: float | None = None) -> Tuple[ThreadSafeStreamSender, ThreadSafeStreamReceiver]:
-    failed = threading.Event()
-    completed = threading.Event()
-    queue = Queue()
-    return ThreadSafeStreamSender(failed, completed, queue), ThreadSafeStreamReceiver(failed, completed, queue, timeout)
+    added = ThreadSafeEvent()
+    completed = ThreadSafeEvent()
+    queue = deque()
+    return ThreadSafeStreamSender(added, completed, queue), ThreadSafeStreamReceiver(added, completed, queue, timeout)

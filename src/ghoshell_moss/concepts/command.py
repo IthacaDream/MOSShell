@@ -7,7 +7,8 @@ from typing import (
 )
 from typing_extensions import Self
 from ghoshell_common.helpers import uuid, generate_import_path
-from ghoshell_moss.helpers.func import parse_function_interface, awaitable_caller, unwrap_callable_or_value
+from ghoshell_moss.helpers.func import parse_function_interface
+from ghoshell_moss.helpers.event import ThreadSafeEvent
 from .errors import CommandError
 from pydantic import BaseModel, Field
 from enum import Enum
@@ -98,8 +99,6 @@ class CommandToken(BaseModel):
     * stop: 表示一个 command 已经结束.
     """
     type: Literal['start', 'delta', 'end'] = Field(description="tokens type")
-
-    chan: Optional[str] = Field(default=None, description="the channel name that the command belongs to ")
 
     name: str = Field(description="command name")
 
@@ -460,10 +459,8 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
             "created": time.time(),
         }
         self.result: Optional[RESULT] = None
-        self._done_event: threading.Event = threading.Event()
+        self._done_event: ThreadSafeEvent = ThreadSafeEvent()
         self._done_lock = threading.Lock()
-        self._done = False
-        self._awaits: List[Tuple[asyncio.AbstractEventLoop, asyncio.Event]] = []
 
     def copy(self, cid: str = "") -> Self:
         cid = cid or uuid()
@@ -498,13 +495,6 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
         """
         self._set_result(None, 'cancelled', CommandError.CANCEL_CODE, reason)
 
-    def _add_await(self, loop: asyncio.AbstractEventLoop, event: asyncio.Event):
-        with self._done_lock:
-            if self._done_event.is_set():
-                loop.call_soon_threadsafe(event.set)
-            else:
-                self._awaits.append((loop, event))
-
     def _set_result(
             self,
             result: Optional[RESULT],
@@ -519,10 +509,6 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
             self.errcode = errcode
             self.errmsg = errmsg
             self._done_event.set()
-            awaits = self._awaits.copy()
-            self._awaits.clear()
-            for loop, event in awaits:
-                loop.call_soon_threadsafe(event.set)
             self.set_state(state)
             return True
 
@@ -570,11 +556,7 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
                 self.raise_error()
             return self.result
 
-        loop = asyncio.get_running_loop()
-        event = asyncio.Event()
-        self._add_await(loop, event)
-
-        await asyncio.wait_for(event.wait(), timeout=timeout)
+        await asyncio.wait_for(self._done_event.wait(), timeout=timeout)
         if throw:
             self.raise_error()
         return self.result
@@ -583,7 +565,8 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
         """
         线程的 wait.
         """
-        self._done_event.wait(timeout=timeout)
+        if not self._done_event.wait_sync():
+            raise TimeoutError(f"wait timeout: {timeout}")
         if throw:
             self.raise_error()
         return self.result

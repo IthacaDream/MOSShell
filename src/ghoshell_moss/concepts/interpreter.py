@@ -3,8 +3,8 @@ from .command import CommandToken, CommandTask, CommandMeta
 from abc import ABC, abstractmethod
 from typing import Iterable, Callable, Optional, Coroutine, List, Dict
 
-CommandTokenCallback = Callable[[CommandToken], None]
-CommandTaskCallback = Callable[[CommandTask], None]
+CommandTokenCallback = Callable[[CommandToken | None], None]
+CommandTaskCallback = Callable[[CommandTask | None], None]
 
 
 class CommandTokenParseError(Exception):
@@ -96,6 +96,7 @@ class CommandTaskElement(ABC):
 
     So we need an Element Tree to parse the tokens into command tasks, and send the tasks immediately
     """
+    depth: int
 
     current: Optional[CommandTask] = None
     """the current command task of this element, created by `start` type command token"""
@@ -108,7 +109,7 @@ class CommandTaskElement(ABC):
         pass
 
     @abstractmethod
-    def on_token(self, token: CommandToken) -> None:
+    def on_token(self, token: CommandToken | None) -> None:
         pass
 
     @abstractmethod

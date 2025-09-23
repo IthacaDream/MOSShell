@@ -14,11 +14,14 @@ def test_thread_send_async_receive():
                 sender.append(char)
 
     async def receiving():
-        buffer = ""
-        async with receiver:
-            async for char in receiver:
-                buffer += char
-        done.append(buffer)
+        try:
+            buffer = ""
+            async with receiver:
+                async for char in receiver:
+                    buffer += char
+            done.append(buffer)
+        except Exception as e:
+            done.append(str(e))
 
     def sync_receiving():
         asyncio.run(receiving())

@@ -6,6 +6,7 @@ from ghoshell_moss.ctml.elements import CommandTaskElementContext
 from ghoshell_moss.concepts.command import PyCommand, BaseCommandTask, Command
 from ghoshell_moss.concepts.interpreter import CommandTaskElement
 from ghoshell_moss.mocks.outputs import ArrOutput
+from ghoshell_moss.helpers.event import ThreadSafeEvent
 from collections import deque
 from dataclasses import dataclass
 import asyncio
@@ -16,29 +17,37 @@ class ElementTestSuite:
     ctx: CommandTaskElementContext
     parser: CTMLTokenParser
     root: CommandTaskElement
-    queue: deque[BaseCommandTask]
+    queue: deque[BaseCommandTask | None]
+    stop_event: ThreadSafeEvent
 
     def as_tuple(self):
         return self.ctx, self.parser, self.root, self.queue
+
+    def stop(self):
+        self.parser.stop()
+        self.stop_event.set()
 
     async def parse(self, content: Iterable[str], run: bool = True) -> None:
         with self.parser:
             for c in content:
                 self.parser.feed(c)
         if run:
-            gather = []
+            gathered = []
             for task in self.queue:
-                gather.append(task.run())
-            await asyncio.gather(*gather, return_exceptions=True)
+                if task is not None:
+                    gathered.append(task.run())
+            await asyncio.gather(*gathered, return_exceptions=True)
 
 
 def new_test_suite(*commands: Command) -> ElementTestSuite:
     tasks_queue = deque()
     output = ArrOutput()
     command_map = {c.name(): c for c in commands}
+    stop_event = ThreadSafeEvent()
     ctx = CommandTaskElementContext(
         command_map,
         output,
+        stop_event=stop_event,
     )
     root = ctx.new_root(tasks_queue.append, stream_id="test")
     token_parser = CTMLTokenParser(
@@ -50,25 +59,45 @@ def new_test_suite(*commands: Command) -> ElementTestSuite:
         parser=token_parser,
         root=root,
         queue=tasks_queue,
+        stop_event=stop_event,
     )
 
 
 @pytest.mark.asyncio
-async def test_element_baseline():
-    ctx, parser, root, q = new_test_suite().as_tuple()
+async def test_element_with_no_command():
+    suite = new_test_suite()
+    ctx, parser, root, q = suite.as_tuple()
+    assert root.depth == 0
     content = ["<foo />", "hello", "<bar />", "world", "<baz />"]
     with parser:
         for c in content:
             parser.feed(c)
 
-    assert len(list(parser.parsed())) == (2 + 1 + 2 + 1 + 2)
+    # <ctml>, <foo></foo>, "hello", <bar></bar>, "world", <baz></baz>
+    assert len(list(parser.parsed())) == (1 + 2 + 1 + 2 + 1 + 2 + 1)
 
     # 模拟执行所有的命令
     for cmd_task in q:
-        await cmd_task.run()
+        if cmd_task is not None:
+            await cmd_task.run()
     # 由于没有任何真实的 command, 所以实际上只有两个 output stream 被执行了.
-    assert len(q) == 2
+    assert len(q) == 3
+    # 最后一个 item 是毒丸.
+    assert q[-1] is None
+
+    # 假设有正确的输出.
     assert ctx.output.clear() == ["hello", "world"]
+
+    children = list(suite.root.children.values())
+    assert len(children) == 1
+    assert children[0].depth == 1
+
+    count = 0
+    for child in children[0].children.values():
+        assert child.depth == 2
+        count += 1
+    # 三个空命令.
+    assert count == 3
 
 
 @pytest.mark.asyncio
@@ -81,7 +110,70 @@ async def test_element_baseline():
 
     suite = new_test_suite(PyCommand(foo), PyCommand(bar))
     await suite.parse(['<foo /><bar a="123">', "hello", "</bar>"], run=True)
-    assert len(list(suite.parser.parsed())) == (2 + 1 + 1 + 1)
-    assert len(suite.queue) == 4
+    assert len(list(suite.parser.parsed())) == (1 + 2 + 1 + 1 + 1 + 1)
+    assert len(suite.queue) == 4 + 1  # 最后一个是 None
+    assert suite.queue.pop() is None
     assert [c.result for c in suite.queue] == [123, 123, None, None]
     suite.root.destroy()
+
+
+@pytest.mark.asyncio
+async def test_element_in_chaos_order():
+    async def foo() -> int:
+        return 123
+
+    async def bar(a: int) -> int:
+        return a
+
+    suite = new_test_suite(PyCommand(foo), PyCommand(bar))
+    await suite.parse(['<fo', 'o /><b', 'ar a="12', '3">he', "llo<", "/bar>"], run=True)
+    assert suite.queue.pop() is None
+    assert [c.result for c in suite.queue] == [123, 123, None, None]
+    suite.root.destroy()
+
+
+@pytest.mark.asyncio
+async def test_parse_and_execute_in_parallel():
+    async def foo() -> int:
+        return 123
+
+    async def bar(a: int) -> int:
+        return a
+
+    suite = new_test_suite(PyCommand(foo), PyCommand(bar))
+    _queue = asyncio.Queue()
+    # 所有的 command task 都会发送给这个 queue
+    suite.root.with_callback(_queue.put_nowait)
+
+    def producer():
+        # feed the inputs
+        with suite.parser:
+            for char in ['<fo', 'o /><b', 'ar a="12', '3">he', "llo<", "/bar>"]:
+                suite.parser.feed(delta=char)
+
+    tasks = []
+    results = []
+
+    async def consumer():
+        while True:
+            task = await _queue.get()
+            if task is None:
+                # 最后一个是 None, 用来打破循环.
+                # 也是测试循环是否被打破了.
+                break
+            else:
+                tasks.append(asyncio.create_task(task.run()))
+
+        # 让 results 来承接所有 task 的返回值.
+        results.extend(await asyncio.gather(*tasks))
+
+    main_tasks = [
+        asyncio.to_thread(producer),
+        asyncio.create_task(consumer()),
+    ]
+    await asyncio.gather(*main_tasks, return_exceptions=True)
+
+    # suite.queue 被 _queue 夺舍了.
+    assert len(suite.queue) == 0
+
+    assert results == [123, 123, None, None]

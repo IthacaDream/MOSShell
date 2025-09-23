@@ -10,7 +10,7 @@ from ghoshell_moss.concepts.shell import OutputStream, Output
 from ghoshell_moss.helpers.stream import create_thread_safe_stream
 from .token_parser import CMTLElement
 from logging import Logger, getLogger
-from threading import Event
+from ghoshell_moss.helpers.event import ThreadSafeEvent
 from contextlib import contextmanager
 
 
@@ -22,18 +22,18 @@ class CommandTaskElementContext:
             commands: Dict[str, Command],
             output: Output,
             logger: Optional[Logger] = None,
-            stop_event: Optional[Event] = None,
+            stop_event: Optional[ThreadSafeEvent] = None,
     ):
         self.commands = commands
         self.output = output
         self.logger = logger or getLogger("MOSShell")
-        self.stop_event = stop_event or threading.Event()
+        self.stop_event = stop_event or ThreadSafeEvent()
 
     def new_root(self, callback: CommandTaskCallback, stream_id: str = "") -> CommandTaskElement:
         """
         创建解析树的根节点.
         """
-        return EmptyCommandTaskElement(
+        return RootCommandTaskElement(
             cid=stream_id,
             current_task=None,
             callback=callback,
@@ -58,11 +58,13 @@ class BaseCommandTaskElement(CommandTaskElement, ABC):
             cid: str,
             current_task: Optional[CommandTask],
             *,
+            depth: int = 0,
             callback: Optional[CommandTaskCallback] = None,
             ctx: CommandTaskElementContext,
     ) -> None:
         self.cid = cid
         self.ctx = ctx
+        self.depth = depth
         self._current_task: Optional[CommandTask] = current_task
         """当前的 task"""
 
@@ -85,6 +87,7 @@ class BaseCommandTaskElement(CommandTaskElement, ABC):
         """子节点发送的 tasks"""
 
         # 正式启动.
+        self._done_event = ThreadSafeEvent()
         self._destroyed = False
         self._on_self_start()
 
@@ -92,15 +95,22 @@ class BaseCommandTaskElement(CommandTaskElement, ABC):
         """设置变更 callback """
         self._callback = callback
 
-    def on_token(self, token: CommandToken) -> None:
-        if self.ctx.stop_event.is_set():
+    def on_token(self, token: CommandToken | None) -> None:
+        if self._done_event.is_set():
+            # todo log
+            return None
+        elif self.ctx.stop_event.is_set():
             # 避免并发操作中存在的乱续.
+            self._end = True
+            return None
+        elif token is None:
+            self._end = True
             return None
 
         if self._end:
             # 当前 element 已经运行结束了, 却拿到了新的 token.
-            # todo: 优化异常.
-            raise CommandTaskParseError(f"receive end token after the command is stopped")
+            # todo: log
+            return None
 
         # 如果有子节点状态已经变更, 但没有被更新, 临时更新一下. 容错.
         if self._unclose_child is not None and self._unclose_child.is_end():
@@ -119,25 +129,21 @@ class BaseCommandTaskElement(CommandTaskElement, ABC):
         # 接受一个 start token.
         if token.type == CommandTokenType.START:
             self._on_cmd_start_token(token)
-            return
         # 接受一个 end token
         elif token.type == CommandTokenType.END:
             self._on_cmd_end_token(token)
-            return
         # 接受一个 delta 类型的 token.
         else:
             self._on_delta_token(token)
-            return
 
-    def _send_callback(self, task: Optional[CommandTask]) -> None:
-        if task is None:
-            # 节省一些冗余代码.
-            return None
+    def _send_callback(self, task: CommandTask) -> None:
+        if not isinstance(task, CommandTask):
+            raise TypeError(f'task must be CommandTask, got {type(task)}')
         if self.ctx.stop_event.is_set():
             # 停止了就啥也不干了.
             return None
 
-        if task is not self._current_task:
+        if task is not None and task is not self._current_task:
             # 添加 children tasks
             self._children_tasks.append(task)
 
@@ -159,6 +165,7 @@ class BaseCommandTaskElement(CommandTaskElement, ABC):
                 current_task=None,
                 callback=self._callback,
                 ctx=self.ctx,
+                depth=self.depth + 1,
             )
         else:
             meta = command.meta()
@@ -177,6 +184,7 @@ class BaseCommandTaskElement(CommandTaskElement, ABC):
                     current_task=task,
                     callback=self._callback,
                     ctx=self.ctx,
+                    depth=self.depth + 1,
                 )
             elif meta.delta_arg == CommandDeltaType.TEXT.value:
                 child = DeltaIsTextCommandTaskElement(
@@ -184,6 +192,7 @@ class BaseCommandTaskElement(CommandTaskElement, ABC):
                     current_task=task,
                     callback=self._callback,
                     ctx=self.ctx,
+                    depth=self.depth + 1,
                 )
             else:
                 child = NoDeltaCommandTaskElement(
@@ -191,6 +200,7 @@ class BaseCommandTaskElement(CommandTaskElement, ABC):
                     current_task=task,
                     callback=self._callback,
                     ctx=self.ctx,
+                    depth=self.depth + 1,
                 )
 
         if child is not None:
@@ -307,9 +317,10 @@ class NoDeltaCommandTaskElement(BaseCommandTaskElement):
 
     def _on_self_end(self) -> None:
         self._end = True
+
         if self._current_task is None:
-            return
-        if len(self._children_tasks) > 0:
+            pass
+        elif len(self._children_tasks) > 0:
             cancel_after_children_task = CancelAfterOthersTask(
                 self._current_task,
                 *self._children_tasks,
@@ -329,6 +340,10 @@ class NoDeltaCommandTaskElement(BaseCommandTaskElement):
         super().destroy()
         if self._output_stream is not None:
             self._output_stream.close()
+
+
+class EmptyCommandTaskElement(NoDeltaCommandTaskElement):
+    pass
 
 
 class DeltaTypeIsTokensCommandTaskElement(BaseCommandTaskElement):
@@ -362,12 +377,41 @@ class DeltaTypeIsTokensCommandTaskElement(BaseCommandTaskElement):
         if token.command_id() != self.cid:
             self._token_sender.append(token)
         else:
-            self._token_sender.end()
+            self._token_sender.commit()
             self._end = True
 
 
-class EmptyCommandTaskElement(NoDeltaCommandTaskElement):
-    pass
+class RootCommandTaskElement(BaseCommandTaskElement):
+
+    def _send_callback_done(self):
+        if not self._done_event.is_set() and not self.ctx.stop_event.is_set() and self._callback is not None:
+            self._callback(None)
+        self._done_event.set()
+
+    def on_token(self, token: CommandToken | None) -> None:
+        if token is None or self.ctx.stop_event.is_set():
+            self._send_callback_done()
+            return
+        if self._unclose_child is None:
+            self._new_child_element(token)
+            return
+        else:
+            self._unclose_child.on_token(token)
+
+        if self._unclose_child.is_end():
+            self._send_callback_done()
+
+    def _on_delta_token(self, token: CommandToken) -> None:
+        raise NotImplementedError
+
+    def _on_self_start(self) -> None:
+        return
+
+    def _on_cmd_start_token(self, token: CommandToken):
+        raise NotImplementedError
+
+    def _on_cmd_end_token(self, token: CommandToken):
+        raise NotImplementedError
 
 
 class DeltaIsTextCommandTaskElement(BaseCommandTaskElement):

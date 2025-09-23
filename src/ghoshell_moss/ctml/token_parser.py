@@ -10,7 +10,7 @@ from ghoshell_moss.concepts.interpreter import CommandTokenParser, CommandTokenP
 from ghoshell_moss.concepts.errors import FatalError
 from ghoshell_moss.helpers.token_filters import SpecialTokenMatcher
 
-CommandTokenCallback = Callable[[CommandToken], None]
+CommandTokenCallback = Callable[[CommandToken | None], None]
 
 
 class CMTLElement:
@@ -18,15 +18,13 @@ class CMTLElement:
     Utility class to generate Command Token in XMTL (Command Token Marked Language stream)
     """
 
-    def __init__(self, *, cmd_idx: int, stream_id: str, chan: str, name: str, attrs: dict):
+    def __init__(self, *, cmd_idx: int, stream_id: str, name: str, attrs: dict):
         self.cmd_idx = cmd_idx
-        self.ns = chan
         self.name = name
         self.deltas = ""
-        # first part idx is 1
-        self.part_idx = 1
+        # first part idx is 0
+        self.part_idx = 0
         self._has_delta = False
-        self.fullname = self.make_fullname(chan, name)
         self.attrs = attrs
         self.stream_id = stream_id
 
@@ -46,12 +44,11 @@ class CMTLElement:
         return content
 
     def start_token(self) -> CommandToken:
-        content = self.make_start_mark(self.fullname, self.attrs, self_close=False)
+        content = self.make_start_mark(self.name, self.attrs, self_close=False)
         part_idx = self.part_idx
         self.part_idx += 1
         return CommandToken(
             name=self.name,
-            chan=self.ns,
             cmd_idx=self.cmd_idx,
             part_idx=part_idx,
             stream_id=self.stream_id,
@@ -77,7 +74,6 @@ class CMTLElement:
         if gen_token and self._has_delta:
             return CommandToken(
                 name=self.name,
-                chan=self.ns,
                 cmd_idx=self.cmd_idx,
                 part_idx=self.part_idx,
                 stream_id=self.stream_id,
@@ -92,13 +88,12 @@ class CMTLElement:
             self.part_idx += 1
         return CommandToken(
             name=self.name,
-            chan=self.ns,
             cmd_idx=self.cmd_idx,
             part_idx=self.part_idx,
             stream_id=self.stream_id,
             type="end",
             kwargs=None,
-            content=f"</{self.fullname}>",
+            content=f"</{self.name}>",
         )
 
 
@@ -139,19 +134,21 @@ class CTMLSaxHandler(xml.sax.ContentHandler, xml.sax.ErrorHandler):
         # event to notify the parsing is over.
         self.done_event = threading.Event()
 
-    def _send_to_callback(self, token: CommandToken) -> None:
-        if not self.done_event.is_set():
-            self._token_order += 1
+    def _send_to_callback(self, token: CommandToken | None) -> None:
+        if token is None:
+            # send the poison item means end
+            self._callback(None)
+        elif not self.done_event.is_set():
             token.order = self._token_order
+            self._token_order += 1
             self._callback(token)
         else:
             # todo: log
             pass
 
-    def startElementNS(self, name: tuple[str, str], qname: str, attrs: xml.sax.xmlreader.AttributesNSImpl) -> None:
+    def startElement(self, name: str, attrs: xml.sax.xmlreader.AttributesNSImpl) -> None:
         if self.done_event.is_set():
             return None
-        cmd_chan, cmd_name = name
         dict_attrs = {}
         if len(attrs) > 0:
             for qname in attrs.getQNames():
@@ -160,8 +157,7 @@ class CTMLSaxHandler(xml.sax.ContentHandler, xml.sax.ErrorHandler):
         element = CMTLElement(
             cmd_idx=self._cmd_idx,
             stream_id=self._stream_id,
-            chan=cmd_chan or self._default_chan,
-            name=cmd_name,
+            name=name,
             attrs=dict_attrs,
         )
         if len(self._parsing_element_stack) > 0:
@@ -169,18 +165,16 @@ class CTMLSaxHandler(xml.sax.ContentHandler, xml.sax.ErrorHandler):
 
         # using stack to handle elements
         self._parsing_element_stack.append(element)
-        if element.fullname != self._root_tag:
-            token = element.start_token()
-            self._send_to_callback(token)
+        token = element.start_token()
+        self._send_to_callback(token)
         self._cmd_idx += 1
 
-    def endElementNS(self, name: tuple[str, str], qname):
+    def endElement(self, name: str):
         if len(self._parsing_element_stack) == 0:
             raise FatalError("CTMLElement end element without existing one")
         element = self._parsing_element_stack.pop(-1)
-        if element.fullname != self._root_tag:
-            token = element.end_token()
-            self._send_to_callback(token)
+        token = element.end_token()
+        self._send_to_callback(token)
 
     def characters(self, content: str):
         if len(self._parsing_element_stack) == 0:
@@ -193,6 +187,7 @@ class CTMLSaxHandler(xml.sax.ContentHandler, xml.sax.ErrorHandler):
 
     def endDocument(self):
         # todo: log
+        self._send_to_callback(None)
         self.done_event.set()
 
     def error(self, exception: Exception):
@@ -238,7 +233,6 @@ class CTMLTokenParser(CommandTokenParser):
             logger=logger,
         )
         self._sax_parser = xml.sax.make_parser()
-        self._sax_parser.setFeature(xml.sax.handler.feature_namespaces, 1)
         self._sax_parser.setContentHandler(self._handler)
         self._sax_parser.setErrorHandler(self._handler)
         self._stopped = False
@@ -256,13 +250,14 @@ class CTMLTokenParser(CommandTokenParser):
     def with_callback(self, callback: CommandTokenCallback) -> None:
         self._callback = callback
 
-    def _add_token(self, token: CommandToken) -> None:
-        self._parsed.append(token)
-        if self._callback is not None:
+    def _add_token(self, token: CommandToken | None) -> None:
+        if token is not None:
+            self._parsed.append(token)
+        if not self._stopped and self._callback is not None:
             self._callback(token)
 
     def is_done(self) -> bool:
-        return self._handler.done_event.is_set()
+        return self._handler.done_event.is_set() or self._stopped
 
     def start(self) -> None:
         if self._started:
@@ -297,6 +292,7 @@ class CTMLTokenParser(CommandTokenParser):
             return
         self._stopped = True
         # cancel
+        self._add_token(None)
         self._handler.done_event.set()
         self._sax_parser.close()
 
@@ -308,6 +304,8 @@ class CTMLTokenParser(CommandTokenParser):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        if not exc_val:
+            self.end()
         self.stop()
 
     @classmethod
