@@ -1,4 +1,4 @@
-from typing import Iterable, AsyncIterable
+from typing import Iterable
 import pytest
 
 from ghoshell_moss.ctml.token_parser import CTMLTokenParser

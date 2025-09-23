@@ -66,6 +66,7 @@ class CMTLElement:
     def add_delta(self, delta: str, gen_token: bool = True) -> Optional[CommandToken]:
         if gen_token and len(delta) > 0:
             self.deltas += delta
+            self._has_delta = True
             return CommandToken(
                 name=self.name,
                 cmd_idx=self.cmd_idx,
@@ -92,6 +93,7 @@ class CMTLElement:
 
 
 class ParserStopped(Exception):
+    """notify the sax that parsing is stopped"""
     pass
 
 
@@ -162,6 +164,14 @@ class CTMLSaxHandler(xml.sax.ContentHandler, xml.sax.ErrorHandler):
         token = element.start_token()
         self._send_to_callback(token)
         self._cmd_idx += 1
+
+    @classmethod
+    def parse_attrs(cls, attrs: xml.sax.xmlreader.AttributesNSImpl) -> dict:
+        dict_attrs = {}
+        if len(attrs) > 0:
+            for qname in attrs.getQNames():
+                dict_attrs[qname] = attrs.getValueByQName(qname)
+        return dict_attrs
 
     def endElement(self, name: str):
         if len(self._parsing_element_stack) == 0:

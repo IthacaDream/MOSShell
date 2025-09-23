@@ -108,16 +108,15 @@ def test_token_with_attrs():
     first_token = q[0]
     last_token = q[-1]
     # belongs to the root, cmd_idx is 0
+    # root tag parts: <speak> , hello, world, </speak>
     assert first_token.name == "speak"
     assert first_token.cmd_idx == 0
+    assert first_token.part_idx == 1
     assert first_token.type == CommandTokenType.DELTA.value
 
     assert last_token.name == "speak"
     assert last_token.cmd_idx == 0
     assert last_token.type == CommandTokenType.DELTA.value
-
-    # root tag parts: <speak> , hello, world, </speak>
-    assert first_token.part_idx == 1
     assert last_token.part_idx == 2
 
 

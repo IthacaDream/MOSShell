@@ -102,7 +102,7 @@ async def baz() -> int:
 
 
 @pytest.mark.asyncio
-async def test_method_command():
+async def test_delta_args_command():
     async def bar(a: int, b: str = "hello", text__: str = "") -> int:
         return 123
 
