@@ -223,6 +223,6 @@ class ChannelRuntimeImpl(ChannelRuntime):
             cmd_task.fail(str(exc))
             return None
         finally:
-            if not cmd_task.is_done():
+            if not cmd_task.done():
                 cmd_task.cancel()
             self._running_tasks.remove(cmd_task)

@@ -22,7 +22,7 @@ async def test_command_task_baseline():
     assert task.state == CommandTaskState.DONE.value
     assert len(task.trace) == 2
     assert task.tokens == "<foo />"
-    assert task.is_done()
+    assert task.done()
 
     assert task.wait_sync() == 123
 
@@ -89,7 +89,7 @@ async def test_command_task_cancel():
     command = PyCommand(foo)
     task = BaseCommandTask.from_command(command, tokens_="<foo />")
     task.cancel("test")
-    assert task.is_done()
+    assert task.done()
     with pytest.raises(CommandError):
         await task.run()
 

@@ -26,7 +26,7 @@ class CommandTaskElementContext:
     ):
         self.commands = commands
         self.output = output
-        self.logger = logger or getLogger("MOSShell")
+        self.logger = logger or getLogger("CommandTaskElement")
         self.stop_event = stop_event or ThreadSafeEvent()
 
     def new_root(self, callback: CommandTaskCallback, stream_id: str = "") -> CommandTaskElement:

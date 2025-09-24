@@ -345,9 +345,15 @@ class PyCommand(Generic[RESULT], Command[RESULT]):
 
 class CommandTask(Generic[RESULT], ABC):
     """
-    thread-safe future object for command execution.
-    1. cancel / fail the task thread-safe, cancel a task outside the loop.
-    2. thread-safe wait the result of the task.
+    线程安全的 Command Task 对象. 相当于重新实现一遍 asyncio.Task 类似的功能.
+    有区别的原理:
+    1. 建立全局唯一的 cid, 方便在双工通讯中赋值.
+    2. 必须实现线程安全, 因为通讯可能是在多线程里.
+    3. 包含 debug 需要的 state, trace 等信息.
+    4. 保留命令的元信息, 包括入参等.
+    5. 不是立刻启动, 而是被 channel 调度时才运行.
+    6. 兼容 json rpc 协议, 方便跨进程通讯.
+    7. 可复制, 复制后可重入, 方便做循环.
     """
 
     cid: str
@@ -363,7 +369,7 @@ class CommandTask(Generic[RESULT], ABC):
     func: Callable[..., Coroutine[None, None, RESULT]]
 
     @abstractmethod
-    def is_done(self) -> bool:
+    def done(self) -> bool:
         """
         if the command is done (cancelled, done, failed)
         """
@@ -395,6 +401,18 @@ class CommandTask(Generic[RESULT], ABC):
         """
         resolve the result of the task if it is running.
         """
+        pass
+
+    def raise_exception(self) -> None:
+        """
+        返回存在的异常.
+        """
+        exp = self.exception()
+        if exp is not None:
+            raise exp
+
+    @abstractmethod
+    def exception(self) -> Optional[Exception]:
         pass
 
     @abstractmethod
@@ -487,7 +505,7 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
             kwargs=kwargs,
         )
 
-    def is_done(self) -> bool:
+    def done(self) -> bool:
         """
         命令已经结束.
         """
@@ -540,11 +558,11 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
         if not self._done_event.is_set():
             self._set_result(result, 'done', 0, None)
 
-    def raise_error(self) -> None:
+    def exception(self) -> Optional[Exception]:
         if self.errcode is None or self.errcode == 0:
             return None
         else:
-            raise CommandError(self.errcode, self.errmsg or "")
+            return CommandError(self.errcode, self.errmsg or "")
 
     async def wait(
             self,
@@ -558,12 +576,12 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
         """
         if self._done_event.is_set():
             if throw:
-                self.raise_error()
+                self.raise_exception()
             return self.result
 
         await asyncio.wait_for(self._done_event.wait(), timeout=timeout)
         if throw:
-            self.raise_error()
+            self.raise_exception()
         return self.result
 
     def wait_sync(self, *, throw: bool = True, timeout: float | None = None) -> Optional[RESULT]:
@@ -573,36 +591,39 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
         if not self._done_event.wait_sync():
             raise TimeoutError(f"wait timeout: {timeout}")
         if throw:
-            self.raise_error()
+            self.raise_exception()
         return self.result
 
     async def run(self) -> RESULT:
         """典型的案例如何使用一个 command task """
-        if self.is_done():
-            self.raise_error()
+        if self.done():
+            self.raise_exception()
             return self.result
 
         async def resolve() -> None:
             r = await self.func(*self.args, **self.kwargs)
             self.resolve(r)
 
+        async def wait() -> None:
+            await self.wait()
+            self.raise_exception()
+
         try:
             result_task = asyncio.create_task(resolve())
-            wait_task = asyncio.create_task(self.wait())
-            for done in asyncio.as_completed([wait_task, result_task]):
-                await done
+            wait_task = asyncio.create_task(wait())
+            await asyncio.gather(result_task, wait_task)
             return self.result
 
         except asyncio.CancelledError as e:
-            if not self.is_done():
+            if not self.done():
                 self.cancel(reason=str(e))
             raise
         except Exception as e:
-            if not self.is_done():
+            if not self.done():
                 self.fail(e)
             raise
         finally:
-            if not self.is_done():
+            if not self.done():
                 self.cancel()
 
 
@@ -658,9 +679,9 @@ class CancelAfterOthersTask(BaseCommandTask[None]):
 
         async def wait_done_then_cancel() -> Optional[None]:
             waiting = list(tasks)
-            if not current.is_done() and len(waiting) > 0:
+            if not current.done() and len(waiting) > 0:
                 await asyncio.gather(*[t.wait() for t in tasks])
-            if not current.is_done():
+            if not current.done():
                 # todo
                 current.cancel()
                 await current.wait()
@@ -675,9 +696,13 @@ class CancelAfterOthersTask(BaseCommandTask[None]):
 
 
 class CommandTaskSeq:
+    """特殊的数据结构, 用来标记一个 task 序列, 也可以由 task 返回. """
 
     def __init__(self, *tasks: BaseCommandTask) -> None:
         self.tasks = tasks
 
     def __iter__(self):
         return iter(self.tasks)
+
+    def __str__(self):
+        return "".join([t.tokens for t in self.tasks])

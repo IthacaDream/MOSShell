@@ -105,19 +105,15 @@ class CTMLSaxHandler(xml.sax.ContentHandler, xml.sax.ErrorHandler):
             stream_id: str,
             callback: CommandTokenCallback,
             *,
-            default_chan: str = "",
             logger: Optional[logging.Logger] = None,
     ):
         """
         :param root_tag: do not send command token with root_tag
         :param stream_id: stream id to mark all the command token
         :param callback: callback function
-        :param default_chan: default channel name
-
         """
         self._root_tag = root_tag
         self._stream_id = stream_id
-        self._default_chan = default_chan
         # idx of the command token
         self._token_order = 0
         self._cmd_idx = 0
@@ -220,7 +216,6 @@ class CTMLTokenParser(CommandTokenParser):
             stream_id: str = "",
             *,
             root_tag: str = "ctml",
-            default_chan: str = "",
             logger: Optional[logging.Logger] = None,
             special_tokens: Optional[Dict[str, str]] = None,
     ):
@@ -233,7 +228,6 @@ class CTMLTokenParser(CommandTokenParser):
             root_tag,
             stream_id,
             self._add_token,
-            default_chan=default_chan,
             logger=logger,
         )
         self._sax_parser = xml.sax.make_parser()

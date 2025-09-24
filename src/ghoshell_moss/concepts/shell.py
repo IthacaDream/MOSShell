@@ -74,6 +74,10 @@ class Output(ABC):
         pass
 
     @abstractmethod
+    def outputted(self) -> List[str]:
+        pass
+
+    @abstractmethod
     def clear(self) -> List[str]:
         """
         清空所有输出中的 output

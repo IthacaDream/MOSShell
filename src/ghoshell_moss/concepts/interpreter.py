@@ -130,6 +130,8 @@ class CommandTaskElement(ABC):
 
 class Interpreter(ABC):
     """
+    命令解释器, 从一个文本流中解析 command token, 同时将流式的 command token 解析为流式的 command task, 然后回调给执行器.
+
     The Command Interpreter that parse the LLM-generated streaming tokens into Command Tokens,
     and send the compiled command tasks into the shell executor.
 
@@ -149,6 +151,10 @@ class Interpreter(ABC):
             async for item in async_iterable_texts:
                 interpreter.feed(item)
         """
+        pass
+
+    @abstractmethod
+    def with_callback(self, callback: CommandTaskCallback) -> None:
         pass
 
     @abstractmethod
@@ -181,7 +187,7 @@ class Interpreter(ABC):
         pass
 
     @abstractmethod
-    def parsed_tasks(self) -> Iterable[CommandTask]:
+    def parsed_tasks(self) -> Dict[str, CommandTask]:
         """
         已经解析生成的 tasks.
         """
@@ -210,7 +216,7 @@ class Interpreter(ABC):
         pass
 
     @abstractmethod
-    def input_text(self) -> str:
+    def inputted(self) -> str:
         """
         返回已经完成输入的文本内容. 必须通过 feed 输入.
         """
@@ -242,6 +248,10 @@ class Interpreter(ABC):
         pass
 
     @abstractmethod
+    def is_running(self) -> bool:
+        pass
+
+    @abstractmethod
     def is_interrupted(self) -> bool:
         """
         解释过程是否被中断.
@@ -270,7 +280,7 @@ class Interpreter(ABC):
         await self.stop()
 
     @abstractmethod
-    async def wait_until_done(self) -> bool:
+    async def wait_until_done(self) -> None:
         """
         等待解释过程完成. 完成有两种情况:
         1. 输入已经完备.

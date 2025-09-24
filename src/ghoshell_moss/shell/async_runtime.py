@@ -207,7 +207,7 @@ class ChannelTask:
             cmd_task.fail(str(exc))
             return None
         finally:
-            if not cmd_task.is_done():
+            if not cmd_task.done():
                 cmd_task.cancel("command {cmd_task.chan}:{cmd_task.name} cancelled")
 
     async def _execute_single_task(self, cmd_task: BaseCommandTask) -> Optional[List[BaseCommandTask]]:

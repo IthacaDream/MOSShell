@@ -101,6 +101,13 @@ class ArrOutput(Output):
         self._outputs[stream_id] = stream_outputs
         return stream
 
+    def outputted(self) -> List[str]:
+        data = self._outputs.copy()
+        result = []
+        for contents in data.values():
+            result.append("".join(contents))
+        return result
+
     def clear(self) -> List[str]:
         outputs = []
         for stream in self._streams.values():
