@@ -4,6 +4,7 @@ from ghoshell_moss.concepts.interpreter import (
 )
 from ghoshell_moss.concepts.shell import Output
 from ghoshell_moss.concepts.command import CommandToken, Command, CommandTask
+from ghoshell_moss.concepts.errors import CommandError
 from ghoshell_moss.ctml.token_parser import CTMLTokenParser
 from ghoshell_moss.ctml.elements import CommandTaskElementContext
 from ghoshell_moss.helpers.event import ThreadSafeEvent
@@ -197,6 +198,9 @@ class CTMLInterpreter(Interpreter):
         except Exception as exc:
             self._logger.exception(exc)
         finally:
+            for task in self._parsed_tasks.values():
+                if not task.done():
+                    task.cancel()
             self._main_loop_done.set()
 
     async def start(self) -> None:
@@ -231,6 +235,19 @@ class CTMLInterpreter(Interpreter):
         await self._main_loop_done.wait()
         if self._fatal_exception:
             raise self._fatal_exception
+
+    async def wait_execution_done(self) -> None:
+        await self.wait_parse_done()
+        waits = []
+        for task in self._parsed_tasks.values():
+            waits.append(task.wait())
+        try:
+            if len(waits) > 0:
+                await asyncio.gather(*waits, return_exceptions=False)
+        except asyncio.CancelledError:
+            pass
+        except CommandError:
+            pass
 
     def destroy(self) -> None:
         self.stop()

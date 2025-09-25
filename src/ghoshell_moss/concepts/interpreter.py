@@ -292,34 +292,12 @@ class Interpreter(ABC):
         pass
 
     @abstractmethod
+    async def wait_execution_done(self) -> None:
+        pass
+
+    @abstractmethod
     def destroy(self) -> None:
         """
         为了防止内存泄漏, 增加一个手动清空的方法.
         """
         pass
-
-
-class SyncInterpreter(CommandTokenParser, ABC):
-    """
-    The sync interface of the Command Interpreter,
-    if we have to use the interface in another thread.
-    """
-    id: str
-
-    @abstractmethod
-    def wait_until_done(self) -> None:
-        pass
-
-    @abstractmethod
-    def start(self) -> None:
-        pass
-
-    @abstractmethod
-    def stop(self) -> None:
-        pass
-
-    def __enter__(self):
-        self.start()
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.stop()
