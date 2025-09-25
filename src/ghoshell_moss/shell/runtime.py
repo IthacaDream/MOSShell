@@ -1,4 +1,4 @@
-from ghoshell_moss.concepts.channel import Channel, ChannelController, ChannelMeta
+from ghoshell_moss.concepts.channel import Channel, Controller, ChannelMeta
 from ghoshell_moss.concepts.command import BaseCommandTask, CommandTaskSeq
 from ghoshell_moss.concepts.errors import StopTheLoop, FatalError
 from ghoshell_moss.concepts.shell import ChannelRuntime
@@ -189,7 +189,7 @@ class ChannelRuntimeImpl(ChannelRuntime):
             if cmd_task.chan != self._name:
                 child = self._chan.get_channel(cmd_task.chan)
                 if child is not None:
-                    child.runtime.append(cmd_task)
+                    child.controller.append(cmd_task)
                 else:
                     cmd_task.fail(f"function {cmd_task.name} channel {cmd_task.chan} not found")
                 return

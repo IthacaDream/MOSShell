@@ -13,11 +13,11 @@ from pydantic import BaseModel, Field
 FunctionCommand = Union[Callable[..., Coroutine], Callable[..., Any]]
 """通常要求是异步函数, 如果是同步函数的话, 会卸载到线程池运行"""
 
-PolicyCommand = Union[Callable[..., Coroutine[None, None, None]], Callable[..., None]]
+LifecycleFunction = Union[Callable[..., Coroutine[None, None, None]], Callable[..., None]]
 
 PrompterCommand = Union[Callable[..., Coroutine[None, None, str]], Callable[..., str]]
 
-StringType = Union[str, Callable[..., str], Callable[..., Coroutine[None, None, str]]]
+StringType = Union[str, Callable[[], str]]
 
 R = TypeVar('R')
 
@@ -30,14 +30,14 @@ class ChannelMeta(BaseModel):
     name: str = Field(description="The name of the channel.")
     available: bool = Field(description="Whether the channel is available.")
     description: str = Field(description="The description of the channel.")
-    stats: List[State] = Field(default_factory=list, description="The list of state objects.")
     commands: List[CommandMeta] = Field(default_factory=list, description="The list of commands.")
     children: List[str] = Field(default_factory=list, description="the children channel names")
-    instruction: str = Field(default="", description="The instruction of the channel.")
-    context: str = Field(default="", description="the runtime context of the channel.")
+    # stats: List[State] = Field(default_factory=list, description="The list of state objects.")
+    # instruction: str = Field(default="", description="The instruction of the channel.")
+    # context: str = Field(default="", description="the runtime context of the channel.")
 
 
-class ChannelController(Protocol):
+class Controller(Protocol):
     """
     channel 的运行时方法.
     只有在 channel.start 之后才可使用.
@@ -49,18 +49,29 @@ class ChannelController(Protocol):
     运行时 IoC 容器.
     """
 
-    states: StateStore
-    """
-    the states store
-    """
-
-    topics: Topics
-    """
-    运行时的 topics.
-    """
+    # states: StateStore
+    # """
+    # the states store
+    # """
+    #
+    # topics: Topics
+    # """
+    # 运行时的 topics.
+    # """
 
     @abstractmethod
-    def meta(self) -> ChannelMeta:
+    def is_blocking(self) -> bool:
+        """
+        channel 是否是阻塞的.
+        """
+        pass
+
+    @abstractmethod
+    def is_running(self) -> bool:
+        pass
+
+    @abstractmethod
+    def meta(self, no_cache: bool = False) -> ChannelMeta:
         """
         返回 Channel 自身的 Meta.
         可能是动态更新的.
@@ -68,58 +79,51 @@ class ChannelController(Protocol):
         pass
 
     @abstractmethod
-    def available(self) -> bool:
+    def is_available(self) -> bool:
         """
         当前 Channel Runtime 是否可用.
         """
         pass
 
     @abstractmethod
-    def commands(self) -> Iterable[Command]:
+    def commands(self, available_only: bool = True) -> Iterable[Command]:
         """
         返回所有 commands.
         """
         pass
 
     @abstractmethod
-    def get_command(self, name: str) -> Optional[Command]:
+    def get_command(self, name: str, *, is_fullname: bool = False) -> Optional[Command]:
         """
         查找一个 command.
         """
         pass
 
     @abstractmethod
-    async def update(self) -> ChannelMeta:
+    def update(self) -> ChannelMeta:
         """
         结合所有上下文, 触发更新当前 Channel.
         """
         pass
 
     @abstractmethod
-    async def set_available(self, available: bool):
-        """
-        修改当前 Channel 的 Available 状态.
-        """
-        pass
-
-    @abstractmethod
-    async def on_policy_run(self) -> None:
+    async def policy_run(self) -> None:
         """
         回归 policy 运行. 通常在一个队列里没有 function 在运行中时, 会运行 policy. 同时 none-block 的函数也不会中断 policy 运行.
         """
         pass
 
     @abstractmethod
-    async def on_policy_pause(self) -> None:
+    async def policy_pause(self) -> None:
         """
         接受到了新的命令, 要中断 policy
         """
         pass
 
     @abstractmethod
-    async def on_clear(self) -> None:
+    async def clear(self) -> None:
         """
-        清空所有的运行中状态.
+        当清空命令被触发的时候.
         """
         pass
 
@@ -137,35 +141,38 @@ class ChannelController(Protocol):
         """
         pass
 
-    @abstractmethod
     async def __aenter__(self):
         await self.start()
         return self
 
-    @abstractmethod
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.close()
 
 
-class Decorators(ABC):
+class Builder(ABC):
 
     @abstractmethod
-    def with_description(self, description: Callable[..., str]) -> Callable[..., str]:
+    def with_description(self) -> Callable[[StringType], StringType]:
         """
         注册一个全局唯一的函数, 用来动态生成 description.
         """
         pass
 
     @abstractmethod
-    def with_command(
+    def with_available(self) -> Callable[[Callable[[], bool]], Callable[[], bool]]:
+        pass
+
+    @abstractmethod
+    def command(
             self,
-            command_type: CommandType,
             *,
             name: str = "",
+            chan: str | None = None,
             doc: Optional[StringType] = None,
             comments: Optional[StringType] = None,
             tags: Optional[List[str]] = None,
             interface: Optional[StringType] = None,
+            available: Optional[Callable[[], bool]] = None,
             # --- 高级参数 --- #
             block: bool = True,
             call_soon: bool = False,
@@ -174,8 +181,8 @@ class Decorators(ABC):
         返回 decorator 将一个函数注册到当前 Channel 里.
         对于 Channel 而言, Function 通常是会有运行时间的. 阻塞的命令, Channel 会一个一个执行.
 
-        :param command_type: 命令的类型.
         :param name: 改写这个函数的名称.
+        :param chan: 设置这个命令所属的 channel.
         :param doc: 获取函数的描述, 可以使用动态函数.
         :param comments: 改写函数的 body 部分, 用注释形式提供的字符串. 每行前会自动添加 '#'. 不用手动添加.
         :param interface: 大模型看到的函数代码形式. 一旦定义了这个, doc, name, comments 就都会失效.
@@ -186,87 +193,46 @@ class Decorators(ABC):
                             pass
         :param tags: 标记函数的分类. 可以用来做筛选, 如果有这个逻辑的话.
         :param block: 这个函数是否会阻塞 channel. 默认都会阻塞.
+        :param available: 通过函数定义这个命令是否 available.
         :param call_soon: 决定这个函数进入轨道后, 会第一时间执行 (不等待调度), 还是等待排队执行到自身时.
                           如果是 block + call_soon, 会先清空队列.
         """
         pass
 
-    def with_function(
-            self,
-            *,
-            name: str = "",
-            doc: Optional[StringType] = None,
-            interface: Optional[StringType] = None,
-            comments: Optional[StringType] = None,
-            tags: Optional[List[str]] = None,
-            # --- 高级参数 --- #
-            block: bool = True,
-            call_soon: bool = False,
-    ) -> Callable[[FunctionCommand], FunctionCommand]:
-        return self.with_command(
-            command_type=CommandType.FUNCTION,
-            name=name,
-            doc=doc,
-            interface=interface,
-            comments=comments,
-            tags=tags,
-            block=block,
-            call_soon=call_soon,
-        )
-
-    def with_policy(
-            self,
-            name: str = "",
-            doc: Optional[StringType] = None,
-            comments: Optional[StringType] = None,
-            tags: Optional[List[str]] = None,
-            interface: Optional[StringType] = None,
-    ) -> Callable[[PolicyCommand], PolicyCommand]:
-        """
-        返回 decorator 可以用来注册一个 policy 函数,
-        """
-        return self.with_command(
-            command_type=CommandType.POLICY,
-            name=name,
-            doc=doc,
-            interface=interface,
-            comments=comments,
-            tags=tags,
-            block=True,
-            call_soon=False,
-        )
-
     @abstractmethod
-    def on_run_policy(self, run_policy: Callable[[], Coroutine[None, None, None]]) -> None:
+    def on_policy_run(self, run_policy: LifecycleFunction) -> LifecycleFunction:
         """
         注册一个函数, 当 Channel 运行 policy 时, 会执行这个函数.
         """
         pass
 
-    def with_prompter(
-            self,
-            *,
-            name: str = "",
-            doc: Optional[StringType] = None,
-            comments: Optional[StringType] = None,
-            tags: Optional[List[str]] = None,
-            interface: Optional[StringType] = None,
-    ) -> Callable[[PrompterCommand], PrompterCommand]:
+    @abstractmethod
+    def on_policy_pause(self, pause_policy: LifecycleFunction) -> LifecycleFunction:
         """
-        返回 decorator, 注册一个可以生成 prompter 的函数, 通常只有 AI 在主动修改自己的 prompt 时 (元认知)
-        才会使用这个函数.
+        policy 回调.
         """
-        return self.with_command(
-            command_type=CommandType.PROMPTER,
-            name=name,
-            doc=doc,
-            interface=interface,
-            comments=comments,
-            tags=tags,
-            # 所有的 prompter 都应该是非阻塞函数.
-            block=False,
-            call_soon=False,
-        )
+        pass
+
+    @abstractmethod
+    def on_clear(self, clear_func: LifecycleFunction) -> LifecycleFunction:
+        """
+        清空
+        """
+        pass
+
+    @abstractmethod
+    def on_start_up(self, start_func: LifecycleFunction) -> LifecycleFunction:
+        """
+        启动时执行的回调.
+        """
+        pass
+
+    @abstractmethod
+    def on_stop(self, stop_func: LifecycleFunction) -> LifecycleFunction:
+        """
+        关闭时的回调.
+        """
+        pass
 
     @abstractmethod
     def with_providers(self, *providers: Provider) -> Self:
@@ -298,15 +264,14 @@ class Channel(ABC):
 
     @abstractmethod
     def name(self) -> str:
-        pass
-
-    @abstractmethod
-    def description(self) -> str:
+        """
+        channel 的名字.
+        """
         pass
 
     @property
     @abstractmethod
-    def runtime(self) -> ChannelController:
+    def controller(self) -> Controller:
         """
         Channel 在 bootstrap 之后返回的运行时.
         :raise RuntimeError: Channel 没有运行
@@ -347,7 +312,7 @@ class Channel(ABC):
     # --- lifecycle --- #
 
     @abstractmethod
-    def run(self, container: Optional[IoCContainer] = None) -> "ChannelController":
+    def run(self, container: Optional[IoCContainer] = None) -> "Controller":
         """
         传入一个父容器, 启动 Channel. 同时生成 Runtime.
         真正运行的是 channel runtime.
@@ -356,36 +321,8 @@ class Channel(ABC):
 
     @property
     @abstractmethod
-    def decorators(self) -> Decorators:
-        pass
-
-    @abstractmethod
-    def stop(self) -> None:
-        pass
-
-    @abstractmethod
-    def is_running(self) -> bool:
+    def builder(self) -> Builder:
         """
-        标注 Channel 已经开始运行了, 但没有终结.
+        用来快速包装各种函数.
         """
         pass
-
-    @abstractmethod
-    async def on_idle(self) -> None:
-        pass
-
-    @abstractmethod
-    async def on_clear(self) -> None:
-        pass
-
-
-if TYPE_CHECKING:
-    async def prompter() -> str:
-        return "hello"
-
-
-    def with_prompter(func: PrompterCommand):
-        pass
-
-
-    with_prompter(prompter)

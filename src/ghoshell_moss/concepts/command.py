@@ -159,6 +159,7 @@ class CommandMeta(BaseModel):
         description="",
         json_schema_extra=dict(enum=CommandType.all()),
     )
+    tags: List[str] = Field(default_factory=list, description="tags of the command")
     delta_arg: Optional[str] = Field(
         default=None,
         description="the delta arg type",
@@ -244,6 +245,7 @@ class PyCommand(Generic[RESULT], Command[RESULT]):
             doc: Optional[StringType] = None,
             comments: Optional[StringType] = None,
             meta: Optional[CommandMeta] = None,
+            tags: Optional[List[str]] = None,
             call_soon: bool = False,
             block: bool = True,
     ):
@@ -257,10 +259,10 @@ class PyCommand(Generic[RESULT], Command[RESULT]):
         """
         self._chan = chan
         self._func_name = func.__name__
-        if name is None:
-            # channel name as the function prefix
-            name = self._func_name if not self._chan else f"{self._chan}_{self._func_name}"
-        self._name = name
+        if not name:
+            name = self._func_name
+        fullname = self.make_fullname(self._chan, name)
+        self._name = fullname
         self._func = func
         self._func_itf = parse_function_interface(func)
         self._is_coroutine_func = inspect.iscoroutinefunction(func)
@@ -272,6 +274,7 @@ class PyCommand(Generic[RESULT], Command[RESULT]):
         self._is_dynamic_itf = callable(interface) or callable(doc) or callable(available) or callable(comments)
         self._call_soon = call_soon
         self._block = block
+        self._tags = tags
         self._meta = meta
         delta_arg = None
         for arg_name in self._func_itf.signature.parameters.keys():
@@ -282,6 +285,10 @@ class PyCommand(Generic[RESULT], Command[RESULT]):
                 # only first delta_arg type. and not allow more than 1
                 break
         self._delta_arg = delta_arg
+
+    @classmethod
+    def make_fullname(cls, chan: str, name: str) -> str:
+        return f"{chan}_{name}" if chan else name
 
     def name(self) -> str:
         if self._meta is not None:
@@ -303,6 +310,7 @@ class PyCommand(Generic[RESULT], Command[RESULT]):
         meta.available = self.is_available()
         meta.delta_arg = self._delta_arg
         meta.call_soon = self._call_soon
+        meta.tags = self._tags or []
         meta.block = self._block
 
         if not self._is_dynamic_itf:

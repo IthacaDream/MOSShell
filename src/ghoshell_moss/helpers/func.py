@@ -1,4 +1,5 @@
-from typing import Any, Dict, TypeVar, Awaitable, List, Callable, Optional
+import asyncio
+from typing import Any, Dict, TypeVar, Awaitable, List, Callable, Optional, Coroutine
 from typing_extensions import is_protocol, is_typeddict
 from ast import literal_eval
 from dataclasses import dataclass
@@ -9,6 +10,8 @@ __all__ = [
     'prepare_kwargs_by_signature',
     'parse_function_interface',
     'awaitable_caller',
+    'run_coroutine_with_cancel',
+    'unwrap_callable_or_value',
 ]
 
 
@@ -156,3 +159,21 @@ def awaitable_caller(
         return r
 
     return wrapper
+
+
+def run_coroutine_with_cancel(
+        cor: Coroutine | asyncio.Task,
+        cancel_scope: Callable[[], Coroutine],
+) -> asyncio.Task:
+    """
+    use cancel scope to cancel the task if it is not done
+    """
+    task = asyncio.create_task(cor) if not isinstance(cor, asyncio.Task) else cor
+
+    async def cancel_coroutine():
+        await cancel_scope()
+        if not task.done():
+            task.cancel()
+
+    gathered = asyncio.gather(task, cancel_coroutine())
+    return asyncio.create_task(gathered)

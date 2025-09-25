@@ -1,0 +1,90 @@
+from ghoshell_moss.channels.py_channel import PyChannel
+from ghoshell_moss.concepts.command import PyCommand
+import pytest
+
+chan = PyChannel(name="test")
+
+
+@chan.builder.command()
+def add(a: int, b: int) -> int:
+    """测试一个同步函数是否能正确被调用. """
+    return a + b
+
+
+@chan.builder.with_description()
+def desc() -> str:
+    return "hello world"
+
+
+@chan.builder.command()
+async def foo() -> int:
+    return 9527
+
+
+@chan.builder.command()
+async def bar(text: str) -> str:
+    return text
+
+
+@chan.builder.command(name="help")
+async def some_command_name_will_be_changed_helplessly() -> str:
+    return "help"
+
+
+class Available:
+    def __init__(self):
+        self.available = True
+
+    def get(self) -> bool:
+        return self.available
+
+
+available_mutator = Available()
+
+
+@chan.builder.command(available=available_mutator.get)
+async def available_test_fn() -> int:
+    return 123
+
+
+@pytest.mark.asyncio
+async def test_py_channel_baseline() -> None:
+    async with chan.run() as controller:
+        assert chan.name() == "test"
+
+        # commands 存在.
+        commands = list(controller.commands())
+        assert len(commands) > 0
+
+        # 所有的命令应该都以 channel 开头.
+        for command in commands:
+            assert command.name().startswith(chan.name())
+
+        # 不用全名来获取函数.
+        foo_cmd = controller.get_command("foo")
+        assert foo_cmd is not None
+        assert await foo_cmd() == 9527
+
+        # 测试名称有效.
+        help_cmd = controller.get_command(PyCommand.make_fullname("test", "help"), is_fullname=True)
+        assert help_cmd is not None
+        assert await help_cmd() == "help"
+
+        # 测试乱取拿不到东西
+        none_cmd = controller.get_command("never_exists_command")
+        assert none_cmd is None
+        # full name 不正确也拿不到.
+        help_cmd = controller.get_command("help", is_fullname=True)
+        assert help_cmd is None
+
+        # available 测试.
+        available_test_cmd = controller.get_command("available_test_fn")
+        assert available_test_cmd is not None
+        assert available_mutator.available
+        assert available_test_cmd.is_available() == available_mutator.available
+        available_mutator.available = False
+        assert available_test_cmd.is_available() == available_mutator.available
+
+        # description 测试.
+        meta = controller.meta()
+        assert meta.description == desc()

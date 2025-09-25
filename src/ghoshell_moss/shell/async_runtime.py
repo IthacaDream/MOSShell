@@ -228,13 +228,13 @@ class ChannelTask:
             # not children show have this command.
             cmd_task.fail(f"channel {cmd_task.chan} not found or command {cmd_task.name}")
             return
-        elif not self.chan.runtime.available():
+        elif not self.chan.controller.is_available():
             cmd_task.cancel(f"Channel {self.name()} not available for command {cmd_task.name}")
             return
 
         cmd_task.set_state('running')
         # get from self channel
-        command = self.chan.runtime.get_command(cmd_task.name)
+        command = self.chan.controller.get_command(cmd_task.name)
         if command is None:
             cmd_task.fail(f"command {cmd_task.name} at channel {cmd_task.chan} not found")
             return None
@@ -289,7 +289,7 @@ class AsyncMOSSShellRuntime(ShellRuntime):
         channels[self.main_chan.name()] = self.main_chan
 
         for name, chan in channels.items():
-            result[name] = list(chan.runtime.commands())
+            result[name] = list(chan.controller.commands())
         return result
 
     async def clear(self, *chans: str) -> None:

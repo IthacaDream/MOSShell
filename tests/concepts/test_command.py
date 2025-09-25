@@ -118,3 +118,16 @@ async def test_delta_args_command():
     meta = command.meta()
     assert meta.name == "baz"
     assert meta.delta_arg == "tokens__"
+
+
+@pytest.mark.asyncio
+async def test_command_rename():
+    async def foo():
+        return 123
+
+    command = PyCommand(foo, name="bar")
+    assert command.name() == "bar"
+    assert command.meta().name == "bar"
+
+    command = PyCommand(foo, name="bar", chan="test")
+    assert command.name() == PyCommand.make_fullname("test", "bar")
