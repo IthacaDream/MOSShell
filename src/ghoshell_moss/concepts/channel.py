@@ -47,6 +47,9 @@ class Controller(Protocol):
     运行时 IoC 容器.
     """
 
+    id: str
+    """unique id of the channel instance"""
+
     # states: StateStore
     # """
     # the states store
@@ -87,6 +90,7 @@ class Controller(Protocol):
     def commands(self, available_only: bool = True) -> Iterable[Command]:
         """
         返回所有 commands.
+        不递归.
         """
         pass
 
@@ -94,6 +98,7 @@ class Controller(Protocol):
     def get_command(self, name: str, *, is_fullname: bool = False) -> Optional[Command]:
         """
         查找一个 command.
+        不递归.
         """
         pass
 
@@ -108,6 +113,7 @@ class Controller(Protocol):
     async def policy_run(self) -> None:
         """
         回归 policy 运行. 通常在一个队列里没有 function 在运行中时, 会运行 policy. 同时 none-block 的函数也不会中断 policy 运行.
+        不会递归执行.
         """
         pass
 
@@ -115,6 +121,7 @@ class Controller(Protocol):
     async def policy_pause(self) -> None:
         """
         接受到了新的命令, 要中断 policy
+        不会递归执行.
         """
         pass
 
@@ -122,6 +129,7 @@ class Controller(Protocol):
     async def clear(self) -> None:
         """
         当清空命令被触发的时候.
+        不会递归执行.
         """
         pass
 
@@ -129,6 +137,7 @@ class Controller(Protocol):
     async def start(self) -> None:
         """
         启动 Channel 运行.
+        不会递归执行.
         """
         pass
 
@@ -136,6 +145,7 @@ class Controller(Protocol):
     async def close(self) -> None:
         """
         关闭当前 Runtime. 同时阻塞销毁资源直到结束.
+        不会递归执行.
         """
         pass
 
@@ -172,7 +182,7 @@ class Builder(ABC):
             interface: Optional[StringType] = None,
             available: Optional[Callable[[], bool]] = None,
             # --- 高级参数 --- #
-            block: bool = True,
+            block: Optional[bool] = None,
             call_soon: bool = False,
     ) -> Callable[[FunctionCommand], FunctionCommand]:
         """
@@ -279,7 +289,7 @@ class Channel(ABC):
     # --- children --- #
 
     @abstractmethod
-    def with_children(self, *children: "Channel") -> Self:
+    def with_children(self, parent: Optional[str] = None, *children: "Channel") -> Self:
         """
         添加子 Channel 到当前 Channel. 形成树状关系.
         :raise KeyError: 如果出现重名会发出这个异常.
@@ -308,6 +318,10 @@ class Channel(ABC):
         pass
 
     # --- lifecycle --- #
+
+    @abstractmethod
+    def is_running(self) -> bool:
+        pass
 
     @abstractmethod
     def run(self, container: Optional[IoCContainer] = None) -> "Controller":

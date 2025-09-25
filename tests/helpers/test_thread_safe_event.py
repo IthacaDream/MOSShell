@@ -1,6 +1,7 @@
 from ghoshell_moss.helpers.event import ThreadSafeEvent
-import asyncio
 from threading import Thread
+import asyncio
+import pytest
 
 
 def test_event_set_and_wait():
@@ -34,3 +35,10 @@ def test_event_set_and_wait():
         i.join()
 
     assert len(done) == 11
+
+
+@pytest.mark.asyncio
+async def test_wait_timeout():
+    event = ThreadSafeEvent()
+    with pytest.raises(asyncio.TimeoutError):
+        await event.wait_until_timeout(0.1)

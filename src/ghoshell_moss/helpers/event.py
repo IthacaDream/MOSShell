@@ -1,5 +1,6 @@
 import asyncio
 from typing import List, Tuple
+from ghoshell_common.helpers import Timeleft
 
 import threading
 
@@ -39,6 +40,21 @@ class ThreadSafeEvent:
         event = asyncio.Event()
         self._add_awaits(loop, event)
         await event.wait()
+
+    async def wait_until_timeout(self, timeout: float | None) -> None:
+        if timeout is None or timeout <= 0.0:
+            await self.wait()
+        else:
+            wait_task = asyncio.create_task(self.wait())
+
+            async def cancel_when_timeout():
+                await asyncio.sleep(timeout)
+                if not wait_task.done():
+                    wait_task.cancel()
+                    raise asyncio.TimeoutError(f"wait timeout after: {timeout}")
+
+            # 测试未到时间直接结束.
+            await asyncio.gather(wait_task, cancel_when_timeout(), return_exceptions=True)
 
     def clear(self) -> None:
         self.thread_event.clear()

@@ -96,6 +96,9 @@ class CTMLInterpreter(Interpreter):
             self._logger.exception(e)
             self._stopped_event.set()
 
+    def meta_instruction(self) -> str:
+        raise NotImplementedError
+
     async def feed(self, delta: str) -> None:
         if not self._committed and not self._stopped_event.is_set():
             if self._fatal_exception is not None:
@@ -215,8 +218,13 @@ class CTMLInterpreter(Interpreter):
             return
         self._interrupted = self._started and not self._main_loop_done.is_set()
         self._stopped_event.set()
+        self._parser.stop()
         if self._main_task is not None:
             await self._main_task
+        if self._interrupted:
+            for task in self._parsed_tasks.values():
+                if not task.done():
+                    task.cancel("interrupted")
 
     def is_stopped(self) -> bool:
         return self._stopped_event.is_set()
@@ -239,7 +247,8 @@ class CTMLInterpreter(Interpreter):
     async def wait_execution_done(self) -> None:
         await self.wait_parse_done()
         waits = []
-        for task in self._parsed_tasks.values():
+        tasks = list(self._parsed_tasks.values())
+        for task in tasks:
             waits.append(task.wait())
         try:
             if len(waits) > 0:
@@ -248,6 +257,12 @@ class CTMLInterpreter(Interpreter):
             pass
         except CommandError:
             pass
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel("execution done")
 
-    def destroy(self) -> None:
-        self.stop()
+    def __del__(self) -> None:
+        self._parser.stop()
+        if self._root_element:
+            self._root_element.destroy()

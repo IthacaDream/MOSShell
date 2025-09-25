@@ -164,7 +164,7 @@ async def test_parse_and_execute_in_parallel():
                 # 也是测试循环是否被打破了.
                 break
             else:
-                tasks.append(asyncio.create_task(task.run()))
+                tasks.append(asyncio.create_task(task.start()))
 
         # 让 results 来承接所有 task 的返回值.
         results.extend(await asyncio.gather(*tasks))

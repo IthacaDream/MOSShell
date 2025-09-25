@@ -424,7 +424,10 @@ class CommandTask(Generic[RESULT], ABC):
         pass
 
     @abstractmethod
-    async def run(self, *args, **kwargs) -> RESULT:
+    async def run(self) -> RESULT:
+        """
+        运行 task
+        """
         pass
 
     @abstractmethod

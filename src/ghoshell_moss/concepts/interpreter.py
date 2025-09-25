@@ -142,6 +142,10 @@ class Interpreter(ABC):
     """each time stream interpretation has a unique id"""
 
     @abstractmethod
+    def meta_instruction(self) -> str:
+        pass
+
+    @abstractmethod
     async def feed(self, delta: str) -> None:
         """
         向 interpreter 提交文本片段, 会自动触发其它流程.
@@ -296,7 +300,7 @@ class Interpreter(ABC):
         pass
 
     @abstractmethod
-    def destroy(self) -> None:
+    def __del__(self) -> None:
         """
         为了防止内存泄漏, 增加一个手动清空的方法.
         """

@@ -7,8 +7,9 @@ from ghoshell_moss.concepts.channel import (
 )
 from ghoshell_moss.concepts.command import Command, PyCommand
 from ghoshell_moss.helpers.func import run_coroutine_with_cancel, unwrap_callable_or_value
-from ghoshell_container import Container, IoCContainer, INSTANCE, BINDING, Provider, provide
 from ghoshell_moss.helpers.event import ThreadSafeEvent
+from ghoshell_container import Container, IoCContainer, INSTANCE, BINDING, Provider, provide
+from ghoshell_common.helpers import uuid
 import asyncio
 import logging
 import threading
@@ -56,7 +57,7 @@ class PyChannelBuilder(Builder):
             tags: Optional[List[str]] = None,
             interface: Optional[StringType] = None,
             available: Optional[Callable[[], bool]] = None,
-            block: bool = True,
+            block: Optional[bool] = None,
             call_soon: bool = False,
     ) -> Callable[[FunctionCommand], FunctionCommand]:
         def wrapper(func: FunctionCommand) -> FunctionCommand:
@@ -69,7 +70,7 @@ class PyChannelBuilder(Builder):
                 tags=tags,
                 interface=interface,
                 available=available,
-                block=block,
+                block=block if block is not None else self.block,
                 call_soon=call_soon,
             )
             self.commands[command.name()] = command
@@ -149,7 +150,14 @@ class PyChannel(Channel):
         else:
             raise RuntimeError("Controller not running")
 
-    def with_children(self, *children: "Channel") -> Self:
+    def with_children(self, parent: Optional[str] = None, *children: "Channel") -> Self:
+        if parent is not None:
+            descendant = self.descendants().get(parent)
+            if descendant is None:
+                raise KeyError(f"the children parent name of {parent} does not exist")
+            descendant.with_children(*children)
+            return
+
         for child in children:
             self._children[child.name()] = child
         return self
@@ -181,9 +189,15 @@ class PyChannel(Channel):
         )
         return self._controller
 
+    def is_running(self) -> bool:
+        return self._controller is not None and self._controller.is_running()
+
     @property
     def build(self) -> Builder:
         return self._builder
+
+    def __del__(self):
+        self._children.clear()
 
 
 class PyChannelController(Controller):
@@ -194,12 +208,14 @@ class PyChannelController(Controller):
             children: Dict[str, Channel],
             builder: PyChannelBuilder,
             container: Optional[IoCContainer] = None,
+            uid: Optional[str] = None,
     ):
         if container is not None:
             container = Container(parent=container, name=f"chan/container/{builder.name}")
         else:
             container = Container(name=f"chan/container/{builder.name}")
         self.container = container
+        self.id = uid or uuid()
         self._children = children
         self._logger = self.container.get(logging.Logger) or logging.getLogger("moss")
         self._builder = builder
@@ -211,6 +227,9 @@ class PyChannelController(Controller):
         self._policy_lock = threading.Lock()
         self._started = False
         self._stopped = False
+
+    def __del__(self):
+        self.container.shutdown()
 
     def is_blocking(self) -> bool:
         return self._builder.block
@@ -357,10 +376,23 @@ class PyChannelController(Controller):
             return
         self._started = True
         await asyncio.to_thread(self.container.bootstrap)
+        bootstrapper = []
+        # 准备 start up
+        if len(self._builder.on_start_up_funcs) > 0:
+            for on_start_func, is_coroutine in self._builder.on_start_up_funcs:
+                if is_coroutine:
+                    task = asyncio.create_task(on_start_func())
+                else:
+                    task = asyncio.to_thread(on_start_func)
+                bootstrapper.append(task)
+        # 并行启动.
+        await asyncio.gather(*bootstrapper, return_exceptions=True)
 
     async def close(self) -> None:
         if self._stopped:
             return
         self._stopped = True
         self._stopped_event.set()
+        await self.policy_pause()
+        await self.clear()
         await asyncio.to_thread(self.container.shutdown)
