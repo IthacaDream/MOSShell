@@ -1,5 +1,6 @@
+from abc import ABC, abstractmethod
 import asyncio
-from typing import List, Tuple
+from typing import List, Tuple, Protocol
 from ghoshell_common.helpers import Timeleft
 
 import threading

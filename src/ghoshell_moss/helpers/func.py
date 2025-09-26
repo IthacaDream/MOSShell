@@ -43,7 +43,10 @@ def prepare_kwargs_by_signature(sig: inspect.Signature, args: tuple, kwargs: dic
                     elif param.annotation is dict or param.annotation is list or is_typeddict(param.annotation):
                         # 支持 dict 和 list 的 python 风格默认转换.
                         # 理论上 Command Token 的协议需要先设计好转换.
-                        value = literal_eval(value)
+                        try:
+                            value = literal_eval(value)
+                        except (ValueError, SyntaxError):
+                            pass
 
                 # annotation the value
                 annotation = param.annotation

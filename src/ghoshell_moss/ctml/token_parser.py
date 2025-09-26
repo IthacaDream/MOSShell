@@ -7,7 +7,6 @@ from xml.sax import saxutils
 from typing import List, Iterable, Optional, Callable, Dict, Set
 from ghoshell_moss.concepts.command import CommandToken
 from ghoshell_moss.concepts.interpreter import CommandTokenParser, CommandTokenParseError
-from ghoshell_moss.concepts.errors import FatalError
 from ghoshell_moss.helpers.token_filters import SpecialTokenMatcher
 from ghoshell_moss.helpers.event import ThreadSafeEvent
 
@@ -99,12 +98,14 @@ class ParserStopped(Exception):
 
 
 class CTMLSaxHandler(xml.sax.ContentHandler, xml.sax.ErrorHandler):
+    """初步实现 sax 解析. 实现得非常糟糕, 主要是对 sax 的回调机制有误解, 留下了大量冗余状态. 需要考虑重写一个简单版. """
 
     def __init__(
             self,
             root_tag: str,
             stream_id: str,
             callback: CommandTokenCallback,
+            stop_event: ThreadSafeEvent,
             *,
             logger: Optional[logging.Logger] = None,
     ):
@@ -113,6 +114,11 @@ class CTMLSaxHandler(xml.sax.ContentHandler, xml.sax.ErrorHandler):
         :param stream_id: stream id to mark all the command token
         :param callback: callback function
         """
+        self._stopped = False
+        """自身的关机"""
+        self._stop_event = stop_event
+        """全局的关机"""
+
         self._root_tag = root_tag
         self._stream_id = stream_id
         # idx of the command token
@@ -126,6 +132,10 @@ class CTMLSaxHandler(xml.sax.ContentHandler, xml.sax.ErrorHandler):
         self._parsing_element_stack: List[CMTLElement] = []
         # event to notify the parsing is over.
         self.done_event = threading.Event()
+        self._exception: Optional[Exception] = None
+
+    def is_stopped(self) -> bool:
+        return self._stopped or self._stop_event.is_set()
 
     def _send_to_callback(self, token: CommandToken | None) -> None:
         if token is None:
@@ -139,13 +149,10 @@ class CTMLSaxHandler(xml.sax.ContentHandler, xml.sax.ErrorHandler):
             # todo: log
             pass
 
-    def startElement(self, name: str, attrs: xml.sax.xmlreader.AttributesNSImpl) -> None:
-        if self.done_event.is_set():
-            return None
-        dict_attrs = {}
-        if len(attrs) > 0:
-            for qname in attrs.getQNames():
-                dict_attrs[qname] = attrs.getValueByQName(qname)
+    def startElement(self, name: str, attrs: xml.sax.xmlreader.AttributesImpl) -> None:
+        if self.is_stopped():
+            raise ParserStopped
+        dict_attrs = self.parse_attrs(attrs)
 
         element = CMTLElement(
             cmd_idx=self._cmd_idx,
@@ -163,51 +170,60 @@ class CTMLSaxHandler(xml.sax.ContentHandler, xml.sax.ErrorHandler):
         self._cmd_idx += 1
 
     @classmethod
-    def parse_attrs(cls, attrs: xml.sax.xmlreader.AttributesNSImpl) -> dict:
-        dict_attrs = {}
-        if len(attrs) > 0:
-            for qname in attrs.getQNames():
-                dict_attrs[qname] = attrs.getValueByQName(qname)
-        return dict_attrs
+    def parse_attrs(cls, attrs: xml.sax.xmlreader.AttributesImpl) -> dict:
+        return dict(attrs)
 
     def endElement(self, name: str):
+        if self.is_stopped():
+            raise ParserStopped
         if len(self._parsing_element_stack) == 0:
-            raise FatalError("CTMLElement end element without existing one")
+            raise ValueError("CTMLElement end element `%s` without existing one" % name)
         element = self._parsing_element_stack.pop(-1)
         token = element.end_token()
         self._send_to_callback(token)
+        if len(self._parsing_element_stack) == 0:
+            self.done_event.set()
 
     def characters(self, content: str):
+        if self.is_stopped():
+            raise ParserStopped
+
         if len(self._parsing_element_stack) == 0:
             # something goes wrong, on char without properly start or end
-            raise FatalError("CTMLElement on character without properly start or end")
+            raise ValueError("CTMLElement on character without properly start or end")
         element = self._parsing_element_stack[-1]
         token = element.add_delta(content)
         if token is not None:
             self._send_to_callback(token)
 
     def endDocument(self):
-        # todo: log
-        self._send_to_callback(None)
         self.done_event.set()
+
+    def startDocument(self):
+        pass
 
     def error(self, exception: Exception):
-        if isinstance(exception, ParserStopped):
+        self.done_event.set()
+        self._logger.error(exception)
+        if self._stop_event.is_set() or isinstance(exception, ParserStopped):
+            # todo
             return
-        self._logger.exception(exception)
+        self._exception = CommandTokenParseError(f"parse error: {exception}")
 
     def fatalError(self, exception: Exception):
-        if isinstance(exception, ParserStopped):
+        self.done_event.set()
+        if self._stop_event.is_set() or isinstance(exception, ParserStopped):
+            # todo
             return
         self._logger.exception(exception)
-        if self.done_event.is_set():
-            return None
-        self.done_event.set()
-        # todo: wrap the exception
-        raise CommandTokenParseError(f"CTML Parse Exception from sax: {exception}")
+        self._exception = CommandTokenParseError(f"parse error: {exception}")
 
     def warning(self, exception):
         self._logger.warning(exception)
+
+    def raise_error(self) -> None:
+        if self._exception is not None:
+            raise self._exception
 
 
 class CTMLTokenParser(CommandTokenParser):
@@ -226,8 +242,8 @@ class CTMLTokenParser(CommandTokenParser):
             special_tokens: Optional[Dict[str, str]] = None,
     ):
         self.root_tag = root_tag
-        self.logger = logger or logging.getLogger("CTMLParser")
-        self._stop_event = stop_event or ThreadSafeEvent()
+        self.logger = logger or logging.getLogger("moss")
+        self.stop_event = stop_event or ThreadSafeEvent()
         self._callback = callback
         self._buffer = ""
         self._parsed: List[CommandToken] = []
@@ -235,20 +251,21 @@ class CTMLTokenParser(CommandTokenParser):
             root_tag,
             stream_id,
             self._add_token,
-            logger=logger,
+            self.stop_event,
+            logger=self.logger,
         )
-        self._sax_parser = xml.sax.make_parser()
-        self._sax_parser.setContentHandler(self._handler)
-        self._sax_parser.setErrorHandler(self._handler)
-        self._stopped = False
-        self._started = False
-        self._ended = False
-        self._sent_last_token = False
         special_tokens = special_tokens or {}
         self._special_tokens_matcher = SpecialTokenMatcher(special_tokens)
 
-    def is_running(self) -> bool:
-        return self._started and not self._stopped and not self._ended and not self._stop_event.is_set()
+        # lifecycle
+        self._sax_parser = sax.make_parser()
+        self._sax_parser.setContentHandler(self._handler)
+        self._sax_parser.setErrorHandler(self._handler)
+
+        self._stopped = False
+        self._started = False
+        self._committed = False
+        self._sent_last_token = False
 
     def parsed(self) -> Iterable[CommandToken]:
         return self._parsed
@@ -268,7 +285,7 @@ class CTMLTokenParser(CommandTokenParser):
                 self._callback(token)
 
     def is_done(self) -> bool:
-        return self._handler.done_event.is_set() or self._stopped
+        return self._handler.done_event.is_set()
 
     def start(self) -> None:
         if self._started:
@@ -277,34 +294,35 @@ class CTMLTokenParser(CommandTokenParser):
         self._sax_parser.feed(f'<{self.root_tag}>')
 
     def feed(self, delta: str) -> None:
-        if self.is_running():
+        self._handler.raise_error()
+        if self._stopped:
+            raise ParserStopped()
+        else:
             self._buffer += delta
             parsed = self._special_tokens_matcher.buffer(delta)
             self._sax_parser.feed(parsed)
-        else:
-            raise ParserStopped()
 
     def commit(self) -> None:
-        if not self.is_running():
+        self._handler.raise_error()
+        if self._committed:
             return
-        if self._ended:
-            return
+        self._committed = True
         last_buffer = self._special_tokens_matcher.clear()
         end_of_the_inputs = f'{last_buffer}</{self.root_tag}>'
         self._sax_parser.feed(end_of_the_inputs)
-        self._ended = True
 
-    def stop(self) -> None:
+    def close(self) -> None:
         """
         stop the parser and clear the resources.
         """
         if self._stopped:
             return
         self._stopped = True
+        self.commit()
+        # self._handler.done_event.wait()
+        self._sax_parser.close()
         # cancel
         self._add_token(None)
-        self._handler.done_event.set()
-        self._sax_parser.close()
 
     def buffer(self) -> str:
         return self._buffer
@@ -314,9 +332,10 @@ class CTMLTokenParser(CommandTokenParser):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if not exc_val:
-            self.commit()
-        self.stop()
+        self.close()
+        if exc_val is not None:
+            return None
+        self._handler.raise_error()
 
     @classmethod
     def parse(

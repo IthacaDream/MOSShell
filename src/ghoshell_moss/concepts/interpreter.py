@@ -21,11 +21,6 @@ class CommandTokenParser(ABC):
     """
 
     @abstractmethod
-    def is_running(self) -> bool:
-        """weather this command is running"""
-        pass
-
-    @abstractmethod
     def with_callback(self, callback: CommandTokenCallback) -> None:
         """
         send command token to callback method
@@ -53,7 +48,7 @@ class CommandTokenParser(ABC):
         pass
 
     @abstractmethod
-    def stop(self) -> None:
+    def close(self) -> None:
         """
         stop the parser and clear the resources.
         """
@@ -82,7 +77,7 @@ class CommandTokenParser(ABC):
         if exc_val is None:
             # ending is needed if parse success
             self.commit()
-        self.stop()
+        self.close()
 
 
 class CommandTaskElement(ABC):

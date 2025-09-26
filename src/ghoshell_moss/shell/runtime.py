@@ -426,6 +426,9 @@ class ChannelRuntimeImpl(ChannelRuntime):
     async def _clear_self_pending(self) -> int:
         if len(self._pending_command_task_queue) > 0:
             cleared = len(self._pending_command_task_queue)
+            for item in self._pending_command_task_queue:
+                # clear the pending task
+                item.cancel("cleared")
             self._pending_command_task_queue.clear()
             return cleared
         return 0

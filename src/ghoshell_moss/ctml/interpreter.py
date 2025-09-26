@@ -155,7 +155,7 @@ class CTMLInterpreter(Interpreter):
     def _token_parse_loop(self) -> None:
         try:
             with self._parser:
-                while not self._stopped_event.is_set() and self._parser.is_running():
+                while not self._stopped_event.is_set() and not self._parser.is_done():
                     try:
                         # check every 0.1 second if the loop is stopped.
                         item = self._input_deltas_queue.get(block=True, timeout=0.1)
@@ -218,7 +218,7 @@ class CTMLInterpreter(Interpreter):
             return
         self._interrupted = self._started and not self._main_loop_done.is_set()
         self._stopped_event.set()
-        self._parser.stop()
+        self._parser.close()
         if self._main_task is not None:
             await self._main_task
         if self._interrupted:
@@ -263,6 +263,6 @@ class CTMLInterpreter(Interpreter):
                     task.cancel("execution done")
 
     def __del__(self) -> None:
-        self._parser.stop()
+        self._parser.close()
         if self._root_element:
             self._root_element.destroy()

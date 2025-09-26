@@ -24,7 +24,7 @@ class ElementTestSuite:
         return self.ctx, self.parser, self.root, self.queue
 
     def stop(self):
-        self.parser.stop()
+        self.parser.close()
         self.stop_event.set()
 
     async def parse(self, content: Iterable[str], run: bool = True) -> None:

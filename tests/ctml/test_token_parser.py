@@ -10,11 +10,9 @@ def test_token_parser_baseline():
     parser = CTMLTokenParser(callback=q.append, stream_id="stream")
     content = "<foo><bar/>h</foo>"
     with parser:
-        assert parser.is_running()
         for c in content:
             parser.feed(c)
         parser.commit()
-    assert not parser.is_running()
     assert parser.is_done()
     assert parser.buffer() == content
     # receive the poison item
@@ -46,9 +44,18 @@ def test_token_parser_baseline():
             part_idx += 1
 
 
+def test_token_parser_with_args():
+    content = '<foo a="1" b="[2, 3]"/>'
+    q = deque[CommandToken | None]()
+    CTMLTokenParser.parse(q.append, iter(content))
+    assert q.pop() is None
+    assert q[1].name == "foo"
+    assert q[1].kwargs == {"a": "1", "b": "[2, 3]"}
+
+
 def test_delta_token_baseline():
     content = "<foo>hello<bar/>world</foo>"
-    q = deque[CommandToken]()
+    q = deque[CommandToken | None]()
     CTMLTokenParser.parse(q.append, iter(content))
     # received the poison item
     assert q.pop() is None
@@ -141,7 +148,7 @@ def test_token_with_cdata():
     assert expect == foo_deltas
 
 
-def test_token_with_namespace():
+def test_token_with_prefix():
     content = "<speaker__say>hello</speaker__say>"
     q = []
     CTMLTokenParser.parse(q.append, iter(content), root_tag="ctml")
