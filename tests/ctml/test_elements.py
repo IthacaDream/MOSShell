@@ -6,7 +6,7 @@ from ghoshell_moss.ctml.elements import CommandTaskElementContext
 from ghoshell_moss.concepts.command import PyCommand, BaseCommandTask, Command, CommandToken
 from ghoshell_moss.concepts.interpreter import CommandTaskElement
 from ghoshell_moss.mocks.outputs import ArrOutput
-from ghoshell_moss.helpers.event import ThreadSafeEvent
+from ghoshell_moss.helpers.asyncio_utils import ThreadSafeEvent
 from collections import deque
 from dataclasses import dataclass
 import asyncio

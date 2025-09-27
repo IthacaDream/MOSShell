@@ -8,7 +8,7 @@ from typing import (
 from typing_extensions import Self
 from ghoshell_common.helpers import uuid, generate_import_path
 from ghoshell_moss.helpers.func import parse_function_interface
-from ghoshell_moss.helpers.event import ThreadSafeEvent
+from ghoshell_moss.helpers.asyncio_utils import ThreadSafeEvent
 from .errors import CommandError
 from pydantic import BaseModel, Field
 from enum import Enum
@@ -374,13 +374,19 @@ class CommandTask(Generic[RESULT], ABC):
     trace: Dict[CommandTaskStateType, float] = {}
     result: Optional[RESULT] = None
     meta: CommandMeta
-    func: Callable[..., Coroutine[None, None, RESULT]]
+    func: Callable[..., Coroutine[None, None, RESULT]] | None
+    """如果 Func 为 None, 则表示 task 只能靠外部 resolve 来赋值. """
 
     @abstractmethod
     def done(self) -> bool:
         """
         if the command is done (cancelled, done, failed)
         """
+        pass
+
+    @abstractmethod
+    def clear(self) -> None:
+        """清空运行结果."""
         pass
 
     @abstractmethod
@@ -426,7 +432,7 @@ class CommandTask(Generic[RESULT], ABC):
     @abstractmethod
     async def run(self) -> RESULT:
         """
-        运行 task
+        运行 task, 并且生成, 更新当前 task 的结果.
         """
         pass
 
@@ -473,7 +479,7 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
             self,
             *,
             meta: CommandMeta,
-            func: Callable[..., Coroutine[None, None, RESULT]],
+            func: Callable[..., Coroutine[None, None, RESULT]] | None,
             tokens: str,
             args: list,
             kwargs: Dict[str, Any],
@@ -527,6 +533,12 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
         停止命令.
         """
         self._set_result(None, 'cancelled', CommandError.CANCEL_CODE, reason)
+
+    def clear(self) -> None:
+        self.result = None
+        self._done_event.clear()
+        self.errcode = 0
+        self.errmsg = None
 
     def _set_result(
             self,
@@ -611,6 +623,10 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
             self.raise_exception()
             return self.result
 
+        if self.func is None:
+            # func 为 none 的情况下, 完全依赖外部运行赋值.
+            return await self.wait(throw=True)
+
         async def resolve() -> None:
             r = await self.func(*self.args, **self.kwargs)
             self.resolve(r)
@@ -620,14 +636,12 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
             self.raise_exception()
 
         try:
-            result_task = asyncio.create_task(resolve())
-            wait_task = asyncio.create_task(wait())
-            await asyncio.gather(result_task, wait_task)
+            await asyncio.gather(resolve(), wait())
             return self.result
 
-        except asyncio.CancelledError as e:
+        except asyncio.CancelledError:
             if not self.done():
-                self.cancel(reason=str(e))
+                self.cancel(reason="canceled")
             raise
         except Exception as e:
             if not self.done():
@@ -709,8 +723,14 @@ class CancelAfterOthersTask(BaseCommandTask[None]):
 class CommandTaskSeq:
     """特殊的数据结构, 用来标记一个 task 序列, 也可以由 task 返回. """
 
-    def __init__(self, *tasks: BaseCommandTask) -> None:
+    def __init__(self, success: Callable[[], Any] | Any, *tasks: BaseCommandTask) -> None:
+        self._success = success
         self.tasks = tasks
+
+    def success(self) -> Any:
+        if self._success and callable(self._success):
+            return self._success()
+        return self._success
 
     def __iter__(self):
         return iter(self.tasks)

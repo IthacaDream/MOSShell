@@ -10,7 +10,7 @@ from ghoshell_moss.concepts.shell import OutputStream, Output
 from ghoshell_moss.helpers.stream import create_thread_safe_stream
 from .token_parser import CMTLElement
 from logging import Logger, getLogger
-from ghoshell_moss.helpers.event import ThreadSafeEvent
+from ghoshell_moss.helpers.asyncio_utils import ThreadSafeEvent
 from contextlib import contextmanager
 
 

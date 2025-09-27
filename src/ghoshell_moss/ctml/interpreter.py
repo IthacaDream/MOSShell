@@ -7,7 +7,7 @@ from ghoshell_moss.concepts.command import CommandToken, Command, CommandTask
 from ghoshell_moss.concepts.errors import CommandError
 from ghoshell_moss.ctml.token_parser import CTMLTokenParser
 from ghoshell_moss.ctml.elements import CommandTaskElementContext
-from ghoshell_moss.helpers.event import ThreadSafeEvent
+from ghoshell_moss.helpers.asyncio_utils import ThreadSafeEvent
 from ghoshell_common.helpers import uuid
 import logging
 import asyncio
@@ -50,6 +50,7 @@ class CTMLInterpreter(Interpreter):
             stop_event=self._stopped_event,
         )
         self._parsed_tokens = []
+        # 用线程安全队列就可以. 考虑到队列可能不是在同一个 loop 里添加
         self._input_deltas_queue: queue.Queue[str | None] = queue.Queue()
 
         # create task element
@@ -99,7 +100,7 @@ class CTMLInterpreter(Interpreter):
     def meta_instruction(self) -> str:
         raise NotImplementedError
 
-    async def feed(self, delta: str) -> None:
+    def feed(self, delta: str) -> None:
         if not self._committed and not self._stopped_event.is_set():
             if self._fatal_exception is not None:
                 raise self._fatal_exception
@@ -110,7 +111,7 @@ class CTMLInterpreter(Interpreter):
     async def parse(self, deltas: AsyncIterable[str]) -> None:
         try:
             async for delta in deltas:
-                await self.feed(delta)
+                self.feed(delta)
         except Exception as e:
             self._logger.exception(e)
             self._stopped_event.set()

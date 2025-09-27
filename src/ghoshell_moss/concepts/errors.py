@@ -9,6 +9,8 @@ class InterpretError(Exception):
 class CommandError(Exception):
 
     CANCEL_CODE = 10010
+    NOT_AVAILABLE = 10020
+    INVALID_USAGE = 10030
     UNKNOWN_CODE = -1
 
     def __init__(self, code: int, message: str):
@@ -17,5 +19,8 @@ class CommandError(Exception):
         super().__init__(f"Command failed with code {code}: {message}")
 
 
-class StopTheLoop(Exception):
+class LoopStoppedError(Exception):
+    """
+    不需要记录的异常.
+    """
     pass

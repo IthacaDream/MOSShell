@@ -23,7 +23,7 @@ async def test_interpreter_baseline():
 
     async with interpreter:
         for c in content:
-            await interpreter.feed(c)
+            interpreter.feed(c)
         await interpreter.wait_parse_done()
 
     # 所有的 input 被 buffer 了.
@@ -51,7 +51,7 @@ async def test_interpreter_cancel():
     async def consumer():
         async with interpreter:
             for c in content:
-                await interpreter.feed(c)
+                interpreter.feed(c)
                 await asyncio.sleep(0.1)
 
             await interpreter.wait_execution_done()

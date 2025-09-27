@@ -8,7 +8,7 @@ from typing import List, Iterable, Optional, Callable, Dict, Set
 from ghoshell_moss.concepts.command import CommandToken
 from ghoshell_moss.concepts.interpreter import CommandTokenParser, CommandTokenParseError
 from ghoshell_moss.helpers.token_filters import SpecialTokenMatcher
-from ghoshell_moss.helpers.event import ThreadSafeEvent
+from ghoshell_moss.helpers.asyncio_utils import ThreadSafeEvent
 
 CommandTokenCallback = Callable[[CommandToken | None], None]
 

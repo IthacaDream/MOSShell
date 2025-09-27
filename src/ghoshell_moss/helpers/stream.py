@@ -1,6 +1,6 @@
 from typing import Generic, TypeVar, Tuple
 from ghoshell_common.helpers import Timeleft
-from ghoshell_moss.helpers.event import ThreadSafeEvent
+from ghoshell_moss.helpers.asyncio_utils import ThreadSafeEvent
 from collections import deque
 import asyncio
 

@@ -141,7 +141,7 @@ class Interpreter(ABC):
         pass
 
     @abstractmethod
-    async def feed(self, delta: str) -> None:
+    def feed(self, delta: str) -> None:
         """
         向 interpreter 提交文本片段, 会自动触发其它流程.
 

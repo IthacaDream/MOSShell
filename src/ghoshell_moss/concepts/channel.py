@@ -4,7 +4,7 @@ from typing import (
     Protocol,
 )
 from typing_extensions import Self
-from .command import Command, CommandMeta
+from ghoshell_moss.concepts.command import Command, CommandMeta, CommandTask
 from ghoshell_container import IoCContainer, INSTANCE, Provider, BINDING
 from pydantic import BaseModel, Field
 
@@ -35,7 +35,7 @@ class ChannelMeta(BaseModel):
     # context: str = Field(default="", description="the runtime context of the channel.")
 
 
-class Controller(Protocol):
+class Client(Protocol):
     """
     channel 的运行时方法.
     只有在 channel.start 之后才可使用.
@@ -49,23 +49,6 @@ class Controller(Protocol):
 
     id: str
     """unique id of the channel instance"""
-
-    # states: StateStore
-    # """
-    # the states store
-    # """
-    #
-    # topics: Topics
-    # """
-    # 运行时的 topics.
-    # """
-
-    @abstractmethod
-    def is_blocking(self) -> bool:
-        """
-        channel 是否是阻塞的.
-        """
-        pass
 
     @abstractmethod
     def is_running(self) -> bool:
@@ -87,7 +70,7 @@ class Controller(Protocol):
         pass
 
     @abstractmethod
-    def commands(self, available_only: bool = True) -> Iterable[Command]:
+    def commands(self, available_only: bool = True) -> Dict[str, Command]:
         """
         返回所有 commands.
         不递归.
@@ -98,6 +81,14 @@ class Controller(Protocol):
     def get_command(self, name: str, *, is_fullname: bool = False) -> Optional[Command]:
         """
         查找一个 command.
+        不递归.
+        """
+        pass
+
+    @abstractmethod
+    async def execute(self, name: str, *args, **kwargs) -> Any:
+        """
+        在 channel 自带的上下文中执行一个 task.
         不递归.
         """
         pass
@@ -137,7 +128,7 @@ class Controller(Protocol):
     async def start(self) -> None:
         """
         启动 Channel 运行.
-        不会递归执行.
+        注意: 会递归启动所有的子 channel. 这是因为子 channel 通常会和父 channel 共享通信通道.
         """
         pass
 
@@ -145,7 +136,7 @@ class Controller(Protocol):
     async def close(self) -> None:
         """
         关闭当前 Runtime. 同时阻塞销毁资源直到结束.
-        不会递归执行.
+        注意, 会递归执行, 关闭所有的子 channel.
         """
         pass
 
@@ -279,7 +270,7 @@ class Channel(ABC):
 
     @property
     @abstractmethod
-    def controller(self) -> Controller:
+    def client(self) -> Client:
         """
         Channel 在 bootstrap 之后返回的运行时.
         :raise RuntimeError: Channel 没有运行
@@ -321,10 +312,13 @@ class Channel(ABC):
 
     @abstractmethod
     def is_running(self) -> bool:
+        """
+        自身是不是 running 状态, 如果是, 则可以拿到 client
+        """
         pass
 
     @abstractmethod
-    def run(self, container: Optional[IoCContainer] = None) -> "Controller":
+    def bootstrap(self, container: Optional[IoCContainer] = None) -> "Client":
         """
         传入一个父容器, 启动 Channel. 同时生成 Runtime.
         真正运行的是 channel runtime.

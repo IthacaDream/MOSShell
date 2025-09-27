@@ -1,6 +1,7 @@
 from typing import Awaitable
 import asyncio
 import time
+import pytest
 
 
 def test_to_thread():
@@ -21,3 +22,68 @@ def test_to_thread():
     asyncio.run(main())
     assert order == ["bar", "foo"]
     # assert isinstance(bar(), Awaitable)
+
+
+@pytest.mark.asyncio
+async def test_gather():
+    cancelled = []
+    done = []
+
+    async def foo():
+        try:
+            await asyncio.sleep(0.1)
+            return "foo"
+        except asyncio.CancelledError:
+            cancelled.append("foo")
+        finally:
+            done.append("foo")
+
+    async def bar():
+        try:
+            await asyncio.sleep(0.1)
+            return "bar"
+        except asyncio.CancelledError:
+            cancelled.append("bar")
+        finally:
+            done.append("bar")
+
+    async def baz():
+        raise asyncio.CancelledError()
+
+    # test 1
+    result = await asyncio.gather(asyncio.shield(foo()), asyncio.shield(bar()))
+    assert result == ["foo", "bar"]
+    assert done == ["foo", "bar"]
+    done.clear()
+    cancelled.clear()
+
+    # test 2: test cancel
+    result = None
+    gathered = asyncio.gather(asyncio.shield(foo()), asyncio.shield(bar()))
+    gathered.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        result = await gathered
+    assert result is None
+    done.clear()
+    cancelled.clear()
+
+    # test 3:
+    result = None
+    with pytest.raises(asyncio.CancelledError):
+        result = await asyncio.gather(asyncio.shield(foo()), asyncio.shield(bar()), baz())
+
+    assert result is None
+    # the cancellation totally ignored
+    assert done == []
+
+    # test 4:
+    with pytest.raises(asyncio.CancelledError):
+        baz_future = asyncio.create_task(baz())
+        _done, pending = await asyncio.wait(
+            [asyncio.ensure_future(t) for t in [foo(), bar(), baz_future]],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if baz_future in _done:
+            for t in pending:
+                t.cancel()
+            raise asyncio.CancelledError()

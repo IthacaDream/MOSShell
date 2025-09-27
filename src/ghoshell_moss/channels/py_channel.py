@@ -1,15 +1,19 @@
 import inspect
-from typing import Type, Optional, List, Callable, Dict, Tuple, Iterable
+from typing import Type, Optional, List, Callable, Dict, Tuple, Iterable, Any, Coroutine, Awaitable
 from typing_extensions import Self
 
 from ghoshell_moss.concepts.channel import (
-    Controller, Builder, Channel, LifecycleFunction, StringType, FunctionCommand, ChannelMeta,
+    Client, Builder, Channel, LifecycleFunction, StringType, FunctionCommand, ChannelMeta,
 )
 from ghoshell_moss.concepts.command import Command, PyCommand
-from ghoshell_moss.helpers.func import run_coroutine_with_cancel, unwrap_callable_or_value
-from ghoshell_moss.helpers.event import ThreadSafeEvent
-from ghoshell_container import Container, IoCContainer, INSTANCE, BINDING, Provider, provide
+from ghoshell_moss.concepts.errors import CommandError, FatalError
+from ghoshell_moss.helpers.func import unwrap_callable_or_value
+from ghoshell_moss.helpers.asyncio_utils import ThreadSafeEvent, ensure_tasks_done_or_cancel
+from ghoshell_container import (
+    Container, IoCContainer, INSTANCE, BINDING, Provider, provide, set_container
+)
 from ghoshell_common.helpers import uuid
+from contextvars import copy_context
 import asyncio
 import logging
 import threading
@@ -128,7 +132,7 @@ class PyChannel(Channel):
     ):
         self._name = name
         self._description = description
-        self._controller: Optional[Controller] = None
+        self._client: Optional[Client] = None
         self._children: Dict[str, Channel] = {}
         self._block = block
         # decorators
@@ -142,13 +146,13 @@ class PyChannel(Channel):
         return self._name
 
     @property
-    def controller(self) -> Controller:
-        if self._controller is None:
-            raise RuntimeError("Controller not start")
-        elif self._controller.is_running():
-            return self._controller
+    def client(self) -> Client:
+        if self._client is None:
+            raise RuntimeError("Server not start")
+        elif self._client.is_running():
+            return self._client
         else:
-            raise RuntimeError("Controller not running")
+            raise RuntimeError("Server not running")
 
     def with_children(self, parent: Optional[str] = None, *children: "Channel") -> Self:
         if parent is not None:
@@ -179,18 +183,18 @@ class PyChannel(Channel):
         descendants = self.descendants()
         return descendants.get(name, None)
 
-    def run(self, container: Optional[IoCContainer] = None) -> "Controller":
-        if self._controller is not None and self._controller.is_running():
-            raise RuntimeError("Controller already running")
-        self._controller = PyChannelController(
+    def bootstrap(self, container: Optional[IoCContainer] = None) -> "Client":
+        if self._client is not None and self._client.is_running():
+            raise RuntimeError("Server already running")
+        self._client = PyChannelClient(
             children=self.children(),
             container=container,
             builder=self._builder,
         )
-        return self._controller
+        return self._client
 
     def is_running(self) -> bool:
-        return self._controller is not None and self._controller.is_running()
+        return self._client is not None and self._client.is_running()
 
     @property
     def build(self) -> Builder:
@@ -200,7 +204,7 @@ class PyChannel(Channel):
         self._children.clear()
 
 
-class PyChannelController(Controller):
+class PyChannelClient(Client):
 
     def __init__(
             self,
@@ -211,31 +215,33 @@ class PyChannelController(Controller):
             uid: Optional[str] = None,
     ):
         if container is not None:
-            container = Container(parent=container, name=f"chan/container/{builder.name}")
+            container = Container(parent=container, name=f"moss/chan_client/{builder.name}")
         else:
-            container = Container(name=f"chan/container/{builder.name}")
+            container = Container(name=f"moss/chan_client/{builder.name}")
         self.container = container
         self.id = uid or uuid()
         self._children = children
         self._logger = self.container.get(logging.Logger) or logging.getLogger("moss")
         self._builder = builder
         self._meta_cache: Optional[ChannelMeta] = None
-        self._stopped_event = ThreadSafeEvent()
+        self._stop_event = ThreadSafeEvent()
         self._failed_exception: Optional[Exception] = None
         self._policy_is_running = ThreadSafeEvent()
         self._policy_tasks: List[asyncio.Task] = []
         self._policy_lock = threading.Lock()
+        self._starting = False
         self._started = False
-        self._stopped = False
+        self._closing = False
+        self._closed_event = threading.Event()
 
     def __del__(self):
         self.container.shutdown()
 
-    def is_blocking(self) -> bool:
+    def is_none_block(self) -> bool:
         return self._builder.block
 
     def is_running(self) -> bool:
-        return self._started and not self._stopped_event.is_set()
+        return self._started and not self._stop_event.is_set()
 
     def meta(self, no_cache: bool = False) -> ChannelMeta:
         if no_cache or self._meta_cache is None:
@@ -260,7 +266,7 @@ class PyChannelController(Controller):
 
     def _refresh_meta(self) -> ChannelMeta:
         command_metas = []
-        for command in self.commands(available_only=False):
+        for command in self.commands(available_only=False).values():
             command_metas.append(command.meta())
         meta = ChannelMeta(
             name=self._builder.name,
@@ -270,13 +276,14 @@ class PyChannelController(Controller):
         )
         return meta
 
-    def commands(self, available_only: bool = True) -> Iterable[Command]:
+    def commands(self, available_only: bool = True) -> Dict[str, Command]:
         if not self.is_available():
-            yield from []
-            return
+            return {}
+        result = {}
         for command in self._builder.commands.values():
             if not available_only or command.is_available():
-                yield command
+                result[command.name()] = command
+        return result
 
     def get_command(
             self,
@@ -297,7 +304,6 @@ class PyChannelController(Controller):
         try:
             self._check_running()
             with self._policy_lock:
-                self._check_running()
                 if self._policy_is_running.is_set():
                     return
                 policy_tasks = []
@@ -305,16 +311,22 @@ class PyChannelController(Controller):
                     if is_coroutine:
                         task = asyncio.create_task(policy_run_func())
                     else:
-                        task = asyncio.to_thread(policy_run_func)
-                    cancel_scope_task = run_coroutine_with_cancel(task, self._stopped_event.wait)
-                    policy_tasks.append(cancel_scope_task)
-                self._policy_is_running.set()
+                        task = asyncio.create_task(asyncio.to_thread(policy_run_func))
+                    policy_tasks.append(task)
                 self._policy_tasks = policy_tasks
-        except RuntimeError as e:
+                if len(policy_tasks) > 0:
+                    self._policy_is_running.set()
+
+        except asyncio.CancelledError:
+            self._logger.info(f"Policy tasks cancelled")
+            return
+        except Exception as e:
             self._fail(e)
 
-    async def _clear_policies(self) -> None:
-        self._policy_is_running.clear()
+    async def _cancel_if_stopped(self) -> None:
+        await self._stop_event.wait()
+
+    async def _clear_running_policies(self) -> None:
         if len(self._policy_tasks) > 0:
             tasks = self._policy_tasks
             self._policy_tasks.clear()
@@ -322,38 +334,32 @@ class PyChannelController(Controller):
                 if not task.done():
                     task.cancel()
             try:
-                await asyncio.gather(*tasks, return_exceptions=False)
-            except asyncio.CancelledError as e:
-                self._logger.error(f"Cancelled due to {e}")
-            except Exception as e:
-                self._fail(e)
+                await ensure_tasks_done_or_cancel(*tasks, cancel=self._stop_event.wait)
+            except asyncio.CancelledError:
+                return
+            finally:
+                self._policy_is_running.clear()
 
     async def policy_pause(self) -> None:
         try:
             with self._policy_lock:
-                await self._clear_policies()
-
+                await self._clear_running_policies()
                 pause_tasks = []
                 for policy_pause_func, is_coroutine in self._builder.policy_pause_funcs:
                     if is_coroutine:
                         task = asyncio.create_task(policy_pause_func())
                     else:
                         task = asyncio.to_thread(policy_pause_func)
-                    cancel_scope_task = run_coroutine_with_cancel(task, self._stopped_event.wait)
-                    pause_tasks.append(cancel_scope_task)
-                try:
-                    await asyncio.gather(*pause_tasks, return_exceptions=False)
-                except asyncio.CancelledError as e:
-                    self._logger.error(f"Cancelled due to {e}")
-                except Exception as e:
-                    self._fail(e)
+                    pause_tasks.append(task)
+                await ensure_tasks_done_or_cancel(*pause_tasks, cancel=self._stop_event.wait)
+
         except Exception as e:
             self._fail(e)
 
     def _fail(self, error: Exception) -> None:
         self._logger.exception(error)
-        self._started = False
-        self._stopped_event.set()
+        self._starting = False
+        self._stop_event.set()
 
     async def clear(self) -> None:
         clear_tasks = []
@@ -362,37 +368,79 @@ class PyChannelController(Controller):
                 task = asyncio.create_task(clear_func())
             else:
                 task = asyncio.to_thread(clear_func)
-            cancel_scope_task = run_coroutine_with_cancel(task, self._stopped_event.wait)
-            clear_tasks.append(cancel_scope_task)
+            clear_tasks.append(task)
         try:
             await asyncio.gather(*clear_tasks, return_exceptions=False)
         except asyncio.CancelledError as e:
             self._logger.error(f"Cancelled due to {e}")
+        except FatalError as e:
+            self._logger.exception(e)
+            raise
         except Exception as e:
-            self._fail(e)
+            self._logger.exception(e)
 
     async def start(self) -> None:
-        if self._started:
+        if self._starting:
             return
-        self._started = True
-        await asyncio.to_thread(self.container.bootstrap)
-        bootstrapper = []
-        # 准备 start up
+        self._starting = True
+        # 启动所有容器.
+        await asyncio.to_thread(self._self_boostrap)
+        startups = []
+        # 准备 start up 的运行.
         if len(self._builder.on_start_up_funcs) > 0:
             for on_start_func, is_coroutine in self._builder.on_start_up_funcs:
                 if is_coroutine:
                     task = asyncio.create_task(on_start_func())
                 else:
                     task = asyncio.to_thread(on_start_func)
-                bootstrapper.append(task)
-        # 并行启动.
-        await asyncio.gather(*bootstrapper, return_exceptions=True)
+                startups.append(task)
+            # 并行启动.
+            await asyncio.gather(*startups, return_exceptions=False)
+
+        # 运行所有的子 channel, 传递相同的服务.
+        start_all_children = []
+        for child in self._children.values():
+            if not child.is_running():
+                client = child.bootstrap(self.container)
+                start_all_children.append(client.start())
+        if len(start_all_children) > 0:
+            await asyncio.gather(*start_all_children, return_exceptions=False)
+        self._started = True
+
+    def _self_boostrap(self) -> None:
+        self.container.register(*self._builder.providers)
+        self.container.set(Client, self)
+        self.container.bootstrap()
+
+    async def execute(self, name: str, *args, **kwargs) -> Any:
+        """
+        直接在本地运行.
+        """
+        func = self._get_execute_func(name)
+        # 方便使用 get_contract 可以拿到上下文.
+        ctx = copy_context()
+        set_container(self.container)
+        # 必须返回的是一个 Awaitable 的函数.
+        result = await ctx.run(func, *args, **kwargs)
+        return result
+
+    def _get_execute_func(self, name: str) -> Callable[..., Coroutine | Awaitable]:
+        """重写这个函数可以重写调用逻辑实现. """
+        command = self.get_command(name)
+        if command is None:
+            raise NotImplementedError(f"Command '{name}' is not implemented.")
+        if not command.is_available():
+            raise CommandError(
+                CommandError.NOT_AVAILABLE,
+                f"Command '{name}' is not available.",
+            )
+        return command.__call__
 
     async def close(self) -> None:
-        if self._stopped:
+        if self._closing:
             return
-        self._stopped = True
-        self._stopped_event.set()
+        self._closing = True
+        self._stop_event.set()
         await self.policy_pause()
         await self.clear()
         await asyncio.to_thread(self.container.shutdown)

@@ -49,11 +49,11 @@ async def available_test_fn() -> int:
 
 @pytest.mark.asyncio
 async def test_py_channel_baseline() -> None:
-    async with chan.run() as controller:
+    async with chan.bootstrap() as client:
         assert chan.name() == "test"
 
         # commands 存在.
-        commands = list(controller.commands())
+        commands = list(client.commands().values())
         assert len(commands) > 0
 
         # 所有的命令应该都以 channel 开头.
@@ -61,24 +61,24 @@ async def test_py_channel_baseline() -> None:
             assert command.name().startswith(chan.name())
 
         # 不用全名来获取函数.
-        foo_cmd = controller.get_command("foo")
+        foo_cmd = client.get_command("foo")
         assert foo_cmd is not None
         assert await foo_cmd() == 9527
 
         # 测试名称有效.
-        help_cmd = controller.get_command(PyCommand.make_fullname("test", "help"), is_fullname=True)
+        help_cmd = client.get_command(PyCommand.make_fullname("test", "help"), is_fullname=True)
         assert help_cmd is not None
         assert await help_cmd() == "help"
 
         # 测试乱取拿不到东西
-        none_cmd = controller.get_command("never_exists_command")
+        none_cmd = client.get_command("never_exists_command")
         assert none_cmd is None
         # full name 不正确也拿不到.
-        help_cmd = controller.get_command("help", is_fullname=True)
+        help_cmd = client.get_command("help", is_fullname=True)
         assert help_cmd is None
 
         # available 测试.
-        available_test_cmd = controller.get_command("available_test_fn")
+        available_test_cmd = client.get_command("available_test_fn")
         assert available_test_cmd is not None
         assert available_mutator.available
         assert available_test_cmd.is_available() == available_mutator.available
@@ -86,5 +86,5 @@ async def test_py_channel_baseline() -> None:
         assert available_test_cmd.is_available() == available_mutator.available
 
         # description 测试.
-        meta = controller.meta()
+        meta = client.meta()
         assert meta.description == desc()

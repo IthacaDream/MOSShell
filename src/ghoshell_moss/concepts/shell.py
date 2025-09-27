@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import List, Iterable, Dict, Literal, Optional
 from typing_extensions import Self
-from ghoshell_moss.concepts.channel import Channel, ChannelMeta
+from ghoshell_moss.concepts.channel import Channel, ChannelMeta, Client
 from ghoshell_moss.concepts.interpreter import Interpreter
 from ghoshell_moss.concepts.command import Command, CommandTask
 from ghoshell_container import IoCContainer
@@ -87,7 +87,9 @@ class Output(ABC):
 class ChannelRuntime(ABC):
     """
     管理 channel 的所有的 command task 运行时状态, 包括阻塞, 执行, 等待.
+    是 shell runtime 管理的核心抽象.
     """
+    client: Client
 
     @abstractmethod
     def name(self) -> str:
@@ -104,31 +106,35 @@ class ChannelRuntime(ABC):
         pass
 
     @abstractmethod
-    def clear(self) -> None:
+    async def clear(self) -> None:
         """
         清空所有的运行任务和运行中的任务.
         """
         pass
 
     @abstractmethod
-    def defer_clear(self) -> None:
+    async def defer_clear(self) -> None:
         """
         设置 channel 为软重启. 当有一个属于当前 channel runtime 的 task 推送进来时, 清空自身和所有子节点.
         """
         pass
 
     @abstractmethod
-    def clear_pending(self) -> int:
+    async def clear_pending(self) -> int:
         """
         清空自身和子节点队列中的任务.
         """
         pass
 
     @abstractmethod
-    def cancel_running(self) -> None:
+    async def cancel_executing(self) -> None:
         """
-        取消正在运行的所有任务, 包括自身和子节点的任务.
+        取消正在运行的所有任务, 包括自身正在运行的任务, 和所有子节点的任务.
         """
+        pass
+
+    @abstractmethod
+    async def wait_until_idle(self, timeout: float | None = None) -> None:
         pass
 
     @abstractmethod
@@ -139,17 +145,13 @@ class ChannelRuntime(ABC):
         pass
 
     @abstractmethod
-    def is_busy(self) -> bool:
-        """
-        是否正在运行任务, 或者队列中存在任务.
-        """
+    def is_available(self) -> bool:
         pass
 
     @abstractmethod
-    async def get_child(self, name: str) -> "ChannelRuntime":
+    def is_busy(self) -> bool:
         """
-        获取子 channel 的 runtime.
-        :raise: KeyError if channel doesn't exist.
+        是否正在运行任务, 或者队列中存在任务.
         """
         pass
 
@@ -161,69 +163,11 @@ class ChannelRuntime(ABC):
         pass
 
     @abstractmethod
-    async def stop(self) -> None:
+    async def close(self) -> None:
         """
         停止 runtime 运行.
         """
         pass
-
-
-class ShellRuntime(ABC):
-
-    @abstractmethod
-    def is_running(self) -> bool:
-        pass
-
-    @abstractmethod
-    def is_idle(self) -> bool:
-        pass
-
-    @abstractmethod
-    def interpret(self, kind: Literal['clear', 'defer_clear', 'try'] = "clear") -> Interpreter:
-        pass
-
-    @abstractmethod
-    async def append(self, *commands: CommandTask) -> None:
-        pass
-
-    @abstractmethod
-    async def clear(self, *chans: str) -> None:
-        pass
-
-    @abstractmethod
-    async def defer_clear(self, *chans: str) -> None:
-        pass
-
-    @abstractmethod
-    async def system_prompt(self) -> str:
-        pass
-
-    @abstractmethod
-    async def commands(self) -> Dict[str, List[Command]]:
-        """
-        get commands from shell
-        """
-        pass
-
-    @abstractmethod
-    async def wait_until_idle(self, timeout: float | None = None) -> None:
-        pass
-
-    @abstractmethod
-    async def start(self) -> None:
-        pass
-
-    @abstractmethod
-    async def stop(self) -> None:
-        pass
-
-    async def __aenter__(self):
-        await self.start()
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        await self.stop()
-        return self
 
 
 class MOSSShell(ABC):
@@ -235,25 +179,24 @@ class MOSSShell(ABC):
     container: IoCContainer
 
     @abstractmethod
-    def name(self) -> str:
+    def with_output(self, output: Output) -> None:
         """
-        shell 的名称.
+        注册 Output 对象.
         """
         pass
+
+    # --- channels --- #
 
     @property
     @abstractmethod
-    def runtime(self) -> ShellRuntime:
+    def main(self) -> Channel:
         """
-        shell 的运行时状态管理.
+        Shell 自身的主轨. 主轨同时可以用来注册所有的子轨.
         """
         pass
 
     @abstractmethod
-    def channels(self) -> Dict[str, ChannelMeta]:
-        """
-        返回所有的 Channel Meta 信息.
-        """
+    def channels(self) -> Dict[str, Channel]:
         pass
 
     @abstractmethod
@@ -270,24 +213,11 @@ class MOSSShell(ABC):
         """
         pass
 
-    @abstractmethod
-    def with_output(self, output: Output) -> None:
-        """
-        注册 Output 对象.
-        """
-        pass
-
-    # --- properties --- #
-
-    @property
-    @abstractmethod
-    def main(self) -> Channel:
-        """
-        Shell 自身的主轨. 主轨同时可以用来注册所有的子轨.
-        """
-        pass
-
     # --- runtime --- #
+
+    @abstractmethod
+    def system_prompt(self) -> str:
+        pass
 
     @abstractmethod
     def is_running(self) -> bool:
@@ -296,11 +226,66 @@ class MOSSShell(ABC):
         """
         pass
 
+    @abstractmethod
+    def is_idle(self) -> bool:
+        pass
+
+    @abstractmethod
+    async def wait_until_idle(self, timeout: float | None = None) -> None:
+        pass
+
+    @abstractmethod
+    async def channel_metas(self) -> Dict[str, ChannelMeta]:
+        """
+        返回所有的 Channel Meta 信息.
+        """
+        pass
+
+    @abstractmethod
+    async def commands(self) -> Dict[str, Command]:
+        pass
+
+    @abstractmethod
+    async def interpret(
+            self,
+            kind: Literal['clear', 'defer_clear', 'try'] = "clear",
+            *,
+            stream_id: Optional[str] = None,
+    ) -> Interpreter:
+        pass
+
+    @abstractmethod
+    async def append(self, *tasks: CommandTask) -> None:
+        pass
+
+    @abstractmethod
+    async def clear(self, *chans: str) -> None:
+        pass
+
+    @abstractmethod
+    async def defer_clear(self, *chans: str) -> None:
+        pass
+
     # --- lifecycle --- #
 
     @abstractmethod
-    async def run(self) -> ShellRuntime:
+    async def start(self) -> None:
         """
-        生成 runtime 对象.
+        runtime 启动.
         """
         pass
+
+    @abstractmethod
+    async def close(self) -> None:
+        """
+        runtime 停止运行.
+        """
+        pass
+
+    async def __aenter__(self):
+        await self.start()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close()
+        return self
