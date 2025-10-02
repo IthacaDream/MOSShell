@@ -297,6 +297,9 @@ class DefaultShell(MOSSShell):
             return
         self._closing = True
         self._stop_event.set()
+        if self._interpreter is not None:
+            await self._interpreter.stop()
+            self._interpreter = None
         # 先关闭所有的 runtime. 递归关闭.
         await self._main_channel_runtime.close()
         self.container.shutdown()
