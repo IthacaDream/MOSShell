@@ -32,8 +32,16 @@ class CTMLInterpreter(Interpreter):
         self._callbacks = []
         if callback is not None:
             self._callbacks.append(callback)
+
         # commands map
         self._commands_map = {c.name(): c for c in commands}
+        self._channel_command_map = {}
+        for command in commands:
+            chan = command.meta().chan
+            chan_commands = self._channel_command_map.get(chan, {})
+            chan_commands[command.name()] = command
+            self._channel_command_map[chan] = chan_commands
+
         self._root_tag = root_tag
         self._special_tokens = special_tokens or {}
         self._stopped_event = ThreadSafeEvent()
@@ -58,7 +66,7 @@ class CTMLInterpreter(Interpreter):
         # create task element
         self._parsed_tokens_queue: queue.Queue[CommandToken | None] = queue.Queue()
         self._task_element_ctx = CommandTaskElementContext(
-            commands=self._commands_map,
+            commands=self._commands_map.values(),
             output=self._output,
             logger=self._logger,
             stop_event=self._stopped_event,
@@ -248,7 +256,7 @@ class CTMLInterpreter(Interpreter):
         if self._fatal_exception:
             raise self._fatal_exception
 
-    async def wait_execution_done(self) -> None:
+    async def wait_execution_done(self) -> Dict[str, CommandTask]:
         await self.wait_parse_done()
         waits = []
         tasks = list(self._parsed_tasks.values())
@@ -257,6 +265,8 @@ class CTMLInterpreter(Interpreter):
         try:
             if len(waits) > 0:
                 await asyncio.gather(*waits, return_exceptions=False)
+
+            return self.parsed_tasks()
         except asyncio.CancelledError:
             pass
         except CommandError:

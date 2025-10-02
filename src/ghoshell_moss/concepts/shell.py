@@ -1,7 +1,7 @@
+import threading
 from abc import ABC, abstractmethod
 from typing import List, Iterable, Dict, Literal, Optional, AsyncIterable
-from typing_extensions import Self
-from ghoshell_moss.concepts.channel import Channel, ChannelMeta, Client
+from ghoshell_moss.concepts.channel import Channel, ChannelMeta
 from ghoshell_moss.concepts.interpreter import Interpreter
 from ghoshell_moss.concepts.command import Command, CommandTask, CommandToken
 from ghoshell_container import IoCContainer
@@ -174,6 +174,10 @@ class MOSSShell(ABC):
         pass
 
     @abstractmethod
+    async def wait_until_closed(self) -> None:
+        pass
+
+    @abstractmethod
     async def channel_metas(self) -> Dict[str, ChannelMeta]:
         """
         返回所有的 Channel Meta 信息.
@@ -264,7 +268,7 @@ class MOSSShell(ABC):
         pass
 
     @abstractmethod
-    def clear(self, *chans: str) -> None:
+    async def clear(self, *chans: str) -> None:
         """
         清空指定的 channel. 如果
         """
@@ -297,3 +301,42 @@ class MOSSShell(ABC):
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.close()
         return self
+
+
+class SyncShell:
+    """ wrapper to run the shell in sync mode (thread)"""
+
+    def __init__(self, shell: MOSSShell):
+        self._shell = shell
+        self._running_loop: Optional[asyncio.AbstractEventLoop] = None
+        self._starting = False
+        self._closing = False
+        self._closed_event = threading.Event()
+
+    def start(self) -> None:
+        if self._starting:
+            return
+        self._starting = True
+        import threading
+        thread = threading.Thread(target=self._run_main_loop, daemon=True)
+        thread.start()
+
+    def _run_main_loop(self) -> None:
+        # 正式运行.
+        asyncio.run(self._main_loop())
+        self._closed_event.set()
+
+    async def _main_loop(self) -> None:
+        loop = asyncio.get_running_loop()
+        self._running_loop = loop
+        await self._shell.start()
+        await self._shell.wait_until_closed()
+
+    def close(self) -> None:
+        if self._closing:
+            return
+        self._closing = True
+        if not self._running_loop:
+            raise RuntimeError(f"Cannot close shell without running")
+        self._running_loop.call_soon_threadsafe(self._shell.close)
+

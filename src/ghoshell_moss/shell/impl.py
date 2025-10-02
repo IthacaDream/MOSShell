@@ -1,12 +1,11 @@
-from typing import Dict, Optional, List, Iterable
-from typing_extensions import Literal, Self
+from typing import Dict, Optional
 from ghoshell_moss.concepts.shell import MOSSShell, Output, NewInterpreterKind
 from ghoshell_moss.concepts.command import Command, CommandTask, CommandWrapper
 from ghoshell_moss.concepts.channel import Channel, ChannelMeta
 from ghoshell_moss.concepts.interpreter import Interpreter
 from ghoshell_moss.ctml.interpreter import CTMLInterpreter
 from ghoshell_moss.mocks.outputs import ArrOutput
-from ghoshell_moss.shell.main_channel import ShellMainChannel
+from ghoshell_moss.shell.main_channel import MainChannel
 from ghoshell_moss.shell.runtime import ChannelRuntimeImpl
 from ghoshell_moss.helpers.asyncio_utils import ThreadSafeEvent, TreeNotify
 from ghoshell_common.helpers import uuid
@@ -14,17 +13,21 @@ from ghoshell_container import IoCContainer, Container
 import logging
 import asyncio
 
+__all__ = ['DefaultShell', 'new_shell']
 
-class ShellImpl(MOSSShell):
+
+class DefaultShell(MOSSShell):
 
     def __init__(
             self,
             *,
+            name: str = "shell",
             description: Optional[str] = None,
             container: IoCContainer | None = None,
             main_channel: Channel | None = None,
             output: Optional[Output] = None,
     ):
+        self.name = name
         self.container = Container(parent=container, name=f"MOSShell")
         self.container.set(MOSSShell, self)
         # output
@@ -35,7 +38,7 @@ class ShellImpl(MOSSShell):
         self.container.set(logging.Logger, self.logger)
 
         # init main channel
-        self._main_channel = main_channel or ShellMainChannel(
+        self._main_channel = main_channel or MainChannel(
             name="",
             block=True,
             description=description or "",
@@ -63,6 +66,7 @@ class ShellImpl(MOSSShell):
         self._configured_channel_metas: Optional[Dict[str, ChannelMeta]] = None
         # --- interpreter --- #
         self._interpreter: Optional[Interpreter] = None
+        self._closed_event: asyncio.Event = asyncio.Event()
 
     def is_running(self) -> bool:
         return self._started and not self._stop_event.is_set() and self._main_channel_runtime.is_running()
@@ -224,28 +228,31 @@ class ShellImpl(MOSSShell):
             if channel_runtime is not None:
                 await channel_runtime.clear()
 
-    def wait_until_idle(self, timeout: float | None = None) -> bool:
-        self._check_running()
-        return self._idle_notifier.wait_sync(timeout)
+    async def wait_until_closed(self) -> None:
+        if not self.is_running():
+            return
+        await self._closed_event.wait()
 
     async def wait_until_idle(self, timeout: float | None = None) -> None:
-        self._check_running()
+        if not self.is_running():
+            return
         await asyncio.wait_for(self._idle_notifier.wait(), timeout=timeout)
 
     async def defer_clear(self, *chans: str) -> None:
         self._check_running()
         names = list(chans)
         if len(names) == 0:
-            await self._main_channel_client.defer_clear()
+            await self._main_channel_runtime.defer_clear()
             return
         # 可以并行执行.
         clearing = []
         for name in names:
-            child = await self._main_channel_client.get_chan_runtime(name)
+            child = await self._main_channel_runtime.get_chan_runtime(name)
             clearing.append(child.defer_clear())
         await asyncio.gather(*clearing)
 
     async def system_prompt(self) -> str:
+        # todo
         raise NotImplementedError()
 
     def _check_running(self) -> None:
@@ -274,3 +281,22 @@ class ShellImpl(MOSSShell):
         self._stop_event.set()
         # 先关闭所有的 runtime. 递归关闭.
         await self._main_channel_runtime.close()
+        self.container.shutdown()
+        self._closed_event.set()
+
+
+def new_shell(
+        name: str = "shell",
+        description: Optional[str] = None,
+        container: IoCContainer | None = None,
+        main_channel: Channel | None = None,
+        output: Optional[Output] = None,
+) -> MOSSShell:
+    """语法糖, 好像不甜"""
+    return DefaultShell(
+        name=name,
+        description=description,
+        container=container,
+        main_channel=main_channel,
+        output=output,
+    )

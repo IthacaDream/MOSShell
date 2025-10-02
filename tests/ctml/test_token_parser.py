@@ -176,3 +176,17 @@ def test_space_only_delta():
 
     q = q[1:-1]
     assert "".join(t.content for t in q) == content
+
+
+def test_namespace_tag():
+    content = '<foo:bar a="123" />'
+    q: List[CommandToken] = []
+    CTMLTokenParser.parse(q.append, iter(content), root_tag="speak")
+    assert q.pop() is None
+    q = q[1:-1]
+    assert len(q) == 2
+
+    start_token = q[0]
+    assert start_token.name == "bar"
+    assert start_token.chan == "foo"
+    assert start_token.kwargs == dict(a="123")

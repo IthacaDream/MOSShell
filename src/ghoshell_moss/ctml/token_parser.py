@@ -13,14 +13,23 @@ from ghoshell_moss.helpers.asyncio_utils import ThreadSafeEvent
 CommandTokenCallback = Callable[[CommandToken | None], None]
 
 
-class CMTLElement:
+class CMTLSaxElement:
     """
     Utility class to generate Command Token in XMTL (Command Token Marked Language stream)
     """
 
-    def __init__(self, *, cmd_idx: int, stream_id: str, name: str, attrs: dict):
+    def __init__(
+            self,
+            *,
+            cmd_idx: int,
+            stream_id: str,
+            chan: str,
+            name: str,
+            attrs: dict,
+    ):
         self.cmd_idx = cmd_idx
         self.name = name
+        self.chan = chan or ""
         self.deltas = ""
         # first part idx is 0
         self.part_idx = 0
@@ -29,26 +38,32 @@ class CMTLElement:
         self.stream_id = stream_id
 
     @classmethod
-    def make_fullname(cls, ns: str, name: str) -> str:
-        return f"{ns}:{name}" if ns else name
+    def make_fullname(cls, chan: Optional[str], name: str) -> str:
+        return f"{chan}:{name}" if chan else name
 
-    @staticmethod
-    def make_start_mark(name: str, attrs: dict, self_close: bool) -> str:
+    @classmethod
+    def make_start_mark(cls, chan: str, name: str, attrs: dict, self_close: bool) -> str:
         attr_expression = []
         for k, v in attrs.items():
             quoted_value = saxutils.quoteattr(v)
             attr_expression.append(f"{k}={quoted_value}")
         exp = " " if len(attr_expression) > 0 else ""
         self_close_mark = "/" if self_close else ""
-        content = f"<{name}{exp}" + " ".join(attr_expression) + self_close_mark + ">"
+        fullname = cls.make_fullname(chan, name)
+        content = f"<{fullname}{exp}" + " ".join(attr_expression) + self_close_mark + ">"
         return content
 
+    @classmethod
+    def make_end_mark(cls, chan: Optional[str], name: str) -> str:
+        return f"</{cls.make_fullname(chan, name)}>"
+
     def start_token(self) -> CommandToken:
-        content = self.make_start_mark(self.name, self.attrs, self_close=False)
+        content = self.make_start_mark(self.chan, self.name, self.attrs, self_close=False)
         part_idx = self.part_idx
         self.part_idx += 1
         return CommandToken(
             name=self.name,
+            chan=self.chan,
             cmd_idx=self.cmd_idx,
             part_idx=part_idx,
             stream_id=self.stream_id,
@@ -69,6 +84,7 @@ class CMTLElement:
             self._has_delta = True
             return CommandToken(
                 name=self.name,
+                chan=self.chan,
                 cmd_idx=self.cmd_idx,
                 part_idx=self.part_idx,
                 stream_id=self.stream_id,
@@ -83,12 +99,13 @@ class CMTLElement:
             self.part_idx += 1
         return CommandToken(
             name=self.name,
+            chan=self.chan,
             cmd_idx=self.cmd_idx,
             part_idx=self.part_idx,
             stream_id=self.stream_id,
             type="end",
             kwargs=None,
-            content=f"</{self.name}>",
+            content=CMTLSaxElement.make_end_mark(self.chan, self.name),
         )
 
 
@@ -129,7 +146,7 @@ class CTMLSaxHandler(xml.sax.ContentHandler, xml.sax.ErrorHandler):
         # get the logger
         self._logger = logger or logging.getLogger("CTMLSaxHandler")
         # simple stack for unfinished element
-        self._parsing_element_stack: List[CMTLElement] = []
+        self._parsing_element_stack: List[CMTLSaxElement] = []
         # event to notify the parsing is over.
         self.done_event = threading.Event()
         self._exception: Optional[Exception] = None
@@ -149,16 +166,37 @@ class CTMLSaxHandler(xml.sax.ContentHandler, xml.sax.ErrorHandler):
             # todo: log
             pass
 
-    def startElement(self, name: str, attrs: xml.sax.xmlreader.AttributesImpl) -> None:
+    def startElementNS(self, name: tuple[str, str], qname: str, attrs: xml.sax.xmlreader.AttributesNSImpl):
+        if self.is_stopped():
+            raise ParserStopped
+        chan, command_name = name
+        dict_attrs = {}
+        for attr_qname in attrs.getQNames():
+            _, name = attrs.getNameByQName(attr_qname)
+            attr_value = attrs.getValueByQName(attr_qname)
+            dict_attrs[name] = attr_value
+        dict_attrs = self.parse_attrs(dict_attrs)
+        self._start_command_token_element(chan, command_name, dict_attrs)
+
+    def startElement(self, name: str, attrs: xml.sax.xmlreader.AttributesImpl | dict) -> None:
         if self.is_stopped():
             raise ParserStopped
         dict_attrs = self.parse_attrs(attrs)
+        parts = name.split(':', 2)
+        if len(parts) == 2:
+            chan, command_name = parts
+        else:
+            chan = ""
+            command_name = parts[0]
+        self._start_command_token_element(chan, command_name, dict_attrs)
 
-        element = CMTLElement(
+    def _start_command_token_element(self, chan: str, name: str, attrs: dict) -> None:
+        element = CMTLSaxElement(
             cmd_idx=self._cmd_idx,
             stream_id=self._stream_id,
             name=name,
-            attrs=dict_attrs,
+            chan=chan,
+            attrs=attrs,
         )
         if len(self._parsing_element_stack) > 0:
             self._parsing_element_stack[-1].on_child_command()
@@ -170,7 +208,7 @@ class CTMLSaxHandler(xml.sax.ContentHandler, xml.sax.ErrorHandler):
         self._cmd_idx += 1
 
     @classmethod
-    def parse_attrs(cls, attrs: xml.sax.xmlreader.AttributesImpl) -> dict:
+    def parse_attrs(cls, attrs: xml.sax.xmlreader.AttributesImpl | dict) -> dict:
         return dict(attrs)
 
     def endElement(self, name: str):
@@ -183,6 +221,9 @@ class CTMLSaxHandler(xml.sax.ContentHandler, xml.sax.ErrorHandler):
         self._send_to_callback(token)
         if len(self._parsing_element_stack) == 0:
             self.done_event.set()
+
+    def endElementNS(self, name: tuple[str, str], qname: str):
+        self.endElement(qname)
 
     def characters(self, content: str):
         if self.is_stopped():
@@ -261,6 +302,9 @@ class CTMLTokenParser(CommandTokenParser):
 
         # lifecycle
         self._sax_parser = sax.make_parser()
+        self._sax_parser.setFeature(sax.handler.feature_namespaces, False)
+        self._sax_parser.setFeature(sax.handler.feature_namespace_prefixes, False)
+
         self._sax_parser.setContentHandler(self._handler)
         self._sax_parser.setErrorHandler(self._handler)
 
@@ -272,8 +316,10 @@ class CTMLTokenParser(CommandTokenParser):
     def parsed(self) -> Iterable[CommandToken]:
         return self._parsed
 
-    def with_callback(self, callback: CommandTokenCallback) -> None:
-        self._callback = callback
+    def with_callback(self, *callbacks: CommandTokenCallback) -> None:
+        callbacks = list(callbacks)
+        callbacks.extend(self._callbacks)
+        self._callbacks = callbacks
 
     def _add_token(self, token: CommandToken | None) -> None:
         if token is not None:

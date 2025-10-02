@@ -730,7 +730,7 @@ class ChannelRuntimeImpl(ChannelRuntime):
 
         # 准备好 ctx. 包含 channel 的容器, 还有 command task 的 context 数据.
         ctx = contextvars.copy_context()
-        set_container(self.channel.client.container)
+        self.channel.set_context_var()
         ctx_ran_cor = ctx.run(cmd_task.run)
 
         # 创建一个可以被 cancel 的 task.

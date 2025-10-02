@@ -29,6 +29,10 @@ async def test_interpreter_baseline():
     # 所有的 input 被 buffer 了.
     assert content == interpreter.inputted()
     assert len(list(interpreter.parsed_tokens())) == 5
+    for token in interpreter.parsed_tokens():
+        if token.name == "foo":
+            assert token.chan == ""
+
     assert len(queue) == 4
     assert len(interpreter.parsed_tasks()) == 3
 

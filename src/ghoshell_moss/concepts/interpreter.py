@@ -1,7 +1,7 @@
+from typing import Iterable, Callable, Optional, Dict, List
+from typing_extensions import Self
 from ghoshell_moss.concepts.command import CommandToken, CommandTask
 from abc import ABC, abstractmethod
-from typing import Iterable, Callable, Optional, Dict
-from typing_extensions import Self
 
 CommandTokenCallback = Callable[[CommandToken | None], None]
 CommandTaskCallback = Callable[[CommandTask | None], None]
@@ -22,7 +22,7 @@ class CommandTokenParser(ABC):
     """
 
     @abstractmethod
-    def with_callback(self, callback: CommandTokenCallback) -> None:
+    def with_callback(self, *callbacks: CommandTokenCallback) -> None:
         """
         send command token to callback method
         """
@@ -292,7 +292,7 @@ class Interpreter(ABC):
         pass
 
     @abstractmethod
-    async def wait_execution_done(self) -> None:
+    async def wait_execution_done(self) -> Dict[str, CommandTask]:
         pass
 
     @abstractmethod

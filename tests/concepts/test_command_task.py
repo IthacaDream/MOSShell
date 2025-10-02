@@ -1,6 +1,6 @@
 import threading
 
-from ghoshell_moss.concepts.command import PyCommand, BaseCommandTask, CommandTaskState, CommandTaskStack
+from ghoshell_moss.concepts.command import PyCommand, BaseCommandTask, CommandTaskState, CommandTaskStack, CommandTask
 from ghoshell_moss.concepts.errors import CommandError
 import pytest
 import asyncio
@@ -155,3 +155,14 @@ async def test_command_task_stack():
 
     await stack.success(bar_task)
     assert bar_task.result == 2
+
+
+@pytest.mark.asyncio
+async def test_command_task_in_context():
+    async def foo() -> str:
+        task = CommandTask.get_from_context()
+        return task.cid
+
+    # 可以拿到外部传递的数据.
+    foo_task = BaseCommandTask.from_command(PyCommand(foo))
+    assert await foo_task.run() == foo_task.cid

@@ -3,7 +3,7 @@ from typing import Type, Optional, List, Callable, Dict, Tuple, Iterable, Any, C
 from typing_extensions import Self
 
 from ghoshell_moss.concepts.channel import (
-    Client, Builder, Channel, LifecycleFunction, StringType, FunctionCommand, ChannelMeta,
+    ChannelClient, Builder, Channel, LifecycleFunction, StringType, FunctionCommand, ChannelMeta,
 )
 from ghoshell_moss.concepts.command import Command, PyCommand
 from ghoshell_moss.concepts.errors import CommandError, FatalError
@@ -132,7 +132,7 @@ class PyChannel(Channel):
     ):
         self._name = name
         self._description = description
-        self._client: Optional[Client] = None
+        self._client: Optional[ChannelClient] = None
         self._children: Dict[str, Channel] = {}
         self._block = block
         # decorators
@@ -146,7 +146,7 @@ class PyChannel(Channel):
         return self._name
 
     @property
-    def client(self) -> Client:
+    def client(self) -> ChannelClient:
         if self._client is None:
             raise RuntimeError("Server not start")
         elif self._client.is_running():
@@ -158,13 +158,18 @@ class PyChannel(Channel):
         if parent is not None:
             descendant = self.descendants().get(parent)
             if descendant is None:
-                raise KeyError(f"the children parent name of {parent} does not exist")
+                raise LookupError(f"the children parent name of {parent} does not exist")
             descendant.with_children(*children)
             return
 
         for child in children:
             self._children[child.name()] = child
         return self
+
+    def new_child(self, name: str) -> Self:
+        child = PyChannel(name=name)
+        self._children[name] = child
+        return child
 
     def children(self) -> Dict[str, "Channel"]:
         return self._children
@@ -183,7 +188,7 @@ class PyChannel(Channel):
         descendants = self.descendants()
         return descendants.get(name, None)
 
-    def bootstrap(self, container: Optional[IoCContainer] = None, depth: int = 0) -> "Client":
+    def bootstrap(self, container: Optional[IoCContainer] = None, depth: int = 0) -> "ChannelClient":
         if self._client is not None and self._client.is_running():
             raise RuntimeError("Server already running")
         self._client = PyChannelClient(
@@ -205,7 +210,7 @@ class PyChannel(Channel):
         self._children.clear()
 
 
-class PyChannelClient(Client):
+class PyChannelClient(ChannelClient):
 
     def __init__(
             self,
@@ -291,11 +296,7 @@ class PyChannelClient(Client):
     def get_command(
             self,
             name: str,
-            *,
-            is_fullname: bool = False,
     ) -> Optional[Command]:
-        if not is_fullname:
-            name = PyCommand.make_fullname(self._builder.name, name)
         return self._builder.commands.get(name, None)
 
     def update(self) -> ChannelMeta:
@@ -412,7 +413,7 @@ class PyChannelClient(Client):
 
     def _self_boostrap(self) -> None:
         self.container.register(*self._builder.providers)
-        self.container.set(Client, self)
+        self.container.set(ChannelClient, self)
         self.container.bootstrap()
 
     async def execute(self, name: str, *args, **kwargs) -> Any:

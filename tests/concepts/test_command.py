@@ -130,4 +130,5 @@ async def test_command_rename():
     assert command.meta().name == "bar"
 
     command = PyCommand(foo, name="bar", chan="test")
-    assert command.name() == PyCommand.make_fullname("test", "bar")
+    assert command.name() == "bar"
+    assert command.meta().chan == "test"

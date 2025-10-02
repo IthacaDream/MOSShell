@@ -45,7 +45,7 @@ def new_test_suite(*commands: Command) -> ElementTestSuite:
     command_map = {c.name(): c for c in commands}
     stop_event = ThreadSafeEvent()
     ctx = CommandTaskElementContext(
-        command_map,
+        command_map.values(),
         output,
         stop_event=stop_event,
     )

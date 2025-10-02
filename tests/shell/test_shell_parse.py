@@ -1,10 +1,10 @@
-from ghoshell_moss.shell.shell_impl import ShellImpl
+from ghoshell_moss.shell.impl import DefaultShell
 import pytest
 
 
 @pytest.mark.asyncio
 async def test_shell_parse_tokens_baseline():
-    shell = ShellImpl()
+    shell = DefaultShell()
     async with shell:
         tokens = []
         async for token in shell.parse_tokens("<foo />"):
@@ -14,7 +14,7 @@ async def test_shell_parse_tokens_baseline():
 
 @pytest.mark.asyncio
 async def test_shell_parse_tasks_baseline():
-    shell = ShellImpl()
+    shell = DefaultShell()
     async with shell:
         tasks = []
         async for token in shell.parse_tasks("<foo>hello</bar>"):

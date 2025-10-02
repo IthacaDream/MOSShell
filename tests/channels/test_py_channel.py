@@ -58,7 +58,7 @@ async def test_py_channel_baseline() -> None:
 
         # 所有的命令应该都以 channel 开头.
         for command in commands:
-            assert command.name().startswith(chan.name())
+            assert command.meta().chan == "test"
 
         # 不用全名来获取函数.
         foo_cmd = client.get_command("foo")
@@ -66,7 +66,7 @@ async def test_py_channel_baseline() -> None:
         assert await foo_cmd() == 9527
 
         # 测试名称有效.
-        help_cmd = client.get_command(PyCommand.make_fullname("test", "help"), is_fullname=True)
+        help_cmd = client.get_command("help")
         assert help_cmd is not None
         assert await help_cmd() == "help"
 
@@ -74,8 +74,8 @@ async def test_py_channel_baseline() -> None:
         none_cmd = client.get_command("never_exists_command")
         assert none_cmd is None
         # full name 不正确也拿不到.
-        help_cmd = client.get_command("help", is_fullname=True)
-        assert help_cmd is None
+        help_cmd = client.get_command("help")
+        assert help_cmd is not None
 
         # available 测试.
         available_test_cmd = client.get_command("available_test_fn")

@@ -1,6 +1,5 @@
-import threading
 from abc import ABC, abstractmethod
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Iterable
 from ghoshell_moss.concepts.command import (
     CommandTask, Command, CommandToken, CommandTokenType, BaseCommandTask, CommandDeltaType,
     CancelAfterOthersTask,
@@ -8,7 +7,7 @@ from ghoshell_moss.concepts.command import (
 from ghoshell_moss.concepts.interpreter import CommandTaskElement, CommandTaskCallback, CommandTaskParseError
 from ghoshell_moss.concepts.shell import OutputStream, Output
 from ghoshell_moss.helpers.stream import create_thread_safe_stream
-from .token_parser import CMTLElement
+from .token_parser import CMTLSaxElement
 from logging import Logger, getLogger
 from ghoshell_moss.helpers.asyncio_utils import ThreadSafeEvent
 from contextlib import contextmanager
@@ -19,15 +18,22 @@ class CommandTaskElementContext:
 
     def __init__(
             self,
-            commands: Dict[str, Command],
+            commands: Iterable[Command],
             output: Output,
             logger: Optional[Logger] = None,
             stop_event: Optional[ThreadSafeEvent] = None,
+            root_tag: str = "ctml",
     ):
-        self.commands = commands
+        self.channel_commands_map = {}
+        for command in commands:
+            chan = command.meta().chan
+            channel_commands = self.channel_commands_map.get(chan, {})
+            channel_commands[command.name()] = command
+            self.channel_commands_map[chan] = channel_commands
         self.output = output
         self.logger = logger or getLogger("CommandTaskElement")
         self.stop_event = stop_event or ThreadSafeEvent()
+        self.root_tag = root_tag
 
     def new_root(self, callback: CommandTaskCallback, stream_id: str = "") -> CommandTaskElement:
         """
@@ -150,6 +156,12 @@ class BaseCommandTaskElement(CommandTaskElement, ABC):
         if self._callback is not None:
             self._callback(task)
 
+    def _find_command(self, chan: str, name: str) -> Optional[Command]:
+        if chan not in self.ctx.channel_commands_map:
+            return None
+        channel_commands = self.ctx.channel_commands_map[chan]
+        return channel_commands.get(name, None)
+
     def _new_child_element(self, token: CommandToken) -> None:
         """
         基于 start token 创建一个子节点.
@@ -158,7 +170,7 @@ class BaseCommandTaskElement(CommandTaskElement, ABC):
             # todo
             raise RuntimeError(f"invalid token {token}")
 
-        command = self.ctx.commands.get(token.name, None)
+        command = self._find_command(token.chan, token.name)
         if command is None:
             child = EmptyCommandTaskElement(
                 cid=token.command_id(),
@@ -324,14 +336,19 @@ class NoDeltaCommandTaskElement(BaseCommandTaskElement):
             cancel_after_children_task = CancelAfterOthersTask(
                 self._current_task,
                 *self._children_tasks,
-                tokens=f"</{self._current_task.meta.name}>",
+            )
+            cancel_after_children_task.tokens = CMTLSaxElement.make_end_mark(
+                self._current_task.meta.chan,
+                self._current_task.meta.name,
             )
             # 等待所有 children tasks 完成, 如果自身还未完成, 则取消.
             self._send_callback(cancel_after_children_task)
         else:
             # 按照 ctml 的规则, 修改规则.
-            self._current_task.tokens = CMTLElement.make_start_mark(
-                name=self._current_task.meta.name,
+            meta = self._current_task.meta
+            self._current_task.tokens = CMTLSaxElement.make_start_mark(
+                chan=meta.chan,
+                name=meta.name,
                 attrs=self._current_task.kwargs,
                 self_close=True,
             )
@@ -435,12 +452,14 @@ class DeltaIsTextCommandTaskElement(BaseCommandTaskElement):
             self._inner_content += token.content
             return None
         if self._current_task is not None:
+            current_task_meta = self._current_task.meta
             self._current_task.kwargs[CommandDeltaType.TEXT.value] = self._inner_content
             if not self._inner_content:
                 attrs = self._current_task.kwargs.copy()
                 del attrs[CommandDeltaType.TEXT.value]
-                self._current_task.tokens = CMTLElement.make_start_mark(
-                    self._current_task.meta.name,
+                self._current_task.tokens = CMTLSaxElement.make_start_mark(
+                    current_task_meta.chan,
+                    current_task_meta.name,
                     attrs=attrs,
                     self_close=True,
                 )

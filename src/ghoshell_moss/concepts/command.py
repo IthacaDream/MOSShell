@@ -104,6 +104,7 @@ class CommandToken(BaseModel):
     type: Literal['start', 'delta', 'end'] = Field(description="tokens type")
 
     name: str = Field(description="command name")
+    chan: str = Field(default="", description="channel name")
 
     order: int = Field(default=0, description="the output order of the command")
 
@@ -274,7 +275,7 @@ class PyCommand(Generic[RESULT], Command[RESULT]):
             self,
             func: Callable[..., Coroutine[None, None, RESULT]] | Callable[..., RESULT],
             *,
-            chan: str = "",
+            chan: Optional[str] = None,
             name: Optional[str] = None,
             available: Callable[[], bool] | None = None,
             interface: Optional[StringType] = None,
@@ -295,10 +296,7 @@ class PyCommand(Generic[RESULT], Command[RESULT]):
         """
         self._chan = chan
         self._func_name = func.__name__
-        if not name:
-            name = self._func_name
-        fullname = self.make_fullname(self._chan, name)
-        self._name = fullname
+        self._name = name or self._func_name
         self._func = func
         self._func_itf = parse_function_interface(func)
         self._is_coroutine_func = inspect.iscoroutinefunction(func)
@@ -322,13 +320,7 @@ class PyCommand(Generic[RESULT], Command[RESULT]):
                 break
         self._delta_arg = delta_arg
 
-    @classmethod
-    def make_fullname(cls, chan: str, name: str) -> str:
-        return f"{chan}_{name}" if chan else name
-
     def name(self) -> str:
-        if self._meta is not None:
-            return self._meta.name
         return self._name
 
     def is_available(self) -> bool:
@@ -341,6 +333,7 @@ class PyCommand(Generic[RESULT], Command[RESULT]):
             return meta
 
         meta = CommandMeta(name=self._name)
+        meta.chan = self._chan or ""
         meta.description = self._unwrap_string_type(self._doc_or_fn, meta.description)
         meta.interface = self._gen_interface(meta.name, meta.description)
         meta.available = self.is_available()
@@ -387,7 +380,7 @@ class PyCommand(Generic[RESULT], Command[RESULT]):
             return await task
 
 
-CommandTaskContextVar = contextvars.ContextVar("MOSShell_CommandTaskContext")
+CommandTaskContextVar = contextvars.ContextVar("MOSShel_CommandTask")
 
 
 class CommandTask(Generic[RESULT], ABC):
@@ -421,15 +414,15 @@ class CommandTask(Generic[RESULT], ABC):
 
     def set_context_var(self) -> None:
         """通过 context var 来传递 context"""
-        CommandTaskContextVar.set(self.context)
+        CommandTaskContextVar.set(self)
 
-    @staticmethod
-    def get_context_var() -> Dict[str, Any]:
-        """获取 context var"""
-        try:
-            return CommandTaskContextVar.get()
-        except LookupError:
-            return dict()
+    @classmethod
+    def get_from_context(cls) -> Optional["CommandTask"]:
+        """
+        从 context var 中获取 task.
+        :raise: LookupError
+        """
+        return CommandTaskContextVar.get()
 
     @abstractmethod
     def done(self) -> bool:

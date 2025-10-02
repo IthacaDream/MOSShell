@@ -1,4 +1,5 @@
 import asyncio
+import contextvars
 import threading
 from abc import ABC, abstractmethod
 from typing import (
@@ -10,6 +11,11 @@ from ghoshell_moss.concepts.command import Command, CommandMeta, CommandTask
 from ghoshell_container import IoCContainer, INSTANCE, Provider, BINDING
 from pydantic import BaseModel, Field
 from contextlib import asynccontextmanager
+
+__all__ = [
+    'FunctionCommand', 'LifecycleFunction', 'PrompterCommand', 'StringType',
+    'ChannelMeta', 'Channel', 'ChannelServer', 'ChannelClient',
+]
 
 FunctionCommand = Union[Callable[..., Coroutine], Callable[..., Any]]
 """通常要求是异步函数, 如果是同步函数的话, 会卸载到线程池运行"""
@@ -38,7 +44,7 @@ class ChannelMeta(BaseModel):
     # context: str = Field(default="", description="the runtime context of the channel.")
 
 
-class Client(Protocol):
+class ChannelClient(Protocol):
     """
     channel 的运行时方法.
     只有在 channel.start 之后才可使用.
@@ -81,7 +87,7 @@ class Client(Protocol):
         pass
 
     @abstractmethod
-    def get_command(self, name: str, *, is_fullname: bool = False) -> Optional[Command]:
+    def get_command(self, name: str) -> Optional[Command]:
         """
         查找一个 command.
         不递归.
@@ -89,7 +95,7 @@ class Client(Protocol):
         pass
 
     @abstractmethod
-    async def execute(self, name: str, *args, **kwargs) -> Any:
+    async def execute(self, task: CommandTask[R]) -> R:
         """
         在 channel 自带的上下文中执行一个 task.
         不递归.
@@ -259,6 +265,9 @@ class Builder(ABC):
         pass
 
 
+ChannelContextVar = contextvars.ContextVar('MOSShell_Channel')
+
+
 class Channel(ABC):
     """
     Shell 可以使用的命令通道.
@@ -271,9 +280,19 @@ class Channel(ABC):
         """
         pass
 
+    def set_context_var(self) -> None:
+        ChannelContextVar.set(self)
+
+    @classmethod
+    def get_from_context(cls) -> Optional[Self]:
+        try:
+            return ChannelContextVar.get()
+        except LookupError:
+            return None
+
     @property
     @abstractmethod
-    def client(self) -> Client:
+    def client(self) -> ChannelClient:
         """
         Channel 在 bootstrap 之后返回的运行时.
         :raise RuntimeError: Channel 没有运行
@@ -286,7 +305,15 @@ class Channel(ABC):
     def with_children(self, *children: "Channel", parent: Optional[str] = None) -> Self:
         """
         添加子 Channel 到当前 Channel. 形成树状关系.
-        :raise KeyError: 如果出现重名会发出这个异常.
+        :raise LookupError: 如果出现重名会发出这个异常.
+        """
+        pass
+
+    @abstractmethod
+    def new_child(self, name: str) -> Self:
+        """
+        生成一个子 channel.
+        :raise NotImplementError: 没有实现的话.
         """
         pass
 
@@ -321,7 +348,7 @@ class Channel(ABC):
         pass
 
     @abstractmethod
-    def bootstrap(self, container: Optional[IoCContainer] = None, depth: int = 0) -> "Client":
+    def bootstrap(self, container: Optional[IoCContainer] = None, depth: int = 0) -> "ChannelClient":
         """
         传入一个父容器, 启动 Channel. 同时生成 Runtime.
         真正运行的是 channel runtime.
