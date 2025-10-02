@@ -3,6 +3,7 @@ from abc import ABC, abstractmethod
 import asyncio
 from typing import List, Tuple, Protocol, Coroutine, Callable, Any, Optional
 from typing_extensions import Self
+from ghoshell_container import get_caller_info
 from contextlib import asynccontextmanager
 from ghoshell_common.helpers import Timeleft
 
@@ -14,9 +15,11 @@ class ThreadSafeEvent:
     thread-safe event
     """
 
-    def __init__(self):
+    def __init__(self, debug: bool = False):
         self.thread_event = threading.Event()
         self.awaits_events: List[Tuple[asyncio.AbstractEventLoop, asyncio.Event]] = []
+        self.debug = debug
+        self.set_at: Optional[str] = None
         self._lock = threading.Lock()
 
     def is_set(self) -> bool:
@@ -26,7 +29,12 @@ class ThreadSafeEvent:
         return self.thread_event.wait(timeout)
 
     def set(self) -> None:
+        if self.thread_event.is_set():
+            return
         self.thread_event.set()
+        if self.debug:
+            self.set_at = get_caller_info(2)
+
         with self._lock:
             for loop, event in self.awaits_events.copy():
                 loop.call_soon_threadsafe(event.set)

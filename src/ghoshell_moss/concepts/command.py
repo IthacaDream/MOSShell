@@ -425,7 +425,6 @@ class CommandTask(Generic[RESULT], ABC):
     state: CommandTaskStateType
     errcode: int = 0
     errmsg: Optional[str] = None
-    result: Optional[RESULT] = None
 
     # --- debug --- #
 
@@ -435,6 +434,10 @@ class CommandTask(Generic[RESULT], ABC):
 
     done_at: Optional[str] = None
     """最后产生结果的 fail/cancel/resolve 函数被调用的代码位置."""
+
+    @abstractmethod
+    def result(self) -> Optional[RESULT]:
+        pass
 
     def set_context_var(self) -> None:
         """通过 context var 来传递 context"""
@@ -560,7 +563,7 @@ class CommandTask(Generic[RESULT], ABC):
         """典型的案例如何使用一个 command task. 有状态的运行逻辑. """
         if self.done():
             self.raise_exception()
-            return self.result
+            return self._result
 
         if self.func is None:
             # func 为 none 的情况下, 完全依赖外部运行赋值.
@@ -579,7 +582,7 @@ class CommandTask(Generic[RESULT], ABC):
                 self.resolve(result)
             else:
                 self.raise_exception()
-            return self.result
+            return self._result
 
         except asyncio.CancelledError:
             if not self.done():
@@ -629,10 +632,13 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
         self.trace: Dict[CommandTaskStateType, float] = {
             "created": time.time(),
         }
-        self.result: Optional[RESULT] = None
+        self._result: Optional[RESULT] = None
         self._done_event: ThreadSafeEvent = ThreadSafeEvent()
         self._done_lock = threading.Lock()
         self._done_callbacks = set()
+
+    def result(self) -> Optional[RESULT]:
+        return self._result
 
     def add_done_callback(self, fn: Callable[[CommandTask], None]):
         self._done_callbacks.add(fn)
@@ -675,7 +681,7 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
         self._set_result(None, 'cancelled', CommandErrorCode.CANCEL_CODE, reason)
 
     def clear(self) -> None:
-        self.result = None
+        self._result = None
         self._done_event.clear()
         self.errcode = 0
         self.errmsg = None
@@ -692,7 +698,7 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
             if self._done_event.is_set():
                 return False
             done_at = done_at or get_caller_info(3)
-            self.result = result
+            self._result = result
             self.errcode = errcode
             self.errmsg = errmsg
             self.done_at = done_at
@@ -750,12 +756,12 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
         if self._done_event.is_set():
             if throw:
                 self.raise_exception()
-            return self.result
+            return self._result
 
         await asyncio.wait_for(self._done_event.wait(), timeout=timeout)
         if throw:
             self.raise_exception()
-        return self.result
+        return self._result
 
     def wait_sync(self, *, throw: bool = True, timeout: float | None = None) -> Optional[RESULT]:
         """
@@ -765,7 +771,7 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
             raise TimeoutError(f"wait timeout: {timeout}")
         if throw:
             self.raise_exception()
-        return self.result
+        return self._result
 
 
 class WaitDoneTask(BaseCommandTask):

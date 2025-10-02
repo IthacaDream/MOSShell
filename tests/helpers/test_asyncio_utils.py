@@ -132,3 +132,19 @@ async def test_notify_tree_baseline():
 
     await foo()
     assert order[2] == 'foo'
+
+
+def test_wait_the_event_timeout():
+    event = ThreadSafeEvent()
+    errors = []
+
+    async def main():
+        try:
+            await asyncio.wait_for(event.wait(), timeout=0.2)
+        except asyncio.TimeoutError as e:
+            errors.append(e)
+
+    asyncio.run(main())
+
+    assert len(errors) == 1
+    assert isinstance(errors[0], asyncio.TimeoutError)

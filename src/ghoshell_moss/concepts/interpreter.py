@@ -3,6 +3,12 @@ from typing_extensions import Self
 from ghoshell_moss.concepts.command import CommandToken, CommandTask
 from abc import ABC, abstractmethod
 
+__all__ = [
+    'CommandTokenParser',
+    'CommandTaskParserElement',
+    "Interpreter",
+]
+
 CommandTokenCallback = Callable[[CommandToken | None], None]
 CommandTaskCallback = Callable[[CommandTask | None], None]
 
@@ -76,7 +82,7 @@ class CommandTokenParser(ABC):
         self.close()
 
 
-class CommandTaskElement(ABC):
+class CommandTaskParserElement(ABC):
     """
     CommandTaskElement works like AST but in realtime.
     It accepts command token from a stream, and generate command task concurrently.
@@ -92,7 +98,7 @@ class CommandTaskElement(ABC):
     current: Optional[CommandTask] = None
     """the current command task of this element, created by `start` type command token"""
 
-    children: Dict[str, "CommandTaskElement"]
+    children: Dict[str, "CommandTaskParserElement"]
     """the children element of this element"""
 
     @abstractmethod
@@ -167,7 +173,7 @@ class Interpreter(ABC):
         pass
 
     @abstractmethod
-    def root_task_element(self) -> CommandTaskElement:
+    def root_task_element(self) -> CommandTaskParserElement:
         """
         当前 Interpreter 做树形 Command Token 解析时使用的 Element 对象. debug 用.
         通常运行在独立的线程池中.

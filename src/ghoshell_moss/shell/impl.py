@@ -104,7 +104,7 @@ class DefaultShell(MOSSShell):
         self._check_running()
         try:
             if task is not None:
-                asyncio.run_coroutine_threadsafe(self._main_channel_runtime.append(task), self._running_loop)
+                self._main_channel_runtime.append(task)
         except Exception as exc:
             self.logger.exception(exc)
             self._stop_event.set()
@@ -221,9 +221,9 @@ class DefaultShell(MOSSShell):
                     result[name] = wrapped
         return commands
 
-    async def append(self, *tasks: CommandTask) -> None:
+    def append(self, *tasks: CommandTask) -> None:
         self._check_running()
-        await self._main_channel_runtime.append(*tasks)
+        self._main_channel_runtime.append(*tasks)
 
     async def clear(self, *chans: str) -> None:
         self._check_running()

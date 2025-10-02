@@ -267,7 +267,7 @@ class MOSSShell(ABC):
     # --- runtime methods --- #
 
     @abstractmethod
-    async def append(self, *tasks: CommandTask) -> None:
+    def append(self, *tasks: CommandTask) -> None:
         """
         添加 task 到运行时.
         """

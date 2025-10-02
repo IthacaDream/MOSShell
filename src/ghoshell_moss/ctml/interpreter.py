@@ -1,6 +1,6 @@
 from typing import Optional, Iterable, Dict, List, AsyncIterable
 from ghoshell_moss.concepts.interpreter import (
-    Interpreter, CommandTaskCallback, CommandTaskElement, CommandTokenParser,
+    Interpreter, CommandTaskCallback, CommandTaskParserElement, CommandTokenParser,
 )
 from ghoshell_moss.concepts.shell import Output
 from ghoshell_moss.concepts.command import CommandToken, Command, CommandTask
@@ -143,7 +143,7 @@ class CTMLInterpreter(Interpreter):
     def parser(self) -> CommandTokenParser:
         return self._parser
 
-    def root_task_element(self) -> CommandTaskElement:
+    def root_task_element(self) -> CommandTaskParserElement:
         return self._root_element
 
     def parsed_tokens(self) -> Iterable[CommandToken]:

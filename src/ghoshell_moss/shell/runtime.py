@@ -20,7 +20,7 @@ class ChannelRuntime(ABC):
     name: str
 
     @abstractmethod
-    async def append(self, *tasks: CommandTask) -> None:
+    def append(self, *tasks: CommandTask) -> None:
         """
         添加 task 到运行时的队列中.
         """
@@ -135,13 +135,10 @@ class ChannelRuntimeImpl(ChannelRuntime):
         # 输入队列, 只是为了足够快地输入. 当执行 cancel 的时候, executing_queue 会被清空, 但 pending queue 不会被清空.
         # 这种队列是为了 call_soon 的特殊 feature 做准备, 同时又不会在执行时阻塞解析. 解析的速度要求是全并行的.
         self._pending_queue: asyncio.Queue[CommandTask | None] = asyncio.Queue()
-        self._pending_queue_locker = asyncio.Lock()
 
         # 消费队列. 如果队列里的数据是 None, 表示这个队列被丢弃了.
         self._executing_queue: asyncio.Queue[CommandTask | None] = asyncio.Queue()
-        self._executing_queue_locker = asyncio.Lock()
         self._executing_block_task: bool = False
-        self._allow_executing_event = asyncio.Event()
 
         # main loop
         self._main_loop_task: Optional[asyncio.Task] = None
@@ -214,9 +211,9 @@ class ChannelRuntimeImpl(ChannelRuntime):
 
     def _check_running(self):
         if not self._started:
-            raise RuntimeError(f"Channel {self.name} is not running")
+            raise RuntimeError(f"Channel `{self.name}` is not running")
         elif self._stop_event.is_set():
-            raise RuntimeError(f"Channel {self.name} is shutdown")
+            raise RuntimeError(f"Channel `{self.name}` is shutdown")
 
     def is_running(self) -> bool:
         """
@@ -318,15 +315,15 @@ class ChannelRuntimeImpl(ChannelRuntime):
         return await asyncio.wait_for(self.is_idle_notifier.wait(), timeout)
 
     # --- append & pending --- #
-    async def append(self, *tasks: CommandTask) -> None:
+    def append(self, *tasks: CommandTask) -> None:
         if not self.is_running():
             raise InterpretError(f"Channel {self.name} is not running")
         task_list = list(tasks)
         if len(task_list) == 0:
             return
 
-        await self._pending_queue_locker.acquire()
         try:
+            _queue = self._pending_queue
             for _task in tasks:
                 if _task is None:
                     continue
@@ -335,17 +332,16 @@ class ChannelRuntimeImpl(ChannelRuntime):
                     # 丢弃掉已经被取消的任务.
                     # todo: log
                     continue
-                # 每个 item 都重新发送一次.
-                _queue = self._pending_queue
                 _task.set_state('pending')
-                _queue.put_nowait(_task)
-        finally:
-            self._pending_queue_locker.release()
+                self._running_event_loop.call_soon_threadsafe(_queue.put_nowait, _task)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            self.logger.exception(e)
 
     async def clear_pending(self) -> None:
         """无锁的清空实现. """
         self._check_running()
-        await self._pending_queue_locker.acquire()
         try:
             # 先清空自身的队列.
             # 同步阻塞清空.
@@ -369,23 +365,17 @@ class ChannelRuntimeImpl(ChannelRuntime):
             # 所有没有管理的异常, 都是致命异常.
             self._stop_event.set()
             raise exc
-        finally:
-            self._pending_queue_locker.release()
 
     async def _consume_pending_loop(self) -> None:
         try:
             while not self._stop_event.is_set():
-                await self._pending_queue_locker.acquire()
-                try:
-                    _pending_queue = self._pending_queue
-                    item = await _pending_queue.get()
-                    if item is None:
-                        continue
-                    await self._add_executing_task(item)
-                except asyncio.CancelledError:
-                    break
-                finally:
-                    self._pending_queue_locker.release()
+                _pending_queue = self._pending_queue
+                item = await _pending_queue.get()
+                if item is None:
+                    continue
+                await self._add_executing_task(item)
+        except asyncio.CancelledError as e:
+            self.logger.info("Cancelling pending task: %r", e)
 
         except Exception as e:
             self.logger.exception(e)
@@ -411,7 +401,6 @@ class ChannelRuntimeImpl(ChannelRuntime):
             finally:
                 self._defer_clear = False
 
-        await self._executing_queue_locker.acquire()
         try:
             # call soon
             if task.meta.call_soon:
@@ -421,7 +410,7 @@ class ChannelRuntimeImpl(ChannelRuntime):
                     # 先清空.
                     await self.cancel_executing()
                     # 丢入执行队列中.
-                    await self._executing_queue.put(task)
+                    self._executing_queue.put_nowait(task)
                     return
                 else:
                     # 立刻执行, 实际上会生成一个 none block 的 task.
@@ -430,13 +419,15 @@ class ChannelRuntimeImpl(ChannelRuntime):
                     return
             else:
                 # 丢到阻塞队列里.
-                await self._executing_queue.put(task)
-        finally:
-            self._executing_queue_locker.release()
+                self._executing_queue.put_nowait(task)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            self.logger.exception(e)
+            self._stop_event.set()
 
     async def cancel_executing(self) -> None:
         self._check_running()
-        await self._executing_queue_locker.acquire()
         try:
             # 准备并发 cancel 所有的运行.
             cancel_running = [self._cancel_self_executing()]
@@ -450,8 +441,6 @@ class ChannelRuntimeImpl(ChannelRuntime):
             self.logger.exception(exc)
             self._stop_event.set()
             raise FatalError("channel %s cancel executing failed" % self.name) from exc
-        finally:
-            self._executing_queue_locker.release()
 
     async def _cancel_self_executing(self) -> None:
         """取消掉正在运行中的 task. """
@@ -479,30 +468,40 @@ class ChannelRuntimeImpl(ChannelRuntime):
             policy_is_running = False
 
             while not self._stop_event.is_set():
-                # 每次重新去获取 queue. 由于 queue 可能被丢弃, 所以一定要一次只执行一步.
-                item = await self._pop_executing_queue_task()
-                if item is None:
-                    if not policy_is_running:
-                        # 启动 policy.
-                        await self._start_self_policy()
-                    elif not self.is_idle_notifier.is_self_set():
-                        # 设置已经闲了.
-                        self.is_idle_notifier.set()
-                    # 进入下个循环.
-                    continue
+                try:
+                    # 每次重新去获取 queue. 由于 queue 可能被丢弃, 所以一定要一次只执行一步.
+                    _queue = self._executing_queue
+                    item = None
+                    if not _queue.empty() or self.is_idle_notifier.is_self_set():
+                        # 用短时间来尝试获取.
+                        item = await _queue.get()
 
-                # 有任务在执行, 怎么都 clear 一下.
-                self.is_idle_notifier.clear()
-                if policy_is_running:
-                    # 阻塞等待 policy 停止运行.
-                    await self._pause_self_policy()
+                    if item is None:
+                        if not policy_is_running:
+                            # 启动 policy.
+                            await self._start_self_policy()
+                            policy_is_running = True
+                        elif not self.is_idle_notifier.is_self_set():
+                            # 设置已经闲了.
+                            self.is_idle_notifier.set()
+                        # 进入下个循环.
+                        continue
 
-                # 获取最早的一个任务.
-                # 运行一个任务. 理论上是很快的调度.
-                # 这个任务不运行结束, 不会释放运行状态. 它如果是同步阻塞的, 则阻塞后续的 task 消费.
-                await self._execute_task(item)
-        except asyncio.CancelledError:
-            self.logger.info(f"channel {self.name} executing loop cancelled")
+                    # 有任务在执行, 怎么都 clear 一下.
+                    self.is_idle_notifier.clear()
+                    if policy_is_running:
+                        # 阻塞等待 policy 停止运行.
+                        await self._pause_self_policy()
+                        policy_is_running = False
+
+                    # 获取最早的一个任务.
+                    # 运行一个任务. 理论上是很快的调度.
+                    # 这个任务不运行结束, 不会释放运行状态. 它如果是同步阻塞的, 则阻塞后续的 task 消费.
+                    await self._execute_task(item)
+                except asyncio.CancelledError as e:
+                    self.logger.error(f"channel {self.name} loop got cancelled: %s", e)
+                except Exception as e:
+                    self.logger.exception(e)
         except Exception as e:
             self.logger.exception(e)
             self._stop_event.set()
@@ -532,34 +531,11 @@ class ChannelRuntimeImpl(ChannelRuntime):
         except Exception as e:
             self.logger.exception(e)
 
-    async def _pop_executing_queue_task(self) -> Optional[CommandTask]:
-        # 每次重新去获取 queue. 由于 queue 可能被丢弃, 所以一定要一次只执行一步.
-        acquired = False
-        try:
-            if not self._allow_executing_event.is_set():
-                await asyncio.wait_for(self._allow_executing_event.wait(), timeout=0.1)
-
-            await self._executing_queue_locker.acquire()
-            acquired = True
-            _queue = self._executing_queue
-            # 队列为空的情况, 启动 policy 运行.
-            if _queue.empty() and self._pending_queue.empty():
-                return None
-
-            # 用短时间来尝试获取.
-            return await asyncio.wait_for(_queue.get(), 0.1)
-
-        except asyncio.TimeoutError:
-            # 没有等待到结果, 继续下一步.
-            return None
-        finally:
-            if acquired:
-                self._executing_queue_locker.release()
-
     async def _execute_task(self, cmd_task: CommandTask) -> None:
         """执行一个 task. 核心目标是最快速度完成调度逻辑, 或者按需阻塞链路.  """
         try:
-            if self._send_task_to_child_if_not_own(cmd_task):
+            sent = await self._send_task_to_child_if_not_own(cmd_task)
+            if sent:
                 # 不是自己的任务, 快速分发.
                 return
             block = cmd_task.meta.block
@@ -663,7 +639,8 @@ class ChannelRuntimeImpl(ChannelRuntime):
                 if owner.done():
                     # 不要继续执行了.
                     break
-                if self._send_task_to_child_if_not_own(sub_task):
+                sent = await self._send_task_to_child_if_not_own(sub_task)
+                if sent:
                     # 发送给子孙了.
                     continue
 
@@ -700,25 +677,25 @@ class ChannelRuntimeImpl(ChannelRuntime):
         """判断一个 task 是不是自己的."""
         execution_channel_name = cmd_task.meta.chan
         if execution_channel_name == self.name:
+            # 就是自己, 不用发送.
             return False
         elif execution_channel_name == "":
             # 主轨命令都是自身执行, 不管谁调度来的.
             return False
-        if execution_channel_name in self.children_runtimes:
-            await self.children_runtimes[execution_channel_name].append(cmd_task)
-            return True
 
         children_channels = self.channel.children()
         if execution_channel_name in children_channels:
             child_channel = children_channels[execution_channel_name]
             child_runtime = await self.get_or_create_child_runtime(child_channel)
-            await child_runtime.append(cmd_task)
+            child_runtime.append(cmd_task)
             return True
 
         for child_channel in children_channels.values():
+            # 判断是不是在一个 child channel 的子孙节点里.
             if execution_channel_name in child_channel.descendants():
+                # 如果是, 命令也只发送给子节点.
                 child_runtime = await self.get_or_create_child_runtime(child_channel)
-                await child_runtime.append(cmd_task)
+                child_runtime.append(cmd_task)
                 return True
 
         # 丢弃掉不认识的.
@@ -731,7 +708,7 @@ class ChannelRuntimeImpl(ChannelRuntime):
         """真正运行一个 command task 了. """
         if cmd_task.done():
             cmd_task.raise_exception()
-            return cmd_task.result
+            return cmd_task.result()
 
         cmd_task.exec_chan = self.name
         # 准备好 ctx. 包含 channel 的容器, 还有 command task 的 context 数据.
@@ -819,3 +796,11 @@ class ChannelRuntimeImpl(ChannelRuntime):
         await self.clear_pending()
         # defer clear 不需要递归. 因为所有子节点的任务来自父节点.
         self._defer_clear = True
+
+    async def __aenter__(self):
+        await self.start()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close()
+        return None
