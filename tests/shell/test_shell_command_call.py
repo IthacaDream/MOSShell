@@ -2,6 +2,8 @@ import asyncio
 
 import pytest
 
+from ghoshell_moss.concepts.interpreter import Interpreter
+
 
 @pytest.mark.asyncio
 async def test_shell_execution_baseline():
@@ -21,13 +23,17 @@ async def test_shell_execution_baseline():
         return 456
 
     async with shell:
-        async with shell.interpret() as interpreter:
-            interpreter.feed("<foo /><bar />")
-            tasks = await interpreter.wait_execution_done()
+        interpreter = shell.interpret()
+        assert isinstance(interpreter, Interpreter)
+        async with interpreter:
+            interpreter.feed("<a:foo /><b:bar />")
+            tasks = await interpreter.wait_execution_done(0.1)
 
             assert len(tasks) == 2
             result = []
             for task in tasks.values():
-                assert task.done()
-                result.append(task.result())
+                assert task.success()
+                result.append(task.result)
+            # 获取到结果.
             assert result == [123, 456]
+            assert ['a', 'b'] == [t.exec_chan for t in tasks.values()]

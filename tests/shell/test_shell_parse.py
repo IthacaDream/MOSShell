@@ -6,6 +6,7 @@ import pytest
 async def test_shell_parse_tokens_baseline():
     shell = DefaultShell()
     async with shell:
+        assert shell.is_running()
         tokens = []
         async for token in shell.parse_tokens("<foo />"):
             tokens.append(token)

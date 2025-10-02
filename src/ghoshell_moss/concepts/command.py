@@ -10,7 +10,8 @@ from typing_extensions import Self
 from ghoshell_common.helpers import uuid, generate_import_path
 from ghoshell_moss.helpers.func import parse_function_interface
 from ghoshell_moss.helpers.asyncio_utils import ThreadSafeEvent, ensure_tasks_done_or_cancel
-from .errors import CommandError
+from ghoshell_moss.concepts.errors import CommandError
+from ghoshell_container import get_caller_info
 from pydantic import BaseModel, Field
 from enum import Enum
 import traceback
@@ -406,6 +407,12 @@ class CommandTask(Generic[RESULT], ABC):
     trace: Dict[CommandTaskStateType, float] = {}
     result: Optional[RESULT] = None
     meta: CommandMeta
+    exec_chan: Optional[str] = None
+    """被运行的 channel 是"""
+
+    done_at: Optional[str] = None
+    """最后产生结果的代码位置."""
+
     func: Callable[..., Coroutine[None, None, RESULT]] | None
     """如果 Func 为 None, 则表示 task 只能靠外部 resolve 来赋值. """
 
@@ -431,8 +438,18 @@ class CommandTask(Generic[RESULT], ABC):
         """
         pass
 
+    def success(self) -> bool:
+        return self.done() and self.state == "done"
+
+    def cancelled(self) -> bool:
+        return self.done() and self.state == "cancelled"
+
     @abstractmethod
     def add_done_callback(self, fn: Callable[[Self], None]):
+        pass
+
+    @abstractmethod
+    def remove_done_callback(self, fn: Callable[[Self], None]):
         pass
 
     @abstractmethod
@@ -560,7 +577,11 @@ class CommandTask(Generic[RESULT], ABC):
                 self.cancel()
 
     def __repr__(self):
-        return f"<CommandTask name=`{self.meta.name}` cid=`{self.cid}` tokens=`{self.tokens}` args=`{self.args}` kwargs=`{self.kwargs}`>"
+        return (f"<CommandTask name=`{self.meta.name}` chan=`{self.meta.chan}` "
+                f"args=`{self.args}` kwargs=`{self.kwargs}`"
+                f"cid=`{self.cid}` tokens=`{self.tokens}` "
+                f"state=`{self.state}` done_at=`{self.done_at}` "
+                f">")
 
 
 class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
@@ -594,10 +615,14 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
         self.result: Optional[RESULT] = None
         self._done_event: ThreadSafeEvent = ThreadSafeEvent()
         self._done_lock = threading.Lock()
-        self._done_callbacks = []
+        self._done_callbacks = set()
 
     def add_done_callback(self, fn: Callable[[CommandTask], None]):
-        self._done_callbacks.append(fn)
+        self._done_callbacks.add(fn)
+
+    def remove_done_callback(self, fn: Callable[[CommandTask], None]):
+        if fn in self._done_callbacks:
+            self._done_callbacks.remove(fn)
 
     def copy(self, cid: str = "") -> Self:
         cid = cid or uuid()
@@ -644,13 +669,16 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
             state: CommandTaskStateType,
             errcode: int,
             errmsg: Optional[str],
+            done_at: Optional[str] = None,
     ) -> bool:
         with self._done_lock:
             if self._done_event.is_set():
                 return False
+            done_at = done_at or get_caller_info(3)
             self.result = result
             self.errcode = errcode
             self.errmsg = errmsg
+            self.done_at = done_at
             self._done_event.set()
             self.set_state(state)
             # 运行结束的回调.
@@ -664,7 +692,6 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
             return True
 
     def fail(self, error: Exception | str) -> None:
-        import sys
         if not self._done_event.is_set():
             if isinstance(error, str):
                 errmsg = error

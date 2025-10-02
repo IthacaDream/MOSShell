@@ -154,7 +154,7 @@ class Interpreter(ABC):
         pass
 
     @abstractmethod
-    def with_callback(self, callback: CommandTaskCallback) -> None:
+    def with_callback(self, *callbacks: CommandTaskCallback) -> None:
         pass
 
     @abstractmethod
@@ -278,9 +278,10 @@ class Interpreter(ABC):
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.stop()
+        return None
 
     @abstractmethod
-    async def wait_parse_done(self) -> None:
+    async def wait_parse_done(self, timeout: float | None = None) -> None:
         """
         等待解释过程完成. 完成有两种情况:
         1. 输入已经完备.
@@ -292,7 +293,7 @@ class Interpreter(ABC):
         pass
 
     @abstractmethod
-    async def wait_execution_done(self) -> Dict[str, CommandTask]:
+    async def wait_execution_done(self, timeout: float | None = None) -> Dict[str, CommandTask]:
         pass
 
     @abstractmethod

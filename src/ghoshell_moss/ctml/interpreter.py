@@ -8,7 +8,7 @@ from ghoshell_moss.concepts.errors import CommandError
 from ghoshell_moss.ctml.token_parser import CTMLTokenParser
 from ghoshell_moss.ctml.elements import CommandTaskElementContext
 from ghoshell_moss.helpers.asyncio_utils import ThreadSafeEvent
-from ghoshell_common.helpers import uuid
+from ghoshell_common.helpers import uuid, Timeleft
 import logging
 import asyncio
 import queue
@@ -135,8 +135,10 @@ class CTMLInterpreter(Interpreter):
         self._committed = True
         self._input_deltas_queue.put_nowait(None)
 
-    def with_callback(self, callback: CommandTaskCallback) -> None:
-        self._callbacks.append(callback)
+    def with_callback(self, *callbacks: CommandTaskCallback) -> None:
+        callbacks = list(callbacks)
+        callbacks.extend(self._callbacks)
+        self._callbacks = callbacks
 
     def parser(self) -> CommandTokenParser:
         return self._parser
@@ -213,9 +215,6 @@ class CTMLInterpreter(Interpreter):
         except Exception as exc:
             self._logger.exception(exc)
         finally:
-            for task in self._parsed_tasks.values():
-                if not task.done():
-                    task.cancel()
             self._main_loop_done.set()
 
     async def start(self) -> None:
@@ -247,32 +246,42 @@ class CTMLInterpreter(Interpreter):
     def is_interrupted(self) -> bool:
         return self._interrupted
 
-    async def wait_parse_done(self) -> None:
+    async def wait_parse_done(self, timeout: float | None = None) -> None:
         if not self._started:
             return
         self.commit()
         # 等待主循环结束.
-        await self._main_loop_done.wait()
+        await asyncio.wait_for(self._main_loop_done.wait(), timeout=timeout)
         if self._fatal_exception:
             raise self._fatal_exception
 
-    async def wait_execution_done(self) -> Dict[str, CommandTask]:
-        await self.wait_parse_done()
+    async def wait_execution_done(self, timeout: float | None = None) -> Dict[str, CommandTask]:
+        timeleft = Timeleft(timeout or 0)
+        await self.wait_parse_done(timeout)
         waits = []
-        tasks = list(self._parsed_tasks.values())
-        for task in tasks:
+        tasks = self.parsed_tasks()
+        for task in tasks.values():
             waits.append(task.wait())
         try:
             if len(waits) > 0:
-                await asyncio.gather(*waits, return_exceptions=False)
-
-            return self.parsed_tasks()
+                gathered = asyncio.gather(*waits, return_exceptions=True)
+                stopped = asyncio.create_task(self._stopped_event.wait())
+                # ignore
+                done, pending = await asyncio.wait(
+                    [gathered, stopped],
+                    timeout=timeleft.left() or None,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+            return tasks
         except asyncio.CancelledError:
-            pass
+            return tasks
         except CommandError:
-            pass
+            return tasks
+        except asyncio.TimeoutError as e:
+            self._logger.exception(e)
+            raise asyncio.TimeoutError(f"Timed out waiting for tasks to complete")
         finally:
-            for task in tasks:
+            for task in tasks.values():
                 if not task.done():
                     task.cancel("execution done")
 

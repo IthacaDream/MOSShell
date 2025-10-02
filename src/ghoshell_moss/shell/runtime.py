@@ -164,17 +164,20 @@ class ChannelRuntimeImpl(ChannelRuntime):
         self._running_event_loop = loop
         # 自身的启动.
         # 最后才启动主循环.
-        start_runtimes = [self._self_bootstrap()]
+        try:
+            start_runtimes = [self._self_bootstrap()]
 
-        for channel in self.channel.children().values():
-            name = channel.name()
-            if name not in self.children_runtimes:
-                runtime = self.make_child_runtime(channel)
-                start_runtimes.append(runtime.start())
-                self.children_runtimes[name] = runtime
+            for channel in self.channel.children().values():
+                name = channel.name()
+                if name not in self.children_runtimes:
+                    runtime = self.make_child_runtime(channel)
+                    start_runtimes.append(runtime.start())
+                    self.children_runtimes[name] = runtime
 
-        # 启动所有已知的 children 节点.
-        await asyncio.gather(*start_runtimes)
+            # 启动所有已知的 children 节点.
+            await asyncio.gather(*start_runtimes)
+        except Exception as e:
+            raise FatalError(f"Failed to start channel {self.name}") from e
 
     async def _self_bootstrap(self):
         # 创建主任务.
@@ -228,7 +231,7 @@ class ChannelRuntimeImpl(ChannelRuntime):
         self._check_running()
         if not self.is_available():
             return []
-        yield from self.channel.client.commands(available_only)
+        yield from self.channel.client.commands(available_only).values()
         if recursive:
             for child_runtime in self.children_runtimes.values():
                 yield from child_runtime.commands(recursive, available_only)
@@ -325,8 +328,10 @@ class ChannelRuntimeImpl(ChannelRuntime):
         await self._pending_queue_locker.acquire()
         try:
             for _task in tasks:
+                if _task is None:
+                    continue
                 # 快速入队.
-                if _task.done():
+                elif _task.done():
                     # 丢弃掉已经被取消的任务.
                     # todo: log
                     continue
@@ -728,6 +733,7 @@ class ChannelRuntimeImpl(ChannelRuntime):
             cmd_task.raise_exception()
             return cmd_task.result
 
+        cmd_task.exec_chan = self.name
         # 准备好 ctx. 包含 channel 的容器, 还有 command task 的 context 数据.
         ctx = contextvars.copy_context()
         self.channel.set_context_var()

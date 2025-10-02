@@ -2,6 +2,7 @@ import threading
 from abc import ABC, abstractmethod
 from typing import List, Iterable, Dict, Literal, Optional, AsyncIterable
 from ghoshell_moss.concepts.channel import Channel, ChannelMeta
+from ghoshell_moss.concepts.errors import FatalError
 from ghoshell_moss.concepts.interpreter import Interpreter
 from ghoshell_moss.concepts.command import Command, CommandTask, CommandToken
 from ghoshell_container import IoCContainer
@@ -300,7 +301,7 @@ class MOSSShell(ABC):
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.close()
-        return self
+        return None
 
 
 class SyncShell:

@@ -102,7 +102,8 @@ class DefaultShell(MOSSShell):
 
     def _append_command_task(self, task: CommandTask | None) -> None:
         self._check_running()
-        self._running_loop.call_soon_threadsafe(self._main_channel_runtime.append, task)
+        if task is not None:
+            self._running_loop.call_soon_threadsafe(self._main_channel_runtime.append, task)
 
     def with_output(self, output: Output) -> None:
         self._output = output
@@ -198,7 +199,9 @@ class DefaultShell(MOSSShell):
         动态获取 commands. 因为可能会有变动.
         """
         self._check_running()
-        commands = {c.name(): c for c in self._main_channel_runtime.commands(recursive=True, available_only=available)}
+        commands = {}
+        for c in self._main_channel_runtime.commands(recursive=True, available_only=available):
+            commands[c.name()] = c
         if self._configured_channel_metas is None:
             return commands
         else:

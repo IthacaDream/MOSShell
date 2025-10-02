@@ -87,3 +87,11 @@ async def test_gather():
             for t in pending:
                 t.cancel()
             raise asyncio.CancelledError()
+
+
+@pytest.mark.asyncio
+async def test_wait_for():
+    event = asyncio.Event()
+
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(event.wait(), 0.01)

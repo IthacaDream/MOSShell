@@ -7,16 +7,15 @@ class InterpretError(Exception):
 
 
 class CommandError(Exception):
-    CANCEL_CODE = 10010
-    NOT_AVAILABLE = 10020
-    INVALID_USAGE = 10030
-    CHILDREN_FAILED = 10040
-    UNKNOWN_CODE = -1
+    CANCEL_CODE = "canceled"
+    NOT_AVAILABLE = "not_available"
+    INVALID_USAGE = "invalid_usage"
+    UNKNOWN_CODE = "unknown"
 
-    def __init__(self, code: int, message: str):
+    def __init__(self, code: str, message: str = ""):
         self.code = code
         self.message = message
-        super().__init__(f"Command failed with code {code}: {message}")
+        super().__init__(f"Command error `{code}`: {message}")
 
 
 class LoopStoppedError(Exception):
