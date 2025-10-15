@@ -3,13 +3,13 @@ import logging
 import threading
 from abc import ABC, abstractmethod
 from typing import (
-    TypedDict, Literal, Optional, Dict, Any, Awaitable, List, Generic, TypeVar, Tuple, Callable, Coroutine, Union,
-    is_typeddict, Protocol, Iterable, AsyncIterator
+    Literal, Optional, Dict, Any, List, Generic, TypeVar, Callable, Coroutine, Union,
+    Iterable, AsyncIterator
 )
 from typing_extensions import Self
-from ghoshell_common.helpers import uuid, generate_import_path
+from ghoshell_common.helpers import uuid
 from ghoshell_moss.helpers.func import parse_function_interface
-from ghoshell_moss.helpers.asyncio_utils import ThreadSafeEvent, ensure_tasks_done_or_cancel
+from ghoshell_moss.helpers.asyncio_utils import ThreadSafeEvent
 from ghoshell_moss.concepts.errors import CommandError, CommandErrorCode
 from ghoshell_container import get_caller_info
 from pydantic import BaseModel, Field
@@ -22,10 +22,13 @@ import contextvars
 __all__ = [
     'CommandToken', 'CommandTokenType',
     'Command', 'CommandMeta', 'PyCommand', 'CommandWrapper',
+    'CommandError', 'CommandErrorCode',
     'CommandType',
     'CommandTaskState', 'CommandTaskStateType',
     'CommandTask', 'BaseCommandTask',
     'CommandTaskStack',
+
+    'RESULT',
 
 ]
 
@@ -231,6 +234,9 @@ class Command(Generic[RESULT], ABC):
         返回 Command 的元信息.
         """
         pass
+
+    def __prompt__(self) -> str:
+        return self.meta().interface
 
     @abstractmethod
     async def __call__(self, *args, **kwargs) -> RESULT:
@@ -670,7 +676,7 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
         """
         停止命令.
         """
-        self._set_result(None, 'cancelled', CommandErrorCode.CANCEL_CODE, reason)
+        self._set_result(None, 'cancelled', CommandErrorCode.CANCELLED, reason)
 
     def clear(self) -> None:
         self._result = None
@@ -715,7 +721,7 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
                 errcode = error.code
                 errmsg = error.message
             elif isinstance(error, asyncio.CancelledError):
-                errcode = CommandErrorCode.CANCEL_CODE.value
+                errcode = CommandErrorCode.CANCELLED.value
                 errmsg = "".join(traceback.format_exception(error, limit=3))
             elif isinstance(error, Exception):
                 errcode = CommandErrorCode.UNKNOWN_CODE.value
@@ -749,10 +755,12 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
             if throw:
                 self.raise_exception()
             return self._result
-
-        await asyncio.wait_for(self._done_event.wait(), timeout=timeout)
-        if throw:
-            self.raise_exception()
+        if timeout is not None:
+            await asyncio.wait_for(self._done_event.wait(), timeout=timeout)
+        else:
+            await self._done_event.wait()
+        if throw and self.errcode != 0:
+            raise CommandError(self.errcode, self.errmsg or "")
         return self._result
 
     def wait_sync(self, *, throw: bool = True, timeout: float | None = None) -> Optional[RESULT]:

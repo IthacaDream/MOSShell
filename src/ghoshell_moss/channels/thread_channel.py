@@ -1,13 +1,13 @@
 from typing import Tuple
 from ghoshell_moss.channels.duplex import *
 import asyncio
-import threading
 from queue import Queue, Empty
 from ghoshell_container import Container, IoCContainer
 from ghoshell_moss.helpers.asyncio_utils import ThreadSafeEvent
 from ghoshell_common.helpers import Timeleft
 
 
+# --- 测试专用 Channel --- #
 # 测试专用的, 用多线程队列模拟一个 duplex channel.
 
 class Server2ClientConnection(Connection):
@@ -21,6 +21,10 @@ class Server2ClientConnection(Connection):
         self._closed = ThreadSafeEvent()
         self._send_queue = server_2_client_queue
         self._recv_queue = client_2_server_queue
+        self._is_available = True
+
+    def is_available(self) -> bool:
+        return not self._closed.is_set() and self._is_available
 
     async def recv(self, timeout: float | None = None) -> ChannelEvent:
         if self._closed.is_set():
@@ -72,6 +76,9 @@ class Client2ServerConnection(Connection):
         self._closed = ThreadSafeEvent()
         self._send_queue = client_2_server_queue
         self._recv_queue = server_2_client_queue
+
+    def is_available(self) -> bool:
+        return not self._closed.is_set()
 
     async def recv(self, timeout: float | None = None) -> ChannelEvent:
         if self._closed.is_set():
