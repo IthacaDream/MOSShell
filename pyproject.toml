@@ -20,6 +20,11 @@ zmq = [
 mcp = [
     "mcp[cli]>=1.17.0",
 ]
+demo = [
+    "live2d-py>=0.5.4",
+    "pygame>=2.6.1",
+    "pyside6>=6.10.0",
+]
 
 [tool.setuptools]
 packages = [
