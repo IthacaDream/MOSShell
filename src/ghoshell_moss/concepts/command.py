@@ -27,8 +27,9 @@ __all__ = [
     'CommandTaskState', 'CommandTaskStateType',
     'CommandTask', 'BaseCommandTask',
     'CommandTaskStack',
-
     'RESULT',
+    'CommandDeltaType', 'CommandDeltaTypeMap',
+    'CancelAfterOthersTask',
 
 ]
 
@@ -223,6 +224,15 @@ class Command(Generic[RESULT], ABC):
     @abstractmethod
     def name(self) -> str:
         pass
+
+    def unique_name(self) -> str:
+        meta = self.meta()
+        return self.make_uniquename(meta.chan, meta.name)
+
+    @staticmethod
+    def make_uniquename(chan: str, name: str) -> str:
+        prefix = chan + ":" if chan else ""
+        return f"{prefix}{name}"
 
     @abstractmethod
     def is_available(self) -> bool:

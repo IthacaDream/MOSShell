@@ -1,11 +1,10 @@
 import threading
 from abc import ABC, abstractmethod
-from typing import List, Iterable, Dict, Literal, Optional, AsyncIterable
+from typing import List, Dict, Literal, Optional, AsyncIterable
 from ghoshell_moss.concepts.channel import Channel, ChannelMeta
 from ghoshell_moss.concepts.interpreter import Interpreter
 from ghoshell_moss.concepts.command import Command, CommandTask, CommandToken
 from ghoshell_container import IoCContainer
-from contextlib import asynccontextmanager
 import asyncio
 
 __all__ = [
@@ -23,7 +22,9 @@ class OutputStream(ABC):
     id: str
     """所有文本片段都有独立的全局唯一id, 通常是 command_part_id"""
 
-    @abstractmethod
+    task: Optional[CommandTask] = None
+    committed: bool = False
+
     def buffer(self, text: str, *, complete: bool = False) -> None:
         """
         添加文本片段到输出流里.
@@ -33,10 +34,25 @@ class OutputStream(ABC):
         :param text: 文本片段
         :type complete: 输出流是否已经结束.
         """
+        if not self.committed and text:
+            self._buffer(text)
+            if self.task is not None:
+                self.task.tokens = self.buffered()
+        if not self.committed and complete:
+            self.commit()
+
+    def _buffer(self, text: str) -> None:
         pass
 
     def commit(self) -> None:
-        self.buffer("", complete=True)
+        if self.committed:
+            return
+        self.committed = True
+        self._commit()
+
+    @abstractmethod
+    def _commit(self) -> None:
+        pass
 
     def as_command_task(self, commit: bool = False) -> Optional[CommandTask]:
         """
@@ -44,6 +60,8 @@ class OutputStream(ABC):
         这个 command task 通常在主轨 (channel name == "") 中运行.
         """
         from ghoshell_moss.concepts.command import BaseCommandTask, CommandMeta, CommandWrapper
+        if self.task is not None:
+            return self.task
 
         if commit:
             self.commit()
@@ -65,6 +83,7 @@ class OutputStream(ABC):
         )
         task.cid = self.id
         task.tokens = self.buffered()
+        self.task = task
         return task
 
     @abstractmethod
@@ -204,6 +223,10 @@ class MOSSShell(ABC):
         """
         当前运行时所有的可用的命令.
         """
+        pass
+
+    @abstractmethod
+    def get_command(self, chan: str, name: str, /, exec_in_chan: bool = False) -> Optional[Command]:
         pass
 
     # --- interpret --- #

@@ -26,7 +26,7 @@ class CTMLInterpreter(Interpreter):
             root_tag: str = "ctml",
             special_tokens: Optional[Dict[str, str]] = None,
             logger: Optional[logging.Logger] = None,
-            on_startup: Optional[Callable[[str], Coroutine[None, None, None]]] = None,
+            on_startup: Optional[Callable[[], Coroutine[None, None, None]]] = None,
     ):
         self.id = stream_id or uuid()
         self._logger = logger or logging.getLogger("CTMLInterpreter")

@@ -36,6 +36,8 @@ class ConsoleAgentApp:
 
     async def handle_user_input(self, text: str) -> None:
         try:
+            self.chat.add_user_message(text)
+            self.chat.start_ai_response()
             await self.agent.response([
                 {"role": "user", "content": text}
             ])

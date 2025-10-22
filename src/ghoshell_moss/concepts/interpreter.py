@@ -9,6 +9,7 @@ __all__ = [
     "Interpreter",
     "CommandTokenCallback",
     "CommandTaskCallback",
+    "CommandTaskParseError",
 ]
 
 CommandTokenCallback = Callable[[CommandToken | None], None]
@@ -153,6 +154,13 @@ class Interpreter(ABC):
         async with interpreter:
             async for item in async_iterable_texts:
                 interpreter.feed(item)
+        """
+        pass
+
+    @abstractmethod
+    def commit(self) -> None:
+        """
+        commit the inputs
         """
         pass
 

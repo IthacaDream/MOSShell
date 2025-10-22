@@ -19,18 +19,17 @@ class ArrOutputStream(OutputStream):
         self.output_done_event = ThreadSafeEvent()
         self.output_buffer = ""
         self.output_started = False
-        self._command_task: Optional[BaseCommandTask] = None
 
     def close(self):
         if self.output_done_event.is_set():
             return
         self.output_done_event.set()
 
-    def buffer(self, text: str, *, complete: bool = False) -> None:
-        if text:
-            self.output_queue.put_nowait(text)
-        if complete:
-            self.output_queue.put_nowait(None)
+    def _buffer(self, text: str) -> None:
+        self.output_queue.put_nowait(text)
+
+    def _commit(self) -> None:
+        self.output_queue.put_nowait(None)
 
     def start(self) -> None:
         if self.output_started:
@@ -60,8 +59,8 @@ class ArrOutputStream(OutputStream):
                     self.outputs.append(self.output_buffer)
                     content_is_not_empty = True
         finally:
-            if self._command_task is not None:
-                self._command_task.tokens = self.output_buffer
+            if self.task is not None:
+                self.task.tokens = self.output_buffer
             self.output_done_event.set()
 
     def buffered(self) -> str:

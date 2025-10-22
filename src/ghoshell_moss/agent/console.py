@@ -252,6 +252,8 @@ class ChatRenderOutputStream(OutputStream):
             self._buffered += text
             if self._started:
                 self._input_queue.put_nowait(text)
+            if self.task is not None:
+                self.task.tokens = self._buffered
         if complete:
             self._input_queue.put_nowait(None)
 

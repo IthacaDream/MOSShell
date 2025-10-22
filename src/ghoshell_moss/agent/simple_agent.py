@@ -1,12 +1,14 @@
 from typing import Optional, List, Dict, Any, ClassVar
 from ghoshell_moss.concepts.shell import MOSSShell, Output
 from ghoshell_moss.shell import new_shell
+from ghoshell_moss.depends import check_agent
+from ghoshell_common.contracts import LoggerItf
 from ghoshell_container import IoCContainer, Container
 from pydantic import BaseModel, Field
 
 import os
 import asyncio
-from ghoshell_moss.depends import check_agent
+import logging
 
 if check_agent():
     import litellm
@@ -55,7 +57,9 @@ means only the tokens comprising the top 10% probability mass are considered.
         for key, value in params.items():
             if isinstance(value, str) and value.startswith("$"):
                 default_value = self.default_env.get(key, "")
-                real_params[key] = os.environ.get(value[1:], default_value)
+                real_value = os.environ.get(value[1:], default_value)
+                if real_value is not None:
+                    real_params[key] = real_value
             else:
                 real_params[key] = value
         return real_params
@@ -92,6 +96,10 @@ class SimpleAgent:
         await self._closed_event.wait()
         if self._error is not None:
             raise RuntimeError(f"agent failed: {self._error}")
+
+    @property
+    def logger(self) -> LoggerItf:
+        return self.container.force_fetch(LoggerItf)
 
     def raise_error(self):
         if self._error is not None:
@@ -132,12 +140,13 @@ class SimpleAgent:
             async with interpreter:
                 async for chunk in response_stream:
                     content = chunk.choices[0].delta.content
+                    self.logger.info("received %s", content)
                     if not content:
                         continue
-
                     generated += content
                     generated_role = chunk.choices[0].role
                     interpreter.feed(content)
+                interpreter.commit()
                 tasks = await interpreter.wait_execution_done()
                 for task in tasks.values():
                     if task.success():
