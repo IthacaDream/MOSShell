@@ -9,61 +9,43 @@ right_arm_chan = PyChannel(name='right_arm')
 
 
 @left_arm_chan.build.command()
-async def up(duration: float = 1.5):
+async def move(duration: float = 1.5, angle: float = 10.0):
     """
-    抬起左手
+    移动左臂到指定角度
 
     :param duration:  执行时间
+    :param angle:  提升角度，10.0为最大角度约为身体夹角45度，0.0为最小角度
     """
     model = left_arm_chan.client.container.force_fetch(live2d.LAppModel)
-    start_time = time.time()
-    while time.time() - start_time < duration:
-        progress = (time.time() - start_time) / duration
-        angle = 8 * progress
-        print(f"progress: {progress}, angle: {angle}")
-        model.SetParameterValue('PARAM_ARM_L_01', angle)
-        await asyncio.sleep(0.016)
 
-@left_arm_chan.build.command()
-async def down(duration: float = 1.5):
-    """
-    放下左手
-    """
-    model = left_arm_chan.client.container.force_fetch(live2d.LAppModel)
-    start_angle = model.GetParameterValue('PARAM_ARM_L_01')
-    if start_angle <= 0:
-        return
+    index = model.GetParamIds().index('PARAM_ARM_L_01')
+    current_angle = model.GetParameterValue(index)
+
     start_time = time.time()
     while time.time() - start_time < duration:
         progress = (time.time() - start_time) / duration
-        angle = start_angle - 8 * progress
-        model.SetParameterValue('PARAM_ARM_L_01', angle)
+        target = current_angle + (angle - current_angle) * progress
+        print(f"progress: {progress}, target: {target}")
+        model.SetParameterValue('PARAM_ARM_L_01', target)
         await asyncio.sleep(0.016)
 
 
 @right_arm_chan.build.command()
-async def up(duration: float = 1.5):
-    """抬手"""
-    model = right_arm_chan.client.container.force_fetch(live2d.LAppModel)
-    start_time = time.time()
-    while time.time() - start_time < duration:
-        progress = (time.time() - start_time) / duration
-        angle = 8 * progress
-        model.SetParameterValue('PARAM_ARM_R_01', angle)
-        await asyncio.sleep(0.016)
+async def move(duration: float = 1.5, angle: float = 10.0):
+    """
+    移动右臂到指定角度
 
-@right_arm_chan.build.command()
-async def down(duration: float = 1.5):
-    """
-    放下左手
+    :param duration:  执行时间
+    :param angle:  提升角度，10.0为最大角度约为身体夹角45度，0.0为最小角度
     """
     model = right_arm_chan.client.container.force_fetch(live2d.LAppModel)
-    start_angle = model.GetParameterValue('PARAM_ARM_R_01')
-    if start_angle <= 0:
-        return
+    index = model.GetParamIds().index('PARAM_ARM_R_01')
+    current_angle = model.GetParameterValue(index)
+
     start_time = time.time()
     while time.time() - start_time < duration:
         progress = (time.time() - start_time) / duration
-        angle = start_angle - 8 * progress
-        model.SetParameterValue('PARAM_ARM_R_01', angle)
+        target = current_angle + (angle - current_angle) * progress
+        print(f"progress: {progress}, target: {target}")
+        model.SetParameterValue('PARAM_ARM_R_01', target)
         await asyncio.sleep(0.016)

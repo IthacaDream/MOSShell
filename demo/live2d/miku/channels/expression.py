@@ -27,9 +27,9 @@ async def surprised(duration: float = 0):
 
 
 @expression_chan.build.command()
-async def wisdom(duration: float = 0):
+async def dazhihui(duration: float = 0):
     """
-    wisdom expression (Dazhihui)
+    dazhihui expression, 呆呆的大聪明表情
     """
     model = expression_chan.client.container.force_fetch(live2d.LAppModel)
     model.SetExpression("Dazhihui")
@@ -39,9 +39,9 @@ async def wisdom(duration: float = 0):
 
 
 @expression_chan.build.command()
-async def cute(duration: float = 0):
+async def mimi_eyes(duration: float = 0):
     """
-    cute expression (Mimiyan)
+    mimi eyes expression (Mimiyan)
     """
     model = expression_chan.client.container.force_fetch(live2d.LAppModel)
     model.SetExpression("Mimiyan")

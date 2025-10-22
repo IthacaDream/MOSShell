@@ -14,9 +14,14 @@ import ghoshell_moss
 from ghoshell_moss.shell import new_shell
 import threading
 from ghoshell_container import  Container
-from channels.motion import motion_chan
+from channels.body import body_chan
 from channels.expression import expression_chan
 from channels.arm import left_arm_chan, right_arm_chan
+from channels.elbow import left_elbow_chan, right_elbow_chan
+from channels.necktie import necktie_chan
+from channels.head import head_chan
+from channels.mouth import mouth_chan
+from channels.leg import left_leg_chan, right_leg_chan
 
 
 
@@ -41,7 +46,7 @@ def init_live2d(model_path: str):
     model = live2d.LAppModel()
     model.LoadModelJson(model_path)
     model.Resize(300, 400)
-    # model.SetAutoBlinkEnable(True)
+    # model.SetAutoBlinkEnable(False)
     # model.SetAutoBreathEnable(True)
     container.bind(live2d.LAppModel, model)
 
@@ -49,11 +54,20 @@ def init_live2d(model_path: str):
 container = Container()
 # 创建 Shell
 shell = new_shell(container=container)
-shell.main_channel.include_channels(
-    motion_chan,
-    expression_chan,
+shell.main_channel.include_channels(body_chan)
+body_chan.include_channels(
+    head_chan,
     left_arm_chan,
     right_arm_chan,
+    left_elbow_chan,
+    right_elbow_chan,
+    necktie_chan,
+    left_leg_chan,
+    right_leg_chan,
+)
+head_chan.include_channels(
+    expression_chan,
+    mouth_chan,
 )
 
 
@@ -61,30 +75,78 @@ async def run_demo_sequence(_shell: ghoshell_moss.MOSSShell):
     """使用 CTML 用例数组运行演示序列"""
     # CTML 演示用例数组
     demo_cases = [
-        # # 用例 1: Motion执行
-        # {
-        #     "name": "测试 motion 能力",
-        #     "ctml": """
-        #     <motion:angry no="0" />
-        #     <motion:happy no="1" />
-        #     <motion:sad no="0" />
-        #     """,
-        #     "description": "测试 motion 能力的执行",
-        # },
-        # # 用例 2: Expression执行
-        # {
-        #     "name": "测试 expression 能力",
-        #     "ctml": """
-        #     <expression:wisdom duration="5" />
-        #     <motion:happy no="1" />
-        #     """,
-        #     "description": "测试 expression 能力的执行",
-        # },
+        # 用例 1: Motion执行
+        {
+            "name": "测试 motion 能力",
+            "ctml": """
+            <body:gentle_torso_twist duration="5.0" />
+            """,
+            "description": "测试 motion 能力的执行",
+        },
+        # 用例 2: Expression执行
+        {
+            "name": "测试 expression 能力",
+            "ctml": """
+            <expression:blush duration="5" />
+            """,
+            "description": "测试 expression 能力的执行",
+        },
         # 用例 3: Arm执行
         {
             "name": "测试 arm 能力",
-            "ctml": """<left_arm:up duration="1.5" />""",
+            "ctml": """
+            <left_arm:move duration="0.5" angle="10.0" />
+            <left_arm:move duration="0.5" angle="5.0" />
+            <right_arm:move duration="0.5" angle="10.0" />
+            <right_arm:move duration="0.5" angle="5.0" />
+            """,
             "description": "测试 arm 能力的执行",
+        },
+        # 用例 4: Hand执行
+        {
+            "name": "测试 hand 能力",
+            "ctml": """
+            <left_elbow:move duration="0.5" angle="10.0" />
+            <left_elbow:move duration="0.5" angle="-30.0" />
+            <right_elbow:move duration="0.5" angle="10.0" />
+            <right_elbow:move duration="0.5" angle="-30.0" />
+            """,
+            "description": "测试 elbow 能力的执行",
+        },
+        # 用例 5: Tie执行
+        {
+            "name": "测试 tie 能力",
+            "ctml": """
+            <necktie:flutter duration="5.0"     />
+            """,
+            "description": "测试 tie 能力的执行",
+        },
+        # 用例 6: Mouth执行
+        {
+            "name": "测试 mouth 能力",
+            "ctml": """
+            <mouth:speek duration="5.0" />
+            """,
+            "description": "测试 mouth 能力的执行",
+        },
+        {
+            "name": "测试 body 能力",
+            "ctml": """
+            <body:activate_body duration="5.0" />
+            """,
+            "description": "测试 body 能力的执行",
+        },
+
+        # 用例 7: Leg执行
+        {
+            "name": "测试 leg 能力",
+            "ctml": """
+            <left_leg:move duration="0.5" angle="10.0" />
+            <left_leg:move duration="0.5" angle="0.0" />
+            <left_right:move duration="0.5" angle="0.0" />
+            <left_right:move duration="0.5" angle="10.0" />
+            """,
+            "description": "测试 leg 能力的执行",
         },
     ]
 

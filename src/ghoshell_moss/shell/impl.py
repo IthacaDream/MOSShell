@@ -278,7 +278,7 @@ class DefaultShell(MOSSShell):
                         continue
                     real_command = commands[unique_name]
                     wrapped = CommandWrapper(meta=command_meta, func=real_command.__call__)
-                    result[command_meta.unique()] = wrapped
+                    result[name] = wrapped
             return result
 
     def get_command(self, chan: str, name: str, /, exec_in_chan: bool = False) -> Optional[Command]:
