@@ -146,6 +146,7 @@ class MOSSShell(ABC):
     """
 
     container: IoCContainer
+    output: Output
 
     @abstractmethod
     def with_output(self, output: Output) -> None:

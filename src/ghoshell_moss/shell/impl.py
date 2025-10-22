@@ -10,6 +10,7 @@ from ghoshell_moss.shell.main_channel import MainChannel
 from ghoshell_moss.shell.runtime import ChannelRuntimeImpl
 from ghoshell_moss.helpers.asyncio_utils import ThreadSafeEvent, TreeNotify
 from ghoshell_common.helpers import uuid
+from ghoshell_common.contracts import LoggerItf
 from ghoshell_container import IoCContainer, Container
 import logging
 import asyncio
@@ -68,10 +69,10 @@ class DefaultShell(MOSSShell):
         self.container = Container(parent=container, name=f"MOSShell")
         self.container.set(MOSSShell, self)
         # output
-        self._output: Output = output or self.container.get(Output) or ArrOutput()
-        self.container.set(Output, self._output)
+        self.output: Output = output or self.container.get(Output) or ArrOutput()
+        self.container.set(Output, self.output)
         # logger
-        self.logger = self.container.get(logging.Logger) or logging.getLogger("moss")
+        logger = self.container.get(logging.Logger) or logging.getLogger("moss")
         self.container.set(logging.Logger, self.logger)
 
         # init main channel
@@ -95,7 +96,6 @@ class DefaultShell(MOSSShell):
         self.main_channel_runtime = ChannelRuntimeImpl(
             container=self.container,
             channel=self._main_channel,
-            logger=self.logger,
             stop_event=self._stop_event,
             is_idle_notifier=self._idle_notifier,
         )
@@ -104,6 +104,14 @@ class DefaultShell(MOSSShell):
         # --- interpreter --- #
         self._interpreter: Optional[Interpreter] = None
         self._closed_event: asyncio.Event = asyncio.Event()
+
+    @property
+    def logger(self) -> LoggerItf:
+        logger = self.container.get(LoggerItf)
+        if logger is None:
+            logger = logging.getLogger("moss")
+            self.container.set(LoggerItf, logger)
+        return logger
 
     def is_running(self) -> bool:
         return self._started and not self._stop_event.is_set() and self.main_channel_runtime.is_running()
@@ -138,7 +146,7 @@ class DefaultShell(MOSSShell):
         callback = self._append_command_task if kind != "dry_run" else None
         interpreter = CTMLInterpreter(
             commands=self.commands().values(),
-            output=self._output,
+            output=self.output,
             stream_id=stream_id or uuid(),
             callback=callback,
             logger=self.logger,
@@ -158,7 +166,7 @@ class DefaultShell(MOSSShell):
             self._stop_event.set()
 
     def with_output(self, output: Output) -> None:
-        self._output = output
+        self.output = output
 
     @property
     def main_channel(self) -> Channel:

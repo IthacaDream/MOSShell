@@ -8,7 +8,6 @@ from pydantic import BaseModel, Field
 
 import os
 import asyncio
-import logging
 
 if check_agent():
     import litellm
@@ -106,7 +105,7 @@ class SimpleAgent:
             raise RuntimeError(self._error)
 
     async def response(self, inputs: List[Dict]) -> None:
-        if self._response_task is not None:
+        if self._response_task is not None and not self._response_task.done():
             self._response_task.cancel()
             await self._response_task
         if self._error is not None:
@@ -136,29 +135,28 @@ class SimpleAgent:
             params['messages'] = messages
             params['stream'] = True
             response_stream = await litellm.acompletion(**params)
-            interpreter = self.shell.interpreter()
-            async with interpreter:
-                async for chunk in response_stream:
-                    content = chunk.choices[0].delta.content
-                    self.logger.info("received %s", content)
-                    if not content:
-                        continue
-                    generated += content
-                    generated_role = chunk.choices[0].role
-                    interpreter.feed(content)
-                interpreter.commit()
-                tasks = await interpreter.wait_execution_done()
-                for task in tasks.values():
-                    if task.success():
-                        result = task.result()
-                        if result is not None:
-                            execution_data.append(
-                                f"{task.tokens}:\n```\n{task.result()}\n```"
-                            )
+            # interpreter = self.shell.interpreter()
+            # async with interpreter:
+            async for chunk in response_stream:
+                content = chunk.choices[0].delta.content
+                self.logger.info("received %s", content)
+                if not content:
+                    continue
+                generated += content
+                print("+++", content)
+                generated_role = chunk.choices[0].role
+                # interpreter.feed(content)
+                # interpreter.commit()
+                # tasks = await interpreter.wait_execution_done()
+                # for task in tasks.values():
+                #     if task.success():
+                #         result = task.result()
+                #         if result is not None:
+                #             execution_data.append(
+                #                 f"{task.tokens}:\n```\n{task.result()}\n```"
+                #             )
         except asyncio.CancelledError:
             pass
-        except Exception as e:
-            self._error = e
         finally:
             self._response_done.set()
             if generated:
