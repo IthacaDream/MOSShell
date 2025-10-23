@@ -152,34 +152,35 @@ class SimpleAgent:
             params['messages'] = messages
             params['stream'] = True
             response_stream = await litellm.acompletion(**params)
-            # interpreter = self.shell.interpreter()
-            # async with interpreter:
-            reasoning = False
-            async for chunk in response_stream:
-                delta = chunk.choices[0].delta
-                if "reasoning_content" in delta:
-                    if not reasoning:
-                        reasoning = True
-                    self.chat.update_ai_response(delta.reasoning_content, is_gray=True)
-                    continue
-                elif reasoning:
-                    self.chat.start_ai_response()
-                    reasoning = False
-                content = delta.content
-                if not content:
-                    continue
-                self.chat.update_ai_response(content)
-                generated += content
-                # interpreter.feed(content)
-                # interpreter.commit()
-                # tasks = await interpreter.wait_execution_done()
-                # for task in tasks.values():
-                #     if task.success():
-                #         result = task.result()
-                #         if result is not None:
-                #             execution_data.append(
-                #                 f"{task.tokens}:\n```\n{task.result()}\n```"
-                #             )
+            interpreter = self.shell.interpreter()
+            async with interpreter:
+                reasoning = False
+                async for chunk in response_stream:
+                    delta = chunk.choices[0].delta
+                    if "reasoning_content" in delta:
+                        if not reasoning:
+                            reasoning = True
+                        self.chat.update_ai_response(delta.reasoning_content, is_gray=True)
+                        continue
+                    elif reasoning:
+                        self.chat.start_ai_response()
+                        reasoning = False
+                    content = delta.content
+                    if not content:
+                        continue
+                    self.chat.update_ai_response(content)
+                    generated += content
+
+                    interpreter.feed(content)
+                interpreter.commit()
+                tasks = await interpreter.wait_execution_done()
+                for task in tasks.values():
+                    if task.success():
+                        result = task.result()
+                        if result is not None:
+                            execution_data.append(
+                                f"{task.tokens}:\n```\n{task.result()}\n```"
+                            )
         except asyncio.CancelledError:
             pass
         finally:
