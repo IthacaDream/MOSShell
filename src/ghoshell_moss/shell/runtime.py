@@ -8,6 +8,7 @@ from ghoshell_moss.concepts.channel import Channel
 from ghoshell_moss.concepts.command import CommandTaskStack, CommandTask, Command
 from ghoshell_moss.concepts.errors import FatalError, CommandError, InterpretError
 from ghoshell_moss.helpers.asyncio_utils import ThreadSafeEvent, ensure_tasks_done_or_cancel, TreeNotify
+from ghoshell_common.contracts import LoggerItf
 from ghoshell_container import IoCContainer
 import asyncio
 
@@ -107,14 +108,12 @@ class ChannelRuntimeImpl(ChannelRuntime):
             channel: Channel,
             *,
             is_idle_notifier: TreeNotify | None = None,
-            logger: Optional[logging.Logger] = None,
             stop_event: Optional[ThreadSafeEvent] = None,
             depth: int = 0
     ):
         # 容器应该要已经运行过了. 关键的抽象也被设置过.
         # channel runtime 不需要有自己的容器. 也不需要关闭它.
         self.container = container
-        self.logger = logger or logging.getLogger("moss")
         self.channel: Channel = channel
         self.name = channel.name()
         self.depth: int = depth
@@ -128,6 +127,7 @@ class ChannelRuntimeImpl(ChannelRuntime):
         # status
         self._started = False
         self._stopped = False
+        self._logger = None
 
         # 获取被启动时的 loop, 用来做跨线程的调度.
         self._running_event_loop: Optional[asyncio.AbstractEventLoop] = None
@@ -150,6 +150,16 @@ class ChannelRuntimeImpl(ChannelRuntime):
         # 运行中的 task group, 方便整体 cancel. 由于版本控制在 3.10, 暂时无法使用 asyncio 的 TaskGroup.
         self._executing_task_group: set = set()
         self._executing_block_task: bool = False
+
+    @property
+    def logger(self) -> LoggerItf:
+        if self._logger is None:
+            logger = self.container.get(LoggerItf)
+            if logger is None:
+                logger = logging.getLogger("moss")
+                self.container.set(LoggerItf, logger)
+            self._logger = logger
+        return self._logger
 
     # --- lifecycle --- #
 
@@ -245,7 +255,6 @@ class ChannelRuntimeImpl(ChannelRuntime):
         child_runtime = ChannelRuntimeImpl(
             self.container,
             channel,
-            logger=self.logger,
             stop_event=self._stop_event,
             is_idle_notifier=self.is_idle_notifier.child(channel.name()),
             depth=self.depth + 1,
@@ -499,7 +508,7 @@ class ChannelRuntimeImpl(ChannelRuntime):
                     # 这个任务不运行结束, 不会释放运行状态. 它如果是同步阻塞的, 则阻塞后续的 task 消费.
                     await self._execute_task(item)
                 except asyncio.CancelledError as e:
-                    self.logger.error(f"channel {self.name} loop got cancelled: %s", e)
+                    self.logger.info(f"channel `{self.name}` loop got cancelled: %s", e)
                 except Exception as e:
                     self.logger.exception(e)
         except Exception as e:

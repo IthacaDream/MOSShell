@@ -1,3 +1,4 @@
+import time
 from typing import List
 import asyncio
 
@@ -28,6 +29,8 @@ async def test_shell_execution_baseline():
         interpreter = shell.interpreter()
         assert isinstance(interpreter, Interpreter)
         assert shell.is_running()
+        foo_cmd = shell.get_command("a", "foo")
+        assert foo_cmd is not None
         async with interpreter:
             interpreter.feed("<a:foo /><b:bar />")
             assert shell.is_running()
@@ -65,6 +68,40 @@ async def test_shell_outputted():
             interpreter.feed("<foo />hello")
             await interpreter.wait_execution_done(10)
             assert interpreter.outputted() == ["hello"]
+
+
+@pytest.mark.asyncio
+async def test_shell_command_run_in_order():
+    from ghoshell_moss.shell import new_shell
+
+    shell = new_shell()
+
+    order = {}
+
+    async def foo(i: int):
+        # makesure first call cast more time than last one
+        await asyncio.sleep(0.3 - i / 10)
+        order[i] = time.time()
+        return i
+
+    # register the foo command
+    shell.main_channel.build.command(block=True)(foo)
+    async with shell:
+        # get the origin command
+        foo_cmd: foo = shell.get_command("", "foo")
+        values = await asyncio.gather(foo_cmd(1), foo_cmd(2))
+        assert values == [1, 2]
+        assert len(order) == 2
+        # the command execute in concurrent
+        assert order[1] > order[2]
+
+        foo_cmd: foo = shell.get_command("", "foo", exec_in_chan=True)
+        values = await asyncio.gather(foo_cmd(1), foo_cmd(2))
+        # the gather order is the same
+        assert values == [1, 2]
+        assert len(order) == 2
+        # second command execute after first one
+        assert order[2] > order[1]
 
 
 @pytest.mark.asyncio

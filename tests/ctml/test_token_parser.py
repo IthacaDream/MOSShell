@@ -190,3 +190,13 @@ def test_namespace_tag():
     assert start_token.name == "bar"
     assert start_token.chan == "foo"
     assert start_token.kwargs == dict(a="123")
+
+
+def test_parser_with_chinese():
+    content = '<foo:bar>你好啊</foo:bar>'
+    q: List[CommandToken] = []
+    CTMLTokenParser.parse(q.append, iter(content), root_tag="speak")
+    assert q.pop() is None
+    q = q[1:-1]
+
+    assert "".join([t.content for t in q]) == content

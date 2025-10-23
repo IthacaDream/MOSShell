@@ -1,19 +1,57 @@
 from typing import Dict, Optional
 from ghoshell_moss.concepts.shell import MOSSShell, Output, InterpreterKind
-from ghoshell_moss.concepts.command import Command, CommandTask, CommandWrapper
+from ghoshell_moss.concepts.command import Command, CommandTask, CommandWrapper, BaseCommandTask, CommandMeta, RESULT
 from ghoshell_moss.concepts.channel import Channel, ChannelMeta
 from ghoshell_moss.concepts.interpreter import Interpreter
+from ghoshell_moss.concepts.errors import CommandErrorCode
 from ghoshell_moss.ctml.interpreter import CTMLInterpreter
 from ghoshell_moss.mocks.outputs import ArrOutput
 from ghoshell_moss.shell.main_channel import MainChannel
 from ghoshell_moss.shell.runtime import ChannelRuntimeImpl
 from ghoshell_moss.helpers.asyncio_utils import ThreadSafeEvent, TreeNotify
 from ghoshell_common.helpers import uuid
+from ghoshell_common.contracts import LoggerItf
 from ghoshell_container import IoCContainer, Container
 import logging
 import asyncio
 
 __all__ = ['DefaultShell', 'new_shell']
+
+
+class ExecuteInChannelRuntimeCommand(Command[RESULT]):
+    """
+    the command will execute in channel runtime
+    """
+
+    def __init__(self, shell: "DefaultShell", command: Command):
+        self._shell = shell
+        self._command = command
+
+    def name(self) -> str:
+        return self._command.name()
+
+    def is_available(self) -> bool:
+        return self._command.is_available()
+
+    def meta(self) -> CommandMeta:
+        return self._command.meta()
+
+    async def __call__(self, *args, **kwargs) -> RESULT:
+        task = BaseCommandTask.from_command(self._command, *args, **kwargs)
+        try:
+            # push task into the shell
+            runtime = await self._shell.main_channel_runtime.get_chan_runtime(self._command.meta().chan)
+            if runtime is None:
+                raise CommandErrorCode.NOT_AVAILABLE.error("Not available")
+            runtime.append(task)
+            await task.wait(throw=False)
+            # 减少抛出异常的调用栈.
+            if exp := task.exception():
+                raise exp
+            return task.result()
+        finally:
+            if not task.done():
+                task.cancel()
 
 
 class DefaultShell(MOSSShell):
@@ -31,11 +69,25 @@ class DefaultShell(MOSSShell):
         self.container = Container(parent=container, name=f"MOSShell")
         self.container.set(MOSSShell, self)
         # output
-        self._output: Output = output or self.container.get(Output) or ArrOutput()
-        self.container.set(Output, self._output)
-        # logger
-        self.logger = self.container.get(logging.Logger) or logging.getLogger("moss")
-        self.container.set(logging.Logger, self.logger)
+        if not output:
+            output = ArrOutput()
+        self.output: Output = output
+        self.container.set(Output, output)
+        # --- lifecycle --- #
+        self._starting = False
+        self._started = False
+        self._closing = False
+        self._logger = None
+
+        self._stop_event = ThreadSafeEvent()
+        self._stopped_event = ThreadSafeEvent()
+        self._running_loop: Optional[asyncio.AbstractEventLoop] = None
+        self._idle_notifier = TreeNotify(name="")
+        # --- configuration --- #
+        self._configured_channel_metas: Optional[Dict[str, ChannelMeta]] = None
+        # --- interpreter --- #
+        self._interpreter: Optional[Interpreter] = None
+        self._closed_event: asyncio.Event = asyncio.Event()
 
         # init main channel
         self._main_channel = main_channel or MainChannel(
@@ -44,32 +96,26 @@ class DefaultShell(MOSSShell):
             description=description or "",
         )
 
-        # --- lifecycle --- #
-        self._starting = False
-        self._started = False
-        self._closing = False
-
-        self._stop_event = ThreadSafeEvent()
-        self._stopped_event = ThreadSafeEvent()
-        self._running_loop: Optional[asyncio.AbstractEventLoop] = None
-        self._idle_notifier = TreeNotify(name="")
-
         # --- runtime --- #
-        self._main_channel_runtime = ChannelRuntimeImpl(
+        self.main_channel_runtime = ChannelRuntimeImpl(
             container=self.container,
             channel=self._main_channel,
-            logger=self.logger,
             stop_event=self._stop_event,
             is_idle_notifier=self._idle_notifier,
         )
-        # --- configuration --- #
-        self._configured_channel_metas: Optional[Dict[str, ChannelMeta]] = None
-        # --- interpreter --- #
-        self._interpreter: Optional[Interpreter] = None
-        self._closed_event: asyncio.Event = asyncio.Event()
+
+    @property
+    def logger(self) -> LoggerItf:
+        if self._logger is None:
+            logger = self.container.get(LoggerItf)
+            if logger is None:
+                logger = logging.getLogger("moss")
+                self.container.set(LoggerItf, logger)
+            self._logger = logger
+        return self._logger
 
     def is_running(self) -> bool:
-        return self._started and not self._stop_event.is_set() and self._main_channel_runtime.is_running()
+        return self._started and not self._stop_event.is_set() and self.main_channel_runtime.is_running()
 
     def is_idle(self) -> bool:
         return self.is_running() and not self._idle_notifier.is_set()
@@ -101,7 +147,7 @@ class DefaultShell(MOSSShell):
         callback = self._append_command_task if kind != "dry_run" else None
         interpreter = CTMLInterpreter(
             commands=self.commands().values(),
-            output=self._output,
+            output=self.output,
             stream_id=stream_id or uuid(),
             callback=callback,
             logger=self.logger,
@@ -115,13 +161,13 @@ class DefaultShell(MOSSShell):
         self._check_running()
         try:
             if task is not None:
-                self._main_channel_runtime.append(task)
+                self.main_channel_runtime.append(task)
         except Exception as exc:
             self.logger.exception(exc)
             self._stop_event.set()
 
     def with_output(self, output: Output) -> None:
-        self._output = output
+        self.output = output
 
     @property
     def main_channel(self) -> Channel:
@@ -137,7 +183,7 @@ class DefaultShell(MOSSShell):
             parent_channel.include_channels(*channels)
         for channel in channels:
             self._running_loop.call_soon_threadsafe(
-                self._main_channel_runtime.get_or_create_child_runtime,
+                self.main_channel_runtime.get_or_create_child_runtime,
                 channel,
             )
 
@@ -192,7 +238,7 @@ class DefaultShell(MOSSShell):
             meta.available = False
             return meta
 
-        runtime = await self._main_channel_runtime.get_chan_runtime(name)
+        runtime = await self.main_channel_runtime.get_chan_runtime(name)
         if runtime is None:
             meta.available = False
             return meta
@@ -215,8 +261,9 @@ class DefaultShell(MOSSShell):
         """
         self._check_running()
         commands = {}
-        for c in self._main_channel_runtime.commands(recursive=True, available_only=available):
-            commands[c.name()] = c
+        for c in self.main_channel_runtime.commands(recursive=True, available_only=available):
+            # 封装一遍, 确保 command 会按顺序执行.
+            commands[c.unique_name()] = c
         if self._configured_channel_metas is None:
             return commands
         else:
@@ -225,16 +272,45 @@ class DefaultShell(MOSSShell):
                 if not meta.available:
                     continue
                 for command_meta in meta.commands:
-                    if command_meta.name not in commands:
+                    unique_name = Command.make_uniquename(command_meta.chan, command_meta.name)
+                    if unique_name not in commands:
                         continue
-                    real_command = commands[command_meta.name]
+                    real_command = commands[unique_name]
                     wrapped = CommandWrapper(meta=command_meta, func=real_command.__call__)
                     result[name] = wrapped
         return commands
 
+    def get_command(self, chan: str, name: str, /, exec_in_chan: bool = False) -> Optional[Command]:
+        self._check_running()
+        channel = self._main_channel.get_channel(chan)
+        if channel is None:
+            return None
+        real_command = channel.client.get_command(name)
+        real_command = self._wrap_command_with_configuration(real_command)
+        if exec_in_chan:
+            return ExecuteInChannelRuntimeCommand(self, real_command)
+        else:
+            return real_command
+
+    def _wrap_command_with_configuration(self, command: Command) -> Command:
+        if self._configured_channel_metas is None:
+            return command
+        chan_meta = self._configured_channel_metas.get(command.meta().chan)
+        if chan_meta is None or not chan_meta.available:
+            meta = command.meta().model_copy()
+            meta.available = False
+            return CommandWrapper(meta, command)
+        for command_meta in chan_meta.commands:
+            if command_meta.name == command.name:
+                return CommandWrapper(command_meta, command)
+        # return not available command
+        meta = command.meta().model_copy()
+        meta.available = False
+        return CommandWrapper(meta, command)
+
     def append(self, *tasks: CommandTask) -> None:
         self._check_running()
-        self._main_channel_runtime.append(*tasks)
+        self.main_channel_runtime.append(*tasks)
 
     async def clear(self, *chans: str) -> None:
         self._check_running()
@@ -242,7 +318,7 @@ class DefaultShell(MOSSShell):
         if len(names) == 0:
             names = [""]
         for name in names:
-            channel_runtime = await self._main_channel_runtime.get_chan_runtime(name)
+            channel_runtime = await self.main_channel_runtime.get_chan_runtime(name)
             if channel_runtime is not None:
                 await channel_runtime.clear()
 
@@ -260,12 +336,12 @@ class DefaultShell(MOSSShell):
         self._check_running()
         names = list(chans)
         if len(names) == 0:
-            await self._main_channel_runtime.defer_clear()
+            await self.main_channel_runtime.defer_clear()
             return
         # 可以并行执行.
         clearing = []
         for name in names:
-            child = await self._main_channel_runtime.get_chan_runtime(name)
+            child = await self.main_channel_runtime.get_chan_runtime(name)
             clearing.append(child.defer_clear())
         await asyncio.gather(*clearing)
 
@@ -288,7 +364,7 @@ class DefaultShell(MOSSShell):
         await asyncio.to_thread(self.container.bootstrap)
 
         # 启动所有的 runtime.
-        await self._main_channel_runtime.start()
+        await self.main_channel_runtime.start()
         # 启动自己的 task
         self._started = True
 
@@ -301,9 +377,10 @@ class DefaultShell(MOSSShell):
             await self._interpreter.stop()
             self._interpreter = None
         # 先关闭所有的 runtime. 递归关闭.
-        await self._main_channel_runtime.close()
-        self.container.shutdown()
+        await self.main_channel_runtime.close()
         self._closed_event.set()
+        # 销毁容器.
+        self.container.shutdown()
 
 
 def new_shell(

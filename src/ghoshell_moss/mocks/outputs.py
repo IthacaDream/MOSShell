@@ -19,18 +19,17 @@ class ArrOutputStream(OutputStream):
         self.output_done_event = ThreadSafeEvent()
         self.output_buffer = ""
         self.output_started = False
-        self._command_task: Optional[BaseCommandTask] = None
 
     def close(self):
         if self.output_done_event.is_set():
             return
         self.output_done_event.set()
 
-    def buffer(self, text: str, *, complete: bool = False) -> None:
-        if text:
-            self.output_queue.put_nowait(text)
-        if complete:
-            self.output_queue.put_nowait(None)
+    def _buffer(self, text: str) -> None:
+        self.output_queue.put_nowait(text)
+
+    def _commit(self) -> None:
+        self.output_queue.put_nowait(None)
 
     def start(self) -> None:
         if self.output_started:
@@ -38,9 +37,6 @@ class ArrOutputStream(OutputStream):
         self.output_started = True
         t = threading.Thread(target=self._output_loop, daemon=True)
         t.start()
-
-    def is_done(self) -> bool:
-        return self.output_done_event.is_set()
 
     def _output_loop(self) -> None:
         try:
@@ -63,35 +59,15 @@ class ArrOutputStream(OutputStream):
                     self.outputs.append(self.output_buffer)
                     content_is_not_empty = True
         finally:
-            if self._command_task is not None:
-                self._command_task.tokens = self.output_buffer
+            if self.cmd_task is not None:
+                self.cmd_task.tokens = self.output_buffer
             self.output_done_event.set()
 
-    def wait_sync(self, timeout: float | None = None) -> bool:
-        return self.output_done_event.wait_sync(timeout)
+    def buffered(self) -> str:
+        return self.output_buffer
 
-    async def astart(self) -> None:
-        await asyncio.to_thread(self.start)
-
-    async def wait(self) -> bool:
-        return await self.output_done_event.wait()
-
-    async def aclose(self) -> None:
-        await asyncio.to_thread(self.close)
-
-    async def _output_start_and_wait(self) -> None:
-        self.start()
+    async def wait(self) -> None:
         await self.output_done_event.wait()
-
-    def as_command_task(self, commit: bool = False) -> Optional[CommandTask]:
-        if commit:
-            self.commit()
-        command = PyCommand(self._output_start_and_wait)
-        task = BaseCommandTask.from_command(command)
-        task.cid = self.id
-        task.tokens = self.output_buffer
-        self._command_task = task
-        return task
 
 
 class ArrOutput(Output):

@@ -1,11 +1,10 @@
 import threading
 from abc import ABC, abstractmethod
-from typing import List, Iterable, Dict, Literal, Optional, AsyncIterable
+from typing import List, Dict, Literal, Optional, AsyncIterable
 from ghoshell_moss.concepts.channel import Channel, ChannelMeta
 from ghoshell_moss.concepts.interpreter import Interpreter
 from ghoshell_moss.concepts.command import Command, CommandTask, CommandToken
 from ghoshell_container import IoCContainer
-from contextlib import asynccontextmanager
 import asyncio
 
 __all__ = [
@@ -23,7 +22,9 @@ class OutputStream(ABC):
     id: str
     """所有文本片段都有独立的全局唯一id, 通常是 command_part_id"""
 
-    @abstractmethod
+    cmd_task: Optional[CommandTask] = None
+    committed: bool = False
+
     def buffer(self, text: str, *, complete: bool = False) -> None:
         """
         添加文本片段到输出流里.
@@ -33,34 +34,70 @@ class OutputStream(ABC):
         :param text: 文本片段
         :type complete: 输出流是否已经结束.
         """
+        if not self.committed and text:
+            self._buffer(text)
+            if self.cmd_task is not None:
+                self.cmd_task.tokens = self.buffered()
+        if not self.committed and complete:
+            self.commit()
+
+    def _buffer(self, text: str) -> None:
         pass
 
     def commit(self) -> None:
-        self.buffer("", complete=True)
+        if self.committed:
+            return
+        self.committed = True
+        self._commit()
 
     @abstractmethod
-    def start(self) -> None:
-        """
-        允许文本片段开始播放. 这时可能文本片段本身都未生成完, 如果是流式的 tts, 则可以一边 buffer, 一边 tts, 一边播放. 三者并行.
-        """
+    def _commit(self) -> None:
         pass
 
-    @abstractmethod
-    def wait_sync(self, timeout: float | None = None) -> bool:
-        """
-        阻塞等待到文本输出完毕. 当文本输出是一个独立的模块时, 需要依赖这个函数实现阻塞.
-        """
-        pass
-
-    @abstractmethod
-    def is_done(self) -> bool:
-        pass
-
-    @abstractmethod
     def as_command_task(self, commit: bool = False) -> Optional[CommandTask]:
         """
         将 wait done 转化为一个 command task.
         这个 command task 通常在主轨 (channel name == "") 中运行.
+        """
+        from ghoshell_moss.concepts.command import BaseCommandTask, CommandMeta, CommandWrapper
+        if self.cmd_task is not None:
+            return self.cmd_task
+
+        if commit:
+            self.commit()
+
+        async def _output() -> None:
+            try:
+                self.start()
+                await self.wait()
+            finally:
+                self.close()
+
+        meta = CommandMeta(
+            name="__output__",
+        )
+
+        command = CommandWrapper(meta, _output)
+        task = BaseCommandTask.from_command(
+            command,
+        )
+        task.cid = self.id
+        task.tokens = self.buffered()
+        self.cmd_task = task
+        return task
+
+    @abstractmethod
+    def buffered(self) -> str:
+        pass
+
+    @abstractmethod
+    async def wait(self) -> None:
+        pass
+
+    @abstractmethod
+    def start(self) -> None:
+        """
+        start to output
         """
         pass
 
@@ -69,20 +106,6 @@ class OutputStream(ABC):
         """
         关闭一个 Stream.
         """
-        pass
-
-    # --- asyncio --- #
-
-    @abstractmethod
-    async def astart(self) -> None:
-        pass
-
-    @abstractmethod
-    async def wait(self) -> bool:
-        pass
-
-    @abstractmethod
-    async def aclose(self) -> None:
         pass
 
 
@@ -123,6 +146,7 @@ class MOSSShell(ABC):
     """
 
     container: IoCContainer
+    output: Output
 
     @abstractmethod
     def with_output(self, output: Output) -> None:
@@ -200,6 +224,10 @@ class MOSSShell(ABC):
         """
         当前运行时所有的可用的命令.
         """
+        pass
+
+    @abstractmethod
+    def get_command(self, chan: str, name: str, /, exec_in_chan: bool = False) -> Optional[Command]:
         pass
 
     # --- interpret --- #
