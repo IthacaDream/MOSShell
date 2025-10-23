@@ -22,17 +22,21 @@ from channels.necktie import necktie_chan
 from channels.head import head_chan
 from channels.mouth import mouth_chan
 from channels.leg import left_leg_chan, right_leg_chan
+from channels.eye import eye_chan
+from channels.eyebrow import eyebrow_left_chan, eyebrow_right_chan
 
 
 
 # 全局状态
 model: live2d.LAppModel | None = None
+WIDTH = 600
+HEIGHT = 800
 
 
 # 初始化Pygame和Live2D
 def init_pygame():
     pygame.init()
-    display = (300, 400)
+    display = (WIDTH, HEIGHT)
     screen = pygame.display.set_mode(display, pygame.DOUBLEBUF | pygame.OPENGL)
     pygame.display.set_caption("Digital Human Demo with PyChannel")
     return screen, display
@@ -45,7 +49,7 @@ def init_live2d(model_path: str):
     live2d.glInit()
     model = live2d.LAppModel()
     model.LoadModelJson(model_path)
-    model.Resize(300, 400)
+    model.Resize(WIDTH, HEIGHT)
     # model.SetAutoBlinkEnable(False)
     # model.SetAutoBreathEnable(True)
     container.bind(live2d.LAppModel, model)
@@ -68,6 +72,9 @@ body_chan.include_channels(
 head_chan.include_channels(
     expression_chan,
     mouth_chan,
+    eye_chan,
+    eyebrow_left_chan,
+    eyebrow_right_chan,
 )
 
 
@@ -138,15 +145,64 @@ async def run_demo_sequence(_shell: ghoshell_moss.MOSSShell):
         # },
 
         # 用例 7: Leg执行
+        # {
+        #     "name": "测试 leg 能力",
+        #     "ctml": """
+        #     <left_leg:move duration="0.5" angle="10.0" />
+        #     <left_leg:move duration="0.5" angle="0.0" />
+        #     <right_leg:move duration="0.5" angle="-10.0" />
+        #     <right_leg:move duration="0.5" angle="0.0" />
+        #     """,
+        #     "description": "测试 leg 能力的执行",
+        # },
+
+        # 用例 8: Eye执行
+        # {
+        #     "name": "测试 eye 能力",
+        #     "ctml": """
+        #     <eye:gaze x="-1.0" duration="1.0" />
+        #     <eye_left:blink duration="3.0" />
+        #     <eye:gaze y="-1.0" duration="1.0" />
+        #     <eye:gaze x="1.0" duration="1.0" />
+        #     <eye:gaze y="1.0" duration="1.0" />
+        #     """,
+        #     "description": "测试 eye 能力的执行",
+        # },
+        # 用例 9: Eyebrow执行
         {
-            "name": "测试 leg 能力",
+            "name": "测试 eyebrow 能力",
             "ctml": """
-            <left_leg:move duration="0.5" angle="10.0" />
-            <left_leg:move duration="0.5" angle="0.0" />
-            <right_leg:move duration="0.5" angle="-10.0" />
-            <right_leg:move duration="0.5" angle="0.0" />
+            <eye_left:blink duration="5.0" speed="2.0" />
+            <eye_right:blink duration="5.0" speed="2.0" />
+            <mouth:speek duration="5.0" speed="2.0"/>
+
+            <eyebrow_left:move x="-1.0" y="0.0" angle="0.0" speed="2.0" />
+            <eyebrow_left:move x="1.0" y="0.0" angle="0.0" speed="2.0" />
+            <eyebrow_left:move x="0.0" y="0.0" angle="0.0" speed="2.0" />
+            <eyebrow_left:move x="0.0" y="1.0" angle="0.0" speed="2.0" />
+            <eyebrow_left:move x="0.0" y="-1.0" angle="0.0" speed="2.0" />
+            <eyebrow_left:move x="0.0" y="0.0" angle="0.0" speed="2.0" />
+            <eyebrow_left:move x="0.0" y="0.0" angle="1.0" speed="2.0" />
+            <eyebrow_left:move x="0.0" y="0.0" angle="-1.0" speed="2.0" />
+            <eyebrow_left:move x="0.0" y="0.0" angle="0.0" speed="2.0" />
+            <eyebrow_left:move x="1.0" y="1.0" angle="1.0" speed="2.0" />
+            <eyebrow_left:move x="-1.0" y="-1.0" angle="-1.0" speed="2.0" />
+            <eyebrow_left:move x="0.0" y="0.0" angle="0.0" speed="2.0" />
+
+            <eyebrow_right:move x="-1.0" y="0.0" angle="0.0" speed="2.0" />
+            <eyebrow_right:move x="1.0" y="0.0" angle="0.0" speed="2.0" />
+            <eyebrow_right:move x="0.0" y="0.0" angle="0.0" speed="2.0" />
+            <eyebrow_right:move x="0.0" y="1.0" angle="0.0" speed="2.0" />
+            <eyebrow_right:move x="0.0" y="-1.0" angle="0.0" speed="2.0" />
+            <eyebrow_right:move x="0.0" y="0.0" angle="0.0" speed="2.0" />
+            <eyebrow_right:move x="0.0" y="0.0" angle="1.0" speed="2.0" />
+            <eyebrow_right:move x="0.0" y="0.0" angle="-1.0" speed="2.0" />
+            <eyebrow_right:move x="0.0" y="0.0" angle="0.0" speed="2.0" />
+            <eyebrow_right:move x="1.0" y="1.0" angle="1.0" speed="2.0" />
+            <eyebrow_right:move x="-1.0" y="-1.0" angle="-1.0" speed="2.0" />
+            <eyebrow_right:move x="0.0" y="0.0" angle="0.0" speed="2.0" />
             """,
-            "description": "测试 leg 能力的执行",
+            "description": "测试 eyebrow 能力的执行",
         },
     ]
 
