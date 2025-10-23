@@ -37,12 +37,12 @@ async def move(duration: float = 1.5, angle: float = 10.0):
 
 
 @right_leg_chan.build.command()
-async def move(duration: float = 1.5, angle: float = 10.0):
+async def move(duration: float = 1.5, angle: float = -10.0):
     """
     移动右腿到指定角度
 
     :param duration:  执行时间，时间越短角度变化越快
-    :param angle:  身体垂直角度，10.0为最大角度约为身体垂直夹角30度，-10.0为最小角度
+    :param angle:  身体垂直角度，-10.0为最大角度约为身体垂直夹角30度，0.0为最小角度
     """
     PARAM = "PARAM_LEG_R_Z"
     model = right_leg_chan.client.container.force_fetch(live2d.LAppModel)
