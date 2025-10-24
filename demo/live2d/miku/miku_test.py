@@ -1,9 +1,8 @@
 import os
 import sys
+
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
-
-
 
 import pygame
 import live2d.v3 as live2d
@@ -13,7 +12,7 @@ from os.path import join, dirname
 import ghoshell_moss
 from ghoshell_moss.shell import new_shell
 import threading
-from ghoshell_container import  Container
+from ghoshell_container import Container
 from channels.body import body_chan
 from channels.expression import expression_chan
 from channels.arm import left_arm_chan, right_arm_chan
@@ -24,8 +23,6 @@ from channels.mouth import mouth_chan
 from channels.leg import left_leg_chan, right_leg_chan
 from channels.eye import eye_chan
 from channels.eyebrow import eyebrow_left_chan, eyebrow_right_chan
-
-
 
 # 全局状态
 model: live2d.LAppModel | None = None
@@ -82,92 +79,92 @@ async def run_demo_sequence(_shell: ghoshell_moss.MOSSShell):
     """使用 CTML 用例数组运行演示序列"""
     # CTML 演示用例数组
     demo_cases = [
-        # # 用例 1: Motion执行
-        # {
-        #     "name": "测试 motion 能力",
-        #     "ctml": """
-        #     <body:gentle_torso_twist duration="5.0" />
-        #     """,
-        #     "description": "测试 motion 能力的执行",
-        # },
-        # # 用例 2: Expression执行
-        # {
-        #     "name": "测试 expression 能力",
-        #     "ctml": """
-        #     <expression:blush duration="5" />
-        #     """,
-        #     "description": "测试 expression 能力的执行",
-        # },
-        # # 用例 3: Arm执行
-        # {
-        #     "name": "测试 arm 能力",
-        #     "ctml": """
-        #     <left_arm:move duration="0.5" angle="10.0" />
-        #     <left_arm:move duration="0.5" angle="5.0" />
-        #     <right_arm:move duration="0.5" angle="10.0" />
-        #     <right_arm:move duration="0.5" angle="5.0" />
-        #     """,
-        #     "description": "测试 arm 能力的执行",
-        # },
-        # # 用例 4: Hand执行
-        # {
-        #     "name": "测试 hand 能力",
-        #     "ctml": """
-        #     <left_elbow:move duration="0.5" angle="10.0" />
-        #     <left_elbow:move duration="0.5" angle="-30.0" />
-        #     <right_elbow:move duration="0.5" angle="10.0" />
-        #     <right_elbow:move duration="0.5" angle="-30.0" />
-        #     """,
-        #     "description": "测试 elbow 能力的执行",
-        # },
-        # # 用例 5: Tie执行
-        # {
-        #     "name": "测试 tie 能力",
-        #     "ctml": """
-        #     <necktie:flutter duration="5.0"     />
-        #     """,
-        #     "description": "测试 tie 能力的执行",
-        # },
-        # # 用例 6: Mouth执行
-        # {
-        #     "name": "测试 mouth 能力",
-        #     "ctml": """
-        #     <mouth:speek duration="5.0" />
-        #     """,
-        #     "description": "测试 mouth 能力的执行",
-        # },
-        # {
-        #     "name": "测试 body 能力",
-        #     "ctml": """
-        #     <body:activate_body duration="5.0" />
-        #     """,
-        #     "description": "测试 body 能力的执行",
-        # },
+        # 用例 1: Motion执行
+        {
+            "name": "测试 motion 能力",
+            "ctml": """
+            <body:gentle_torso_twist duration="5.0" />
+            """,
+            "description": "测试 motion 能力的执行",
+        },
+        # 用例 2: Expression执行
+        {
+            "name": "测试 expression 能力",
+            "ctml": """
+            <expression:blush duration="5" />
+            """,
+            "description": "测试 expression 能力的执行",
+        },
+        # 用例 3: Arm执行
+        {
+            "name": "测试 arm 能力",
+            "ctml": """
+            <left_arm:move duration="0.5" angle="10.0" />
+            <left_arm:move duration="0.5" angle="5.0" />
+            <right_arm:move duration="0.5" angle="10.0" />
+            <right_arm:move duration="0.5" angle="5.0" />
+            """,
+            "description": "测试 arm 能力的执行",
+        },
+        # 用例 4: Hand执行
+        {
+            "name": "测试 hand 能力",
+            "ctml": """
+            <left_elbow:move duration="0.5" angle="10.0" />
+            <left_elbow:move duration="0.5" angle="-30.0" />
+            <right_elbow:move duration="0.5" angle="10.0" />
+            <right_elbow:move duration="0.5" angle="-30.0" />
+            """,
+            "description": "测试 elbow 能力的执行",
+        },
+        # 用例 5: Tie执行
+        {
+            "name": "测试 tie 能力",
+            "ctml": """
+            <necktie:flutter duration="5.0"     />
+            """,
+            "description": "测试 tie 能力的执行",
+        },
+        # 用例 6: Mouth执行
+        {
+            "name": "测试 mouth 能力",
+            "ctml": """
+            <mouth:speek duration="5.0" />
+            """,
+            "description": "测试 mouth 能力的执行",
+        },
+        {
+            "name": "测试 body 能力",
+            "ctml": """
+            <body:activate_body duration="5.0" />
+            """,
+            "description": "测试 body 能力的执行",
+        },
 
         # 用例 7: Leg执行
-        # {
-        #     "name": "测试 leg 能力",
-        #     "ctml": """
-        #     <left_leg:move duration="0.5" angle="10.0" />
-        #     <left_leg:move duration="0.5" angle="0.0" />
-        #     <right_leg:move duration="0.5" angle="-10.0" />
-        #     <right_leg:move duration="0.5" angle="0.0" />
-        #     """,
-        #     "description": "测试 leg 能力的执行",
-        # },
+        {
+            "name": "测试 leg 能力",
+            "ctml": """
+            <left_leg:move duration="0.5" angle="10.0" />
+            <left_leg:move duration="0.5" angle="0.0" />
+            <right_leg:move duration="0.5" angle="-10.0" />
+            <right_leg:move duration="0.5" angle="0.0" />
+            """,
+            "description": "测试 leg 能力的执行",
+        },
 
         # 用例 8: Eye执行
-        # {
-        #     "name": "测试 eye 能力",
-        #     "ctml": """
-        #     <eye:gaze x="-1.0" duration="1.0" />
-        #     <eye_left:blink duration="3.0" />
-        #     <eye:gaze y="-1.0" duration="1.0" />
-        #     <eye:gaze x="1.0" duration="1.0" />
-        #     <eye:gaze y="1.0" duration="1.0" />
-        #     """,
-        #     "description": "测试 eye 能力的执行",
-        # },
+        {
+            "name": "测试 eye 能力",
+            "ctml": """
+            <eye:gaze x="-1.0" duration="1.0" />
+            <eye_left:blink duration="3.0" />
+            <eye:gaze y="-1.0" duration="1.0" />
+            <eye:gaze x="1.0" duration="1.0" />
+            <eye:gaze y="1.0" duration="1.0" />
+            """,
+            "description": "测试 eye 能力的执行",
+        },
         # 用例 9: Eyebrow执行
         {
             "name": "测试 eyebrow 能力",

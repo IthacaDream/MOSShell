@@ -210,9 +210,11 @@ class Interpreter(ABC):
         pass
 
     @abstractmethod
-    def results(self) -> Dict[str, str]:
+    async def results(self) -> Dict[str, str]:
         """
         将所有已经执行完的 task 的 result 作为有序的字符串字典输出
+        知道第一个运行失败的.
+        其中返回值为 None 或空字符串的不会展示.
 
         :return: key is the task name and attrs, value is the result or error of the command
                  if command task return None, ignore the result of it.

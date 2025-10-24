@@ -4,7 +4,7 @@ from ghoshell_moss.concepts.interpreter import (
 )
 from ghoshell_moss.concepts.shell import Output
 from ghoshell_moss.concepts.command import CommandToken, Command, CommandTask
-from ghoshell_moss.concepts.errors import CommandError
+from ghoshell_moss.concepts.errors import CommandError, CommandErrorCode
 from ghoshell_moss.ctml.token_parser import CTMLTokenParser
 from ghoshell_moss.ctml.elements import CommandTaskElementContext
 from ghoshell_moss.helpers.asyncio_utils import ThreadSafeEvent
@@ -160,8 +160,18 @@ class CTMLInterpreter(Interpreter):
             return self._output.outputted()
         return self._outputted
 
-    def results(self) -> Dict[str, str]:
-        raise NotImplementedError("todo")
+    async def results(self) -> Dict[str, str]:
+        tasks = await self.wait_execution_done()
+        results = {}
+        for task in tasks.values():
+            if task.success():
+                result = task.result()
+                if result is not None and not (isinstance(result, str) and result.strip()):
+                    results[task.tokens] = result
+            else:
+                results[task.tokens] = CommandErrorCode.description(task.errcode, task.errmsg)
+                break
+        return results
 
     def executed(self) -> str:
         raise NotImplementedError("todo")

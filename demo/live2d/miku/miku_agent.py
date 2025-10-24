@@ -2,6 +2,7 @@ from ghoshell_moss.agent.simple_agent import SimpleAgent
 
 import os
 import sys
+
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
 
@@ -10,7 +11,7 @@ import live2d.v3 as live2d
 import asyncio
 from os.path import join, dirname
 from ghoshell_moss.shell import new_shell
-from ghoshell_container import  Container
+from ghoshell_container import Container
 from channels.body import body_chan
 from channels.expression import expression_chan
 from channels.arm import left_arm_chan, right_arm_chan
@@ -19,7 +20,6 @@ from channels.necktie import necktie_chan
 from channels.head import head_chan
 from channels.mouth import mouth_chan
 from channels.leg import left_leg_chan, right_leg_chan
-
 
 # 全局状态
 model: live2d.LAppModel | None = None
@@ -104,7 +104,7 @@ async def run_agent_and_render():
 
             pygame.display.flip()
             clock.tick(60)
-            
+
             # 让出控制权给其他协程，确保agent也能运行
             await asyncio.sleep(0.01)
     finally:
@@ -114,7 +114,7 @@ async def run_agent_and_render():
             await agent_task
         except asyncio.CancelledError:
             pass
-        
+
         # 清理资源
         live2d.dispose()
         pygame.quit()

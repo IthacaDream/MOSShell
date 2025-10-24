@@ -132,11 +132,18 @@ class SimpleAgent:
         self._response_task = task
 
     async def _response(self, inputs: List[Dict]) -> None:
+        try:
+            while len(inputs) > 0:
+                inputs = await self._single_response(inputs)
+        except asyncio.CancelledError:
+            pass
+
+    async def _single_response(self, inputs: List[Dict]) -> Optional[List[Dict]]:
         if len(inputs) == 0:
             return
 
         generated = ""
-        execution_data = []
+        execution_results = ""
         try:
             self.chat.start_ai_response()
             self._response_done.clear()
@@ -173,24 +180,19 @@ class SimpleAgent:
 
                     interpreter.feed(content)
                 interpreter.commit()
-                tasks = await interpreter.wait_execution_done()
-                for task in tasks.values():
-                    if task.success():
-                        result = task.result()
-                        if result is not None:
-                            execution_data.append(
-                                f"{task.tokens}:\n```\n{task.result()}\n```"
-                            )
-        except asyncio.CancelledError:
-            pass
+                results = await interpreter.results()
+                if len(results) > 0:
+                    execution_results = "\n".join(results)
+                if execution_results:
+                    return [{"role": "system", "content": "## executions:\n\n%s" % execution_results}]
+                else:
+                    return None
         finally:
             self._response_done.set()
             self.chat.finalize_ai_response()
             self.messages.extend(inputs)
             if generated:
                 self.messages.append({"role": "assistant", "content": generated})
-                execution = "\n\n".join(execution_data)
-                self.messages.append({"role": "system", "content": "## executions:\n\n%s" % execution})
 
     async def run(self):
         async with self:

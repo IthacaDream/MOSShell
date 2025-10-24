@@ -1,3 +1,4 @@
+from typing import Dict
 from enum import Enum
 
 __all__ = ['FatalError', 'InterpretError', 'CommandErrorCode', 'CommandError']
@@ -24,6 +25,7 @@ class CommandError(Exception):
 
 
 class CommandErrorCode(int, Enum):
+    SUCCESS = 0
     CANCELLED = 10010
     NOT_AVAILABLE = 10020
     INVALID_USAGE = 10030
@@ -33,3 +35,19 @@ class CommandErrorCode(int, Enum):
 
     def error(self, message: str) -> CommandError:
         return CommandError(self.value, message)
+
+    @classmethod
+    def get_error_code_name(cls, value: int) -> str:
+        """将错误代码值映射到对应的枚举名称"""
+        try:
+            return cls(value).name
+        except ValueError:
+            # 如果值不在枚举中，返回未知代码的名称
+            return cls.UNKNOWN_CODE.name
+
+    @classmethod
+    def description(cls, errcode: int, errmsg: str | None = None) -> str:
+        if errcode == cls.SUCCESS:
+            return "success"
+        name = cls.get_error_code_name(errcode)
+        return "failed `{}`: {}".format(name, errmsg or "no errmsg")
