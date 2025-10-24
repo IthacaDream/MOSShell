@@ -35,7 +35,15 @@ __all__ = [
 
 RESULT = TypeVar("RESULT")
 
-CommandTaskStateType = Literal['created', 'queued', 'pending', 'running', 'failed', 'done', 'cancelled']
+
+class CommandTaskStateType(str, Enum):
+    created = 'created'
+    queued = 'queued'
+    pending = 'pending'
+    running = 'running'
+    failed = 'failed'
+    done = 'done'
+    cancelled = 'cancelled'
 
 
 class CommandTaskState(str, Enum):
@@ -428,13 +436,13 @@ class CommandTask(Generic[RESULT], ABC):
 
     # --- command state --- #
 
-    state: CommandTaskStateType
+    state: str
     errcode: int = 0
     errmsg: Optional[str] = None
 
     # --- debug --- #
 
-    trace: Dict[CommandTaskStateType, float] = {}
+    trace: Dict[str, float] = {}
     exec_chan: Optional[str] = None
     """记录 task 在哪个 channel 被运行. """
 
@@ -490,11 +498,11 @@ class CommandTask(Generic[RESULT], ABC):
         """
         pass
 
-    def set_state(self, state: CommandTaskStateType) -> None:
+    def set_state(self, state: CommandTaskStateType | str) -> None:
         """
         set the state of the command with time
         """
-        self.state = state
+        self.state = str(state)
         self.trace[state] = time.time()
 
     @abstractmethod
@@ -631,12 +639,12 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
         self.tokens: str = tokens
         self.args: List = list(args)
         self.kwargs: Dict[str, Any] = kwargs
-        self.state: CommandTaskStateType = "created"
+        self.state: str = "created"
         self.meta = meta
         self.func = func
         self.errcode: Optional[int] = None
         self.errmsg: Optional[str] = None
-        self.trace: Dict[CommandTaskStateType, float] = {
+        self.trace: Dict[str, float] = {
             "created": time.time(),
         }
         self.context = context or {}
@@ -697,7 +705,7 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
     def _set_result(
             self,
             result: Optional[RESULT],
-            state: CommandTaskStateType,
+            state: CommandTaskStateType | str,
             errcode: int,
             errmsg: Optional[str],
             done_at: Optional[str] = None,

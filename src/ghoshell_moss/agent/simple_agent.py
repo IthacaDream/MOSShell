@@ -133,10 +133,12 @@ class SimpleAgent:
 
     async def _response(self, inputs: List[Dict]) -> None:
         try:
-            while len(inputs) > 0:
+            while inputs is not None and len(inputs) > 0:
                 inputs = await self._single_response(inputs)
         except asyncio.CancelledError:
             pass
+        except Exception as e:
+            self.logger.error(e)
 
     async def _single_response(self, inputs: List[Dict]) -> Optional[List[Dict]]:
         if len(inputs) == 0:

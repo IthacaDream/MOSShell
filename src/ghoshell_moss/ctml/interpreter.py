@@ -3,7 +3,7 @@ from ghoshell_moss.concepts.interpreter import (
     Interpreter, CommandTaskCallback, CommandTaskParserElement, CommandTokenParser,
 )
 from ghoshell_moss.concepts.shell import Output
-from ghoshell_moss.concepts.command import CommandToken, Command, CommandTask
+from ghoshell_moss.concepts.command import CommandToken, Command, CommandTask, CommandTaskStateType
 from ghoshell_moss.concepts.errors import CommandError, CommandErrorCode
 from ghoshell_moss.ctml.token_parser import CTMLTokenParser
 from ghoshell_moss.ctml.elements import CommandTaskElementContext
@@ -173,8 +173,13 @@ class CTMLInterpreter(Interpreter):
                 break
         return results
 
-    def executed(self) -> str:
-        raise NotImplementedError("todo")
+    def executed(self) -> List[CommandTask]:
+        tasks = self.parsed_tasks().copy()
+        executions = []
+        for task in tasks.values():
+            if CommandTaskStateType.running.value in task.trace:
+                executions.append(task)
+        return executions
 
     def inputted(self) -> str:
         return self._input_buffer

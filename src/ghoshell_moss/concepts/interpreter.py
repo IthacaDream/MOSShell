@@ -222,7 +222,7 @@ class Interpreter(ABC):
         pass
 
     @abstractmethod
-    def executed(self) -> str:
+    def executed(self) -> List[CommandTask]:
         """
         返回已经被执行的 tokens.
         """
