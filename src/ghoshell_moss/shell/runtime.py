@@ -29,6 +29,10 @@ class ChannelRuntime(ABC):
 
     @abstractmethod
     def commands(self, recursive: bool = True, available_only: bool = True) -> Iterable[Command]:
+        """
+        获取 runtime 所有的 commands, 递归获取.
+        子channel 的名称用 a.b.c 的方式来描述路径.
+        """
         pass
 
     @abstractmethod
@@ -104,6 +108,7 @@ class ChannelRuntimeImpl(ChannelRuntime):
 
     def __init__(
             self,
+            name: str,
             container: IoCContainer,
             channel: Channel,
             *,
@@ -113,9 +118,9 @@ class ChannelRuntimeImpl(ChannelRuntime):
     ):
         # 容器应该要已经运行过了. 关键的抽象也被设置过.
         # channel runtime 不需要有自己的容器. 也不需要关闭它.
+        self.name = name
         self.container = container
         self.channel: Channel = channel
-        self.name = channel.name()
         self.depth: int = depth
         self.loop: asyncio.AbstractEventLoop | None = None
         self.is_idle_notifier = is_idle_notifier or TreeNotify(self.name)
@@ -234,11 +239,11 @@ class ChannelRuntimeImpl(ChannelRuntime):
     def is_available(self) -> bool:
         return self.is_running() and self.channel.is_running() and self.channel.client.is_available()
 
-    def commands(self, recursive: bool = True, available_only: bool = True) -> Iterable[Command]:
+    def commands(self, recursive: bool = True, available_only: bool = True) -> Dict[str, Command]:
         self._check_running()
         if not self.is_available():
             return []
-        yield from self.channel.client.commands(available_only).values()
+        yield from self.channel.client.commands(available_only)
         if recursive:
             for child_runtime in self.children_runtimes.values():
                 yield from child_runtime.commands(recursive, available_only)
@@ -252,7 +257,9 @@ class ChannelRuntimeImpl(ChannelRuntime):
         return not self.is_idle_notifier.is_set()
 
     def make_child_runtime(self, channel: Channel) -> ChannelRuntime:
+        name = Channel.join_channel_name(self.name, channel.name())
         child_runtime = ChannelRuntimeImpl(
+            name,
             self.container,
             channel,
             stop_event=self._stop_event,
@@ -264,9 +271,9 @@ class ChannelRuntimeImpl(ChannelRuntime):
     async def get_or_create_child_runtime(self, channel: Channel) -> Self:
         if channel is self.channel:
             raise ValueError(f"Channel {self.name} register child but is itself")
-        name = channel.name()
-        if name in self.children_runtimes:
-            runtime = self.children_runtimes[name]
+        origin_channel_name = channel.name()
+        if origin_channel_name in self.children_runtimes:
+            runtime = self.children_runtimes[origin_channel_name]
             if runtime.channel is channel:
                 # 直接返回.
                 return runtime
@@ -274,14 +281,14 @@ class ChannelRuntimeImpl(ChannelRuntime):
                 # 清空掉之前的.
                 await runtime.close()
 
-        if name not in self.channel.children():
+        if origin_channel_name not in self.channel.children():
             # 动态注册.
-            self.channel.include_channels(channel)
+            self.channel.import_channels(channel)
 
         child_runtime = self.make_child_runtime(channel)
         if not child_runtime.is_running():
             await child_runtime.start()
-        self.children_runtimes[child_runtime.name] = child_runtime
+        self.children_runtimes[origin_channel_name] = child_runtime
         return child_runtime
 
     async def get_chan_runtime(self, name: str, child_only: bool = False) -> Optional[Self]:

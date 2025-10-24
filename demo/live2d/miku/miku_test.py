@@ -55,8 +55,8 @@ def init_live2d(model_path: str):
 container = Container()
 # 创建 Shell
 shell = new_shell(container=container)
-shell.main_channel.include_channels(body_chan)
-body_chan.include_channels(
+shell.main_channel.import_channels(body_chan)
+body_chan.import_channels(
     head_chan,
     left_arm_chan,
     right_arm_chan,
@@ -66,7 +66,7 @@ body_chan.include_channels(
     left_leg_chan,
     right_leg_chan,
 )
-head_chan.include_channels(
+head_chan.import_channels(
     expression_chan,
     mouth_chan,
     eye_chan,

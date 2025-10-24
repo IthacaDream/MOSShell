@@ -1,12 +1,12 @@
 from ast import Tuple
 from typing import Dict, Optional
-from ghoshell_moss.concepts.shell import MOSSShell, Output, InterpreterKind
+from ghoshell_moss.concepts.shell import MOSSShell, Speech, InterpreterKind
 from ghoshell_moss.concepts.command import Command, CommandTask, CommandWrapper, BaseCommandTask, CommandMeta, RESULT
 from ghoshell_moss.concepts.channel import Channel, ChannelMeta
 from ghoshell_moss.concepts.interpreter import Interpreter
 from ghoshell_moss.concepts.errors import CommandErrorCode
 from ghoshell_moss.ctml.interpreter import CTMLInterpreter
-from ghoshell_moss.mocks.outputs import ArrOutput
+from ghoshell_moss.mocks.outputs import ArrSpeech
 from ghoshell_moss.shell.main_channel import MainChannel
 from ghoshell_moss.shell.runtime import ChannelRuntimeImpl
 from ghoshell_moss.helpers.asyncio_utils import ThreadSafeEvent, TreeNotify
@@ -64,16 +64,16 @@ class DefaultShell(MOSSShell):
             description: Optional[str] = None,
             container: IoCContainer | None = None,
             main_channel: Channel | None = None,
-            output: Optional[Output] = None,
+            output: Optional[Speech] = None,
     ):
         self.name = name
         self.container = Container(parent=container, name=f"MOSShell")
         self.container.set(MOSSShell, self)
         # output
         if not output:
-            output = ArrOutput()
-        self.output: Output = output
-        self.container.set(Output, output)
+            output = ArrSpeech()
+        self.output: Speech = output
+        self.container.set(Speech, output)
         # --- lifecycle --- #
         self._starting = False
         self._started = False
@@ -148,7 +148,7 @@ class DefaultShell(MOSSShell):
         callback = self._append_command_task if kind != "dry_run" else None
         interpreter = CTMLInterpreter(
             commands=self.commands().values(),
-            output=self.output,
+            speech=self.output,
             stream_id=stream_id or uuid(),
             callback=callback,
             logger=self.logger,
@@ -167,26 +167,21 @@ class DefaultShell(MOSSShell):
             self.logger.exception(exc)
             self._stop_event.set()
 
-    def with_output(self, output: Output) -> None:
-        self.output = output
+    def with_speech(self, speech: Speech) -> None:
+        self.output = speech
 
     @property
     def main_channel(self) -> Channel:
         return self._main_channel
 
-    def register(self, *channels: Channel, parent: str = "") -> None:
-        if parent == "":
-            self._main_channel.include_channels(*channels)
-        else:
-            parent_channel = self._main_channel.descendants().get(parent, None)
-            if parent_channel is None:
-                raise KeyError(f"Channel {parent} not found")
-            parent_channel.include_channels(*channels)
-        for channel in channels:
-            self._running_loop.call_soon_threadsafe(
-                self.main_channel_runtime.get_or_create_child_runtime,
-                channel,
-            )
+    def register(self, *channels: Channel) -> None:
+        self._main_channel.import_channels(*channels)
+        if self.main_channel_runtime.is_running():
+            for channel in channels:
+                self._running_loop.call_soon_threadsafe(
+                    self.main_channel_runtime.get_or_create_child_runtime,
+                    channel,
+                )
 
     def configure(self, *metas: ChannelMeta) -> None:
         metas = {}
@@ -196,10 +191,27 @@ class DefaultShell(MOSSShell):
             self._configured_channel_metas = metas
 
     def channels(self) -> Dict[str, Channel]:
-        channels = {"": self._main_channel}
-        for name, channel in self._main_channel.descendants().items():
-            channels[name] = channel
+        descendants = self._recursive_get_channels(self._main_channel, prefix="")
+        channels = descendants
+        channels[""] = self._main_channel
         return channels
+
+    def _recursive_get_channels(self, channel: Channel, prefix: str) -> Dict[str, Channel]:
+        children = channel.children()
+        if len(children) == 0:
+            return {}
+        if channel.name() == "":
+            prefix = ""
+        else:
+            prefix = ".".join([prefix, channel.name()]).lstrip('.')
+
+        result = {}
+        for name, child in children.items():
+            unique_name = "{}.{}".format(prefix, name).lstrip('.')
+            result[unique_name] = child
+            descendants = self._recursive_get_channels(child, unique_name)
+            result.update(descendants)
+        return result
 
     async def channel_metas(self) -> Dict[str, ChannelMeta]:
         self._check_running()
@@ -247,7 +259,7 @@ class DefaultShell(MOSSShell):
         meta.available = runtime.is_available()
         if meta.available:
             # commands map
-            commands = {c.name(): c for c in runtime.commands(recursive=False, available_only=False)}
+            commands = {c: c for c in runtime.commands(recursive=False, available_only=False)}
             # change available.
             for command_meta in meta.commands:
                 if command_meta.name not in commands:
@@ -261,10 +273,7 @@ class DefaultShell(MOSSShell):
         动态获取 commands. 因为可能会有变动.
         """
         self._check_running()
-        commands = {}
-        for c in self.main_channel_runtime.commands(recursive=True, available_only=available):
-            # 封装一遍, 确保 command 会按顺序执行.
-            commands[c.unique_name()] = c
+        commands = self.main_channel_runtime.commands(recursive=True, available_only=available)
         if self._configured_channel_metas is None:
             return commands
         else:
@@ -389,7 +398,7 @@ def new_shell(
         description: Optional[str] = None,
         container: IoCContainer | None = None,
         main_channel: Channel | None = None,
-        output: Optional[Output] = None,
+        output: Optional[Speech] = None,
 ) -> MOSSShell:
     """语法糖, 好像不甜"""
     return DefaultShell(

@@ -142,7 +142,17 @@ class Interpreter(ABC):
     """each time stream interpretation has a unique id"""
 
     @abstractmethod
-    def meta_instruction(self) -> str:
+    def meta_system_prompt(self) -> str:
+        """
+        给大模型使用 MOSS 的元规则. interpreter 可以定义不同的规则.
+        """
+        pass
+
+    @abstractmethod
+    def moss_instruction(self) -> str:
+        """
+        当前 interpreter 状态下, moss 的完整使用提示. 用于呈现给大模型.
+        """
         pass
 
     @abstractmethod
@@ -262,6 +272,9 @@ class Interpreter(ABC):
 
     @abstractmethod
     def is_running(self) -> bool:
+        """
+        是否正在运行中: start -> end 中间.
+        """
         pass
 
     @abstractmethod
@@ -308,7 +321,8 @@ class Interpreter(ABC):
     @abstractmethod
     async def wait_execution_done(self, timeout: float | None = None) -> Dict[str, CommandTask]:
         """
-
+        等待所有的 task 被执行完毕.
+        如果这些 task 没有被任何方式执行, 将会导致持续的阻塞.
         """
         pass
 

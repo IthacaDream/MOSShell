@@ -1,5 +1,5 @@
 from typing import Optional, List, Dict, Any, ClassVar
-from ghoshell_moss.concepts.shell import MOSSShell, Output
+from ghoshell_moss.concepts.shell import MOSSShell, Speech
 from ghoshell_moss.shell import new_shell
 from ghoshell_moss.depends import check_agent
 from ghoshell_common.contracts import LoggerItf
@@ -75,7 +75,7 @@ class SimpleAgent:
             model: Optional[ModelConf] = None,
             container: Optional[IoCContainer] = None,
             shell: Optional[MOSSShell] = None,
-            output: Optional[Output] = None,
+            output: Optional[Speech] = None,
             messages: Optional[List[Dict]] = None,
     ):
         self.container = Container(name="agent", parent=container)

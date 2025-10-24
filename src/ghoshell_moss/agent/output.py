@@ -2,13 +2,13 @@ import asyncio
 from typing import List, Dict, Optional, Callable, Any
 
 from ghoshell_moss.depends import check_agent
-from ghoshell_moss.concepts.shell import Output, OutputStream
+from ghoshell_moss.concepts.shell import Speech, SpeechStream
 from ghoshell_common.helpers import uuid
 
 from ghoshell_moss.agent.console import ChatRenderer
 
 
-class ChatRenderOutputStream(OutputStream):
+class ChatRenderSpeechStream(SpeechStream):
 
     def __init__(
             self,
@@ -70,14 +70,14 @@ class ChatRenderOutputStream(OutputStream):
             await self._main_loop_task
 
 
-class ChatRenderOutput(Output):
+class ChatRenderSpeech(Speech):
 
     def __init__(self, render: ChatRenderer):
         self.render = render
         self.last_stream_close_event = asyncio.Event()
         self._outputted = {}
 
-    def new_stream(self, *, batch_id: Optional[str] = None) -> OutputStream:
+    def new_stream(self, *, batch_id: Optional[str] = None) -> SpeechStream:
         batch_id = batch_id or uuid()
         last_stream_close_event = self.last_stream_close_event
         new_close_event = asyncio.Event()
@@ -88,7 +88,7 @@ class ChatRenderOutput(Output):
             self._outputted[batch_id].append(item)
             self.render.update_ai_response(item)
 
-        return ChatRenderOutputStream(
+        return ChatRenderSpeechStream(
             batch_id,
             _output,
             on_start=last_stream_close_event,

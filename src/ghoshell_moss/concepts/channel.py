@@ -4,7 +4,7 @@ import threading
 from abc import ABC, abstractmethod
 from typing import (
     Iterable, Optional, Union, Callable, Coroutine, List, Type, TypeVar, Dict, Any,
-    Protocol, AsyncIterator
+    Protocol, AsyncIterator, Tuple
 )
 from typing_extensions import Self
 from ghoshell_moss.concepts.command import Command, CommandMeta, CommandTask
@@ -36,13 +36,13 @@ class ChannelMeta(BaseModel):
     Channel 的元信息数据.
     可以用来 mock 一个 channel.
     """
-    name: str = Field(description="The name of the channel.")
+    name: str = Field(description="The origin name of the channel, kind like python module name.")
     channel_id: str = Field(default="", description="The ID of the channel.")
     available: bool = Field(default=True, description="Whether the channel is available.")
     description: str = Field(default="", description="The description of the channel.")
     commands: List[CommandMeta] = Field(default_factory=list, description="The list of commands.")
     children: List[str] = Field(default_factory=list, description="the children channel names")
-    # stats: List[State] = Field(default_factory=list, description="The list of state objects.")
+    # states: List[State] = Field(default_factory=list, description="The list of state objects.")
     # instruction: str = Field(default="", description="The instruction of the channel.")
     # context: str = Field(default="", description="the runtime context of the channel.")
 
@@ -64,6 +64,9 @@ class ChannelClient(Protocol):
 
     @abstractmethod
     def is_running(self) -> bool:
+        """
+        是否已经启动了.
+        """
         pass
 
     @abstractmethod
@@ -77,31 +80,22 @@ class ChannelClient(Protocol):
     @abstractmethod
     def is_available(self) -> bool:
         """
-        当前 Channel Runtime 是否可用.
+        当前 Channel Client 是否可用.
+        当一个 Client 是 running 状态下, 仍然可能会有被暂停等因素导致它暂时不能用.
         """
         pass
 
     @abstractmethod
     def commands(self, available_only: bool = True) -> Dict[str, Command]:
         """
-        返回所有 commands.
-        不递归.
+        返回所有 commands. 注意, 只返回 Channel 自身的 Command.
         """
         pass
 
     @abstractmethod
     def get_command(self, name: str) -> Optional[Command]:
         """
-        查找一个 command.
-        不递归.
-        """
-        pass
-
-    @abstractmethod
-    async def execute(self, task: CommandTask[R]) -> R:
-        """
-        在 channel 自带的上下文中执行一个 task.
-        不递归.
+        查找一个 command. 只返回自身的 command.
         """
         pass
 
@@ -278,11 +272,20 @@ class Channel(ABC):
         """
         pass
 
+    @staticmethod
+    def join_channel_name(parent: str, name: str) -> str:
+        """连接两个 channel 的标准语法. """
+        if parent:
+            return f'{parent}.{name}'
+        return name
+
     def set_context_var(self) -> None:
+        """与 get from context 配套使用, 可以在 Command 运行时拿到 Channel 本身. """
         ChannelContextVar.set(self)
 
-    @classmethod
-    def get_from_context(cls) -> Optional[Self]:
+    @staticmethod
+    def get_from_context() -> Optional["Channel"]:
+        """在 Command 内部调用这个函数, 可以拿到运行它的 channel. """
         try:
             return ChannelContextVar.get()
         except LookupError:
@@ -300,9 +303,10 @@ class Channel(ABC):
     # --- children --- #
 
     @abstractmethod
-    def include_channels(self, *children: "Channel", parent: Optional[str] = None) -> Self:
+    def import_channels(self, *children: "Channel") -> Self:
         """
         添加子 Channel 到当前 Channel. 形成树状关系.
+        效果可以比较 python 的 import module_name
         """
         pass
 
@@ -324,36 +328,55 @@ class Channel(ABC):
     def descendants(self) -> Dict[str, "Channel"]:
         """
         返回所有的子孙 Channel, 先序遍历.
+        其中的 key 是 channel 的路径关系.
+        每次都要动态构建, 有性能成本.
         """
         descendants: Dict[str, "Channel"] = {}
-        for child in self.children().values():
-            descendants[child.name()] = child
-            for descendant in child.descendants().values():
-                descendants[descendant.name()] = descendant
+        children = self.children()
+        if len(children) == 0:
+            return descendants
+        for child in children.values():
+            child_name = child.name()
+            descendants[child_name] = child
+            for descendant_name, descendant in child.descendants().items():
+                # join descendant name with parent name
+                channel_path = Channel.join_channel_name(child_name, descendant_name)
+                descendants[channel_path] = descendant
         return descendants
 
-    def all_channels(self) -> Iterable["Channel"]:
+    def all_channels(self) -> Dict[str, "Channel"]:
         """
         语法糖, 返回所有的 channel, 包含自身.
         """
-        yield self
-        for channel in self.children().values():
-            yield from channel.all_channels()
+        descendants = self.descendants()
+        descendants[self.name()] = self
+        return descendants
 
-    def get_channel(self, name: str) -> Optional[Self]:
+    def get_channel(self, channel_path: str) -> Optional[Self]:
         """
         使用 channel 名从树中获取一个 Channel 对象. 包括自身.
         """
-        if name == self.name():
+        if channel_path == self.name():
             return self
-        children = self.children()
-        if name in children:
-            return children[name]
-        for child in children.values():
-            got = child.get_channel(name)
-            if got is not None:
-                return got
-        return None
+        channel_names = channel_path.split('.')
+        first = channel_names.pop(0)
+        if first == self.name():
+            return self
+        return self.recursive_find_sub_channel(self, channel_names)
+
+    @classmethod
+    def recursive_find_sub_channel(cls, root: "Channel", paths: List[str]) -> Optional["Channel"]:
+        names_count = len(paths)
+        if names_count == 0:
+            return None
+        first = paths[0]
+        children = root.children()
+        if first not in children:
+            return None
+        new_root = children[first]
+        if names_count == 1:
+            return new_root
+        return cls.recursive_find_sub_channel(new_root, paths[1:])
 
     # --- lifecycle --- #
 
@@ -367,8 +390,7 @@ class Channel(ABC):
     @abstractmethod
     def bootstrap(self, container: Optional[IoCContainer] = None) -> "ChannelClient":
         """
-        传入一个父容器, 启动 Channel. 同时生成 Runtime.
-        真正运行的是 channel runtime.
+        传入一个 IoC 容器, 启动 Channel 的 Client. !不会递归启动所有的子 Channel.
         """
         pass
 
@@ -400,6 +422,9 @@ class ChannelServer(ABC):
 
     @abstractmethod
     async def wait_closed(self) -> None:
+        """
+        等待 server 运行到结束为止.
+        """
         pass
 
     @abstractmethod
@@ -411,6 +436,9 @@ class ChannelServer(ABC):
 
     @abstractmethod
     def is_running(self) -> bool:
+        """
+        判断这个实例是否在运行.
+        """
         pass
 
     def run_until_closed(self, channel: Channel) -> None:
@@ -420,24 +448,30 @@ class ChannelServer(ABC):
         asyncio.run(self.arun_until_closed(channel))
 
     async def arun_until_closed(self, channel: Channel) -> None:
+        """
+        展示如何在 async 中持续运行到结束.
+        """
         await self.arun(channel)
         await self.wait_closed()
 
     def run_in_thread(self, channel: Channel) -> None:
         """
-        展示如何在多线程中异步运行.
+        展示如何在多线程中异步运行, 非阻塞.
         """
         thread = threading.Thread(target=self.run_until_closed, args=(channel,), daemon=True)
         thread.start()
 
     @abstractmethod
     def close(self) -> None:
+        """
+        关闭当前 Server.
+        """
         pass
 
     @asynccontextmanager
     async def run_in_ctx(self, channel: Channel) -> AsyncIterator[Self]:
         """
-        支持 with statement 的运行方式.
+        支持 async with statement 的运行方式调用 channel server, 通常用于测试.
         """
         await self.arun(channel)
         yield self

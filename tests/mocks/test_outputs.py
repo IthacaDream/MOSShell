@@ -1,7 +1,7 @@
 import asyncio
 
-from ghoshell_moss.mocks.outputs import ArrOutput, ArrOutputStream
-from ghoshell_moss.concepts.shell import OutputStream
+from ghoshell_moss.mocks.outputs import ArrSpeech, ArrSpeechStream
+from ghoshell_moss.concepts.shell import SpeechStream
 import pytest
 
 
@@ -9,7 +9,7 @@ import pytest
 async def test_output_in_asyncio():
     content = "hello world"
 
-    async def buffer_stream(_stream: OutputStream, idx_: int):
+    async def buffer_stream(_stream: SpeechStream, idx_: int):
         for c in content:
             _stream.buffer(c)
             await asyncio.sleep(0)
@@ -17,7 +17,7 @@ async def test_output_in_asyncio():
         _stream.buffer(str(idx_))
         _stream.commit()
 
-    output = ArrOutput()
+    output = ArrSpeech()
     for i in range(5):
         idx = i
         stream = output.new_stream(batch_id=str(idx))

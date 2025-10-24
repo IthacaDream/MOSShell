@@ -362,8 +362,8 @@ class DuplexChannelStub(Channel):
             raise RuntimeError(f'Channel {self} has not been started yet.')
         return self._client
 
-    def include_channels(self, *children: "Channel", parent: Optional[str] = None) -> Self:
-        return self._local_channel.include_channels(*children, parent=parent)
+    def import_channels(self, *children: "Channel") -> Self:
+        return self._local_channel.import_channels(*children)
 
     def new_child(self, name: str) -> Self:
         return self._local_channel.new_child(name)
@@ -751,9 +751,9 @@ class DuplexChannelProxy(Channel):
             raise RuntimeError(f'Channel {self} has not been started yet.')
         return self._client
 
-    def include_channels(self, *children: "Channel", parent: Optional[str] = None) -> Self:
+    def import_channels(self, *children: "Channel") -> Self:
         # 新添加的 channel 都放到 local channel 里.
-        self._local_channel.include_channels(*children, parent=parent)
+        self._local_channel.import_channels(*children)
         return self
 
     def new_child(self, name: str) -> Self:

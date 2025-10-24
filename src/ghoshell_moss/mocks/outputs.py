@@ -2,7 +2,7 @@ import asyncio
 from typing import Optional, List, Dict
 
 from ghoshell_moss.concepts.command import CommandTask, BaseCommandTask, CommandMeta, PyCommand
-from ghoshell_moss.concepts.shell import Output, OutputStream
+from ghoshell_moss.concepts.shell import Speech, SpeechStream
 from ghoshell_moss.helpers.asyncio_utils import ThreadSafeEvent
 from ghoshell_common.helpers import uuid
 
@@ -10,7 +10,7 @@ import threading
 from queue import Queue, Empty
 
 
-class ArrOutputStream(OutputStream):
+class ArrSpeechStream(SpeechStream):
 
     def __init__(self, outputs: List[str], id: str = "", ):
         self.outputs = outputs
@@ -70,15 +70,15 @@ class ArrOutputStream(OutputStream):
         await self.output_done_event.wait()
 
 
-class ArrOutput(Output):
+class ArrSpeech(Speech):
 
     def __init__(self):
-        self._streams: dict[str, ArrOutputStream] = {}
+        self._streams: dict[str, ArrSpeechStream] = {}
         self._outputs: Dict[str, List[str]] = {}
 
-    def new_stream(self, *, batch_id: Optional[str] = None) -> OutputStream:
+    def new_stream(self, *, batch_id: Optional[str] = None) -> SpeechStream:
         stream_outputs = []
-        stream = ArrOutputStream(stream_outputs, id=batch_id)
+        stream = ArrSpeechStream(stream_outputs, id=batch_id)
         stream_id = stream.id
         if stream_id in self._streams:
             existing_stream = self._streams[stream_id]

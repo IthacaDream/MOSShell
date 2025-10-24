@@ -163,7 +163,7 @@ async def test_shell_loop():
         # get shell from channel's container
         _shell = chan.client.container.get(MOSSShell)
         tasks = []
-        async for t in _shell.parse_tokens_to_tasks(tokens__):
+        async for t in _shell.parse_tokens_to_command_tasks(tokens__):
             tasks.append(t)
 
         async def _iter():

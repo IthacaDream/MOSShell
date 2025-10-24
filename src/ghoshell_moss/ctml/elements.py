@@ -5,7 +5,7 @@ from ghoshell_moss.concepts.command import (
     CancelAfterOthersTask,
 )
 from ghoshell_moss.concepts.interpreter import CommandTaskParserElement, CommandTaskCallback, CommandTaskParseError
-from ghoshell_moss.concepts.shell import OutputStream, Output
+from ghoshell_moss.concepts.shell import SpeechStream, Speech
 from ghoshell_moss.helpers.stream import create_thread_safe_stream
 from ghoshell_common.contracts import LoggerItf
 from .token_parser import CMTLSaxElement
@@ -19,18 +19,13 @@ class CommandTaskElementContext:
 
     def __init__(
             self,
-            commands: Iterable[Command],
-            output: Output,
+            channel_commands: Dict[str, Dict[str, Command]],
+            output: Speech,
             logger: Optional[LoggerItf] = None,
             stop_event: Optional[ThreadSafeEvent] = None,
             root_tag: str = "ctml",
     ):
-        self.channel_commands_map = {}
-        for command in commands:
-            chan = command.meta().chan
-            channel_commands = self.channel_commands_map.get(chan, {})
-            channel_commands[command.name()] = command
-            self.channel_commands_map[chan] = channel_commands
+        self.channel_commands_map = channel_commands
         self.output = output
         self.logger = logger or getLogger("moss")
         self.stop_event = stop_event or ThreadSafeEvent()
@@ -87,7 +82,7 @@ class BaseCommandTaskParserElement(CommandTaskParserElement, ABC):
         self._end = False
         """这个 element 是否已经结束了"""
 
-        self._current_stream: Optional[OutputStream] = None
+        self._current_stream: Optional[SpeechStream] = None
         """当前正在发送的 output stream"""
 
         self._children_tasks: List[CommandTask] = []
@@ -263,7 +258,7 @@ class NoDeltaCommandTaskElement(BaseCommandTaskParserElement):
     """
     没有 delta 参数的 Command
     """
-    _output_stream: Optional[OutputStream] = None
+    _output_stream: Optional[SpeechStream] = None
 
     def _on_delta_token(self, token: CommandToken) -> None:
         if self._output_stream is None:

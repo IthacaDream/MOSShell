@@ -233,10 +233,6 @@ class Command(Generic[RESULT], ABC):
     def name(self) -> str:
         pass
 
-    def unique_name(self) -> str:
-        meta = self.meta()
-        return self.make_uniquename(meta.chan, meta.name)
-
     @staticmethod
     def make_uniquename(chan: str, name: str) -> str:
         prefix = chan + ":" if chan else ""

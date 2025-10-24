@@ -5,18 +5,20 @@ __all__ = ['FatalError', 'InterpretError', 'CommandErrorCode', 'CommandError']
 
 
 class FatalError(Exception):
+    """
+    致命错误, 会导致 Shell 停摆, 状态也需要清空.
+    """
     pass
 
 
 class InterpretError(Exception):
+    """
+    解释器解释异常, 是可以恢复的异常.
+    """
     pass
 
 
 class CommandError(Exception):
-    CANCEL_CODE = 10010
-    NOT_AVAILABLE = 10020
-    INVALID_USAGE = 10030
-    UNKNOWN_CODE = -1
 
     def __init__(self, code: int = -1, message: str = ""):
         self.code = code

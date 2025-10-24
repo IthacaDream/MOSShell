@@ -307,7 +307,7 @@ class MCPChannel(Channel):
         return self._client
 
     # --- 未使用的Channel方法（默认空实现） --- #
-    def include_channels(self, *children: Channel, parent: Optional[str] = None) -> Channel:
+    def import_channels(self, *children: Channel) -> Channel:
         raise NotImplementedError("MCPChannel does not support children")
 
     def new_child(self, name: str) -> Channel:

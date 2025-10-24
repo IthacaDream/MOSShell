@@ -1,4 +1,4 @@
-from ghoshell_moss.mocks.outputs import ArrOutput
+from ghoshell_moss.mocks.outputs import ArrSpeech
 from ghoshell_moss.ctml.interpreter import CTMLInterpreter
 from ghoshell_moss.concepts.command import PyCommand
 from collections import deque
@@ -15,7 +15,7 @@ async def test_interpreter_baseline():
     interpreter = CTMLInterpreter(
         commands=[PyCommand(foo)],
         stream_id="test",
-        output=ArrOutput(),
+        speech=ArrSpeech(),
         callback=queue.append,
     )
 
@@ -46,7 +46,7 @@ async def test_interpreter_cancel():
     interpreter = CTMLInterpreter(
         commands=[PyCommand(foo)],
         stream_id="test",
-        output=ArrOutput(),
+        speech=ArrSpeech(),
         callback=queue.append,
     )
 
