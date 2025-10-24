@@ -7,6 +7,7 @@ from ghoshell_moss.concepts.command import (
 from ghoshell_moss.concepts.interpreter import CommandTaskParserElement, CommandTaskCallback, CommandTaskParseError
 from ghoshell_moss.concepts.shell import OutputStream, Output
 from ghoshell_moss.helpers.stream import create_thread_safe_stream
+from ghoshell_common.contracts import LoggerItf
 from .token_parser import CMTLSaxElement
 from logging import Logger, getLogger
 from ghoshell_moss.helpers.asyncio_utils import ThreadSafeEvent
@@ -20,7 +21,7 @@ class CommandTaskElementContext:
             self,
             commands: Iterable[Command],
             output: Output,
-            logger: Optional[Logger] = None,
+            logger: Optional[LoggerItf] = None,
             stop_event: Optional[ThreadSafeEvent] = None,
             root_tag: str = "ctml",
     ):
@@ -31,7 +32,7 @@ class CommandTaskElementContext:
             channel_commands[command.name()] = command
             self.channel_commands_map[chan] = channel_commands
         self.output = output
-        self.logger = logger or getLogger("CommandTaskElement")
+        self.logger = logger or getLogger("moss")
         self.stop_event = stop_event or ThreadSafeEvent()
         self.root_tag = root_tag
 

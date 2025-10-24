@@ -6,6 +6,7 @@ from ghoshell_moss.concepts.shell import Output
 from ghoshell_moss.concepts.command import CommandToken, Command, CommandTask, CommandTaskStateType
 from ghoshell_moss.concepts.errors import CommandError, CommandErrorCode
 from ghoshell_moss.ctml.token_parser import CTMLTokenParser
+from ghoshell_moss.ctml.prompt import get_system_prompt
 from ghoshell_moss.ctml.elements import CommandTaskElementContext
 from ghoshell_moss.helpers.asyncio_utils import ThreadSafeEvent
 from ghoshell_common.contracts import LoggerItf
@@ -42,7 +43,7 @@ class CTMLInterpreter(Interpreter):
         for command in commands:
             chan = command.meta().chan
             chan_commands = self._channel_command_map.get(chan, {})
-            chan_commands[command.unique_name()] = command
+            chan_commands[command.name()] = command
             self._channel_command_map[chan] = chan_commands
 
         self._root_tag = root_tag
