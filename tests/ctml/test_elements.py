@@ -5,7 +5,7 @@ from ghoshell_moss.ctml.token_parser import CTMLTokenParser
 from ghoshell_moss.ctml.elements import CommandTaskElementContext
 from ghoshell_moss.concepts.command import PyCommand, BaseCommandTask, Command, CommandToken
 from ghoshell_moss.concepts.interpreter import CommandTaskParserElement
-from ghoshell_moss.mocks.outputs import ArrSpeech
+from ghoshell_moss.speech.mock import MockSpeech
 from ghoshell_moss.helpers.asyncio_utils import ThreadSafeEvent
 from collections import deque
 from dataclasses import dataclass
@@ -41,7 +41,7 @@ class ElementTestSuite:
 
 def new_test_suite(*commands: Command) -> ElementTestSuite:
     tasks_queue = deque()
-    output = ArrSpeech()
+    output = MockSpeech()
     command_map = {}
     for command in commands:
         chan = command.meta().chan

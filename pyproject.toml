@@ -33,6 +33,9 @@ agent = [
     "prompt-toolkit>=3.0.52",
     "rich>=14.2.0",
 ]
+audio = [
+    "pulsectl>=24.12.0",
+]
 
 [tool.setuptools]
 packages = [

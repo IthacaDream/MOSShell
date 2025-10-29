@@ -4,7 +4,7 @@ from ghoshell_moss.concepts.channel import ChannelMeta, ChannelFullPath
 from ghoshell_moss.concepts.interpreter import (
     Interpreter, CommandTaskCallback, CommandTaskParserElement, CommandTokenParser,
 )
-from ghoshell_moss.concepts.shell import Speech
+from ghoshell_moss.concepts.speech import Speech
 from ghoshell_moss.concepts.command import CommandToken, Command, CommandTask, CommandTaskStateType
 from ghoshell_moss.concepts.errors import CommandErrorCode, InterpretError
 from ghoshell_moss.ctml.token_parser import CTMLTokenParser, ParserStopped

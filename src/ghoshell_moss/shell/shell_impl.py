@@ -6,7 +6,7 @@ from ghoshell_moss.concepts.channel import Channel, ChannelMeta, ChannelFullPath
 from ghoshell_moss.concepts.interpreter import Interpreter
 from ghoshell_moss.concepts.errors import CommandErrorCode
 from ghoshell_moss.ctml.interpreter import CTMLInterpreter
-from ghoshell_moss.mocks.outputs import ArrSpeech
+from ghoshell_moss.speech.mock import MockSpeech
 from ghoshell_moss.shell.main_channel import MainChannel
 from ghoshell_moss.shell.shell_runtime import ShellRuntime
 from ghoshell_moss.helpers.asyncio_utils import ThreadSafeEvent, TreeNotify
@@ -73,7 +73,7 @@ class DefaultShell(MOSSShell):
         self._main_channel = main_channel or MainChannel(name="")
         # output
         if not output:
-            output = ArrSpeech()
+            output = MockSpeech()
         self.speech: Speech = output
         self.container.set(Speech, output)
         # --- lifecycle --- #

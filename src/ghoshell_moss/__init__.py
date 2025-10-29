@@ -22,6 +22,11 @@ from ghoshell_moss.concepts.channel import (
     ChannelPaths,
 )
 
+from ghoshell_moss.concepts.speech import (
+    Speech,
+    SpeechStream,
+)
+
 from ghoshell_moss.concepts.interpreter import (
     Interpreter,
     CommandTokenParser,

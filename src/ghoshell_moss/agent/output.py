@@ -2,10 +2,11 @@ import asyncio
 from typing import List, Dict, Optional, Callable, Any
 
 from ghoshell_moss.depends import check_agent
-from ghoshell_moss.concepts.shell import Speech, SpeechStream
-from ghoshell_common.helpers import uuid
 
-from ghoshell_moss.agent.console import ChatRenderer
+if check_agent():
+    from ghoshell_moss.agent.console import ChatRenderer
+from ghoshell_moss.concepts.speech import Speech, SpeechStream
+from ghoshell_common.helpers import uuid
 
 
 class ChatRenderSpeechStream(SpeechStream):

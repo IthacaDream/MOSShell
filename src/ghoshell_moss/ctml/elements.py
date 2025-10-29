@@ -5,7 +5,7 @@ from ghoshell_moss.concepts.command import (
     CancelAfterOthersTask,
 )
 from ghoshell_moss.concepts.interpreter import CommandTaskParserElement, CommandTaskCallback, CommandTaskParseError
-from ghoshell_moss.concepts.shell import SpeechStream, Speech
+from ghoshell_moss.concepts.speech import SpeechStream, Speech
 from ghoshell_moss.concepts.errors import InterpretError
 from ghoshell_moss.helpers.stream import create_thread_safe_stream
 from ghoshell_common.contracts import LoggerItf
