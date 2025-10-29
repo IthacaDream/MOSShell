@@ -12,6 +12,8 @@ dependencies = [
     "ghoshell-common>=0.4.0.dev1",
     "ghoshell-container>=0.3.0.dev1",
     "zmq>=0.0.0",
+    "numpy>=2.2.6",
+    "click>=8.3.0",
 ]
 
 [project.optional-dependencies]
@@ -35,6 +37,8 @@ agent = [
 ]
 audio = [
     "pulsectl>=24.12.0",
+    "pyaudio>=0.2.14",
+    "scipy>=1.15.3",
 ]
 
 [tool.setuptools]
