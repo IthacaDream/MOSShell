@@ -2,7 +2,7 @@ import asyncio
 import numpy as np
 from typing import Optional
 from ghoshell_moss.depends import check_pyaudio
-from ghoshell_moss.concepts.speech import AudioType
+from ghoshell_moss.concepts.speech import AudioFormat
 from ghoshell_common.contracts import LoggerItf
 
 if check_pyaudio():
@@ -84,7 +84,7 @@ async def test_pyaudio_player():
             sine_wave = 0.3 * np.sin(2 * np.pi * 440 * t)  # 减小音量避免爆音
 
             # 添加音频片段
-            end_time = await player.add(sine_wave, audio_type=AudioType.PCM_F32LE, channel=0, rate=sample_rate)
+            end_time = await player.add(sine_wave, audio_type=AudioFormat.PCM_F32LE, channels=0, rate=sample_rate)
             print(f"预计完成时间: {end_time}")
 
             # 等待播放完成
@@ -114,7 +114,7 @@ async def test_multiple_chunks():
             t = np.linspace(0, duration, samples, endpoint=False)
             chunk = 0.2 * np.sin(2 * np.pi * freq * t)  # 减小音量
 
-            end_time = await player.add(chunk, audio_type=AudioType.PCM_F32LE, channel=1, rate=sample_rate)
+            end_time = await player.add(chunk, audio_type=AudioFormat.PCM_F32LE, channels=1, rate=sample_rate)
             print(f"片段 {i + 1} ({freq}Hz) 预计完成时间: {end_time}")
 
         # 等待所有播放完成

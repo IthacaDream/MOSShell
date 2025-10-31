@@ -175,3 +175,16 @@ async def test_run_until_complete_in_loop():
     loop = asyncio.get_running_loop()
     loop.call_soon(foo)
     await event.wait()
+
+
+async def test_catch_cancelled_error():
+    async def foo():
+        try:
+            await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            pass
+
+    task = asyncio.create_task(foo())
+    task.cancel()
+    # 不会抛出异常.
+    await task

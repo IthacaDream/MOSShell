@@ -2,7 +2,7 @@ import asyncio
 import time
 import numpy as np
 from abc import ABC, abstractmethod
-from ghoshell_moss.concepts.speech import StreamAudioPlayer, AudioType
+from ghoshell_moss.concepts.speech import StreamAudioPlayer, AudioFormat
 from ghoshell_moss.helpers.asyncio_utils import ThreadSafeEvent
 from ghoshell_common.contracts import LoggerItf
 import queue
@@ -35,7 +35,7 @@ class BaseAudioStreamPlayer(StreamAudioPlayer, ABC):
         使用单独的线程处理阻塞的音频输出操作
         """
         self.logger = logger or logging.getLogger("PyAudioPlayer")
-        self.audio_type = AudioType.PCM_S16LE
+        self.audio_type = AudioFormat.PCM_S16LE
         # self.device_index = device_index
         self.sample_rate = sample_rate
         self.channels = channels
@@ -45,7 +45,6 @@ class BaseAudioStreamPlayer(StreamAudioPlayer, ABC):
         self._committed = True
         self._estimated_end_time = 0.0
         self._closed = False
-        self._lock = asyncio.Lock()
 
         # 使用线程安全的队列进行线程间通信
         self._audio_queue = queue.Queue()
@@ -77,32 +76,33 @@ class BaseAudioStreamPlayer(StreamAudioPlayer, ABC):
 
     async def clear(self) -> None:
         """清空播放队列并重置"""
-        async with self._lock:
-            # 清空队列
-            while not self._audio_queue.empty():
-                try:
-                    self._audio_queue.get_nowait()
-                except queue.Empty:
-                    break
+        # 清空队列
+        old_queue = self._audio_queue
+        self._audio_queue = queue.Queue()
+        while not old_queue.empty():
+            try:
+                old_queue.get_nowait()
+            except queue.Empty:
+                break
 
-            # 重置时间估计
-            self._estimated_end_time = time.time()
-            self.logger.info("播放队列已清空")
+        # 重置时间估计
+        self._estimated_end_time = time.time()
+        self.logger.info("播放队列已清空")
 
-    async def add(
+    def add(
             self,
             chunk: np.ndarray,
             *,
-            audio_type: AudioType,
+            audio_type: AudioFormat,
             rate: int,
-            channel: int = 1,
+            channels: int = 1,
     ) -> float:
         """添加音频片段到播放队列"""
         if self._closed:
             return time.time()
 
         # 格式转换
-        if audio_type == AudioType.PCM_F32LE:
+        if audio_type == AudioFormat.PCM_F32LE:
             # float32 [-1, 1] -> int16
             audio_data = (chunk * 32767).astype(np.int16)
         else:
@@ -112,22 +112,21 @@ class BaseAudioStreamPlayer(StreamAudioPlayer, ABC):
         # 计算持续时间
         duration = len(audio_data) / (2 * rate)  # 2 bytes/sample
 
-        async with self._lock:
-            # 添加到线程安全队列
-            try:
-                self._audio_queue.put_nowait(audio_data.tobytes())
-                self._play_done_event.clear()
-            except queue.Full:
-                self.logger.warning("音频队列已满，丢弃音频数据")
-                return time.time()
+        # 添加到线程安全队列
+        try:
+            self._audio_queue.put_nowait(audio_data.tobytes())
+            self._play_done_event.clear()
+        except queue.Full:
+            self.logger.warning("音频队列已满，丢弃音频数据")
+            return time.time()
 
-            # 更新预计结束时间
-            current_time = time.time()
-            if current_time > self._estimated_end_time:
-                self._estimated_end_time = current_time + duration
-            else:
-                self._estimated_end_time += duration
-            return self._estimated_end_time
+        # 更新预计结束时间
+        current_time = time.time()
+        if current_time > self._estimated_end_time:
+            self._estimated_end_time = current_time + duration
+        else:
+            self._estimated_end_time += duration
+        return self._estimated_end_time
 
     async def wait_play_done(self, timeout: Optional[float] = None) -> bool:
         """等待所有音频播放完成"""

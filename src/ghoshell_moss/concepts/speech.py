@@ -7,16 +7,20 @@ from enum import Enum
 
 __all__ = [
     'Speech', 'SpeechStream',
-    'AudioType',
+    'AudioFormat',
     'StreamAudioPlayer',
-    'StreamTTS', 'StreamTTSBatch', 'StreamTTSSession',
+    'TTS', 'TTSBatch',
+    'TTSInfo', 'TTSAudioCallback',
 ]
 
 
 class SpeechStream(ABC):
     """
-    shell 发送文本的专用模块. 本身是非阻塞的.
+    Speech 创建的单个 Stream.
+    Shell 发送文本的专用模块. 是对语音或文字输出的高阶抽象.
+    一个 speech 可以同时创建多个 stream, 但执行 tts 的顺序按先后排列.
     """
+
     id: str
     """所有文本片段都有独立的全局唯一id, 通常是 command_token.part_id"""
 
@@ -81,12 +85,12 @@ class SpeechStream(ABC):
         async def _speech_lifecycle() -> None:
             try:
                 # 标记开始播放.
-                self.start()
+                await self.start()
                 # 等待输入结束, 播放结束.
                 await self.wait()
             finally:
                 # 关闭播放.
-                self.close()
+                await self.close()
 
         meta = CommandMeta(
             name="__speech__",
@@ -121,14 +125,14 @@ class SpeechStream(ABC):
         pass
 
     @abstractmethod
-    def start(self) -> None:
+    async def start(self) -> None:
         """
         start to output
         """
         pass
 
     @abstractmethod
-    def close(self):
+    async def close(self):
         """
         关闭一个 Stream.
         """
@@ -155,14 +159,30 @@ class Speech(ABC):
         pass
 
     @abstractmethod
-    def clear(self) -> List[str]:
+    async def clear(self) -> List[str]:
         """
         清空所有输出中的 output
         """
         pass
 
+    @abstractmethod
+    async def start(self) -> None:
+        pass
 
-class AudioType(Enum):
+    @abstractmethod
+    async def close(self) -> None:
+        pass
+
+    @abstractmethod
+    async def wait_closed(self) -> None:
+        pass
+
+    async def run_until_closed(self) -> None:
+        async with self:
+            await self.wait_closed()
+
+
+class AudioFormat(Enum):
     PCM_S16LE = 's16le'
     PCM_F32LE = 'float32le'
 
@@ -173,7 +193,7 @@ class StreamAudioPlayer(ABC):
     底层可能是 pyaudio, pulseaudio 或者别的实现.
     """
 
-    audio_type: AudioType
+    audio_type: AudioFormat
     channel: int
     sample_rate: int
 
@@ -205,13 +225,13 @@ class StreamAudioPlayer(ABC):
         pass
 
     @abstractmethod
-    async def add(
+    def add(
             self,
             chunk: np.ndarray,
             *,
-            audio_type: AudioType,
+            audio_type: AudioFormat,
             rate: int,
-            channel: int = 1,
+            channels: int = 1,
     ) -> float:
         """
         添加音频片段. 关于音频的参数, 用来方便做转码 (根据底层实现判断转码的必要性)
@@ -247,58 +267,65 @@ class StreamAudioPlayer(ABC):
 
 
 class TTSInfo(BaseModel):
-    rate: int = Field(description="accept rate of the audio chunk")
+    """
+    反映出 tts 生成音频的参数, 用于播放时做数据的转换.
+    """
+    sample_rate: int = Field(description="音频的采样率")
     """音频片段的 rate"""
 
-    channels: int = Field(description="channel number of the audio chunk")
-    """通道数"""
+    channels: int = Field(default=1, description="音频的通道数")
 
-    format: Literal['pcm16'] = Field(
-        default="pcm16", description="format of the audio chunk",
+    audio_format: str = Field(
+        default=AudioFormat.PCM_S16LE.value, description="音频的默认格式, 还没设计好所有类型.",
     )
 
-    config_schema: Optional[Dict] = Field(
+    voice_schema: Optional[Dict] = Field(
         default=None,
-        description="音频可配置项的 schema, 可以给大模型看. 为 None 表示没有可配置项"
+        description="声音的 schema, 通常用来给模型看"
     )
 
-    configs: Dict[str, Dict] = Field(
+    voices: Dict[str, Dict] = Field(
         default_factory=dict,
-        description="音频模块可选的配置项"
+        description="声音的可选项"
     )
-    default_conf_key: str = Field(
+    current_voice: str = Field(
         default="",
-        description="默认的配置项的 key"
+        description="当前的声音"
     )
 
 
-class StreamTTSBatch(ABC):
+_SampleRate = int
+_Channels = int
+TTSAudioCallback = Callable[[np.ndarray], None]
+
+
+class TTSBatch(ABC):
     """
     流式 tts 的批次. 简单解释一下批次的含义.
 
     假设有云端的 TTS 服务, 可以流式地解析 tts, 这样会创建一个 connection, 比如 websocket connection.
-    这个 connection 并不是只能解析一段文本,  它可以分批 (可能并行, 可能不并行) 解析多端文本, 生成多个音频流.
-    之所以要多个音频流, 因为它们的播放控制逻辑可能并不一致. 比如一段段被播放.
+    这个 connection 并不是只能解析一段文本,  它可以分批 (可能并行, 可能不并行) 解析多段文本, 生成多个音频流.
 
-    我们的抽象需要屏蔽掉并行或不并行. 单独用 Batch 来代表一个流式输出串中的很多断.
+    而这里的 tts batch, 就是用来理解多个音频流已经阻塞生成完毕.
     """
 
     @abstractmethod
-    async def start(self):
+    def batch_id(self) -> str:
         """
-        启动这个 Batch
-        """
-        pass
-
-    @abstractmethod
-    def with_audio_callback(self, callback: Callable[[np.ndarray | None], None]) -> None:
-        """
-        设置音频的回调路径. 不会清空已有的.
+        唯一 id.
         """
         pass
 
     @abstractmethod
-    async def feed(self, text: str):
+    def with_callback(self, callback: TTSAudioCallback) -> None:
+        """
+        设置一个 callback 取代已经存在的.
+        当音频数据生成后, 就会直接回调这个 callback.
+        """
+        pass
+
+    @abstractmethod
+    def feed(self, text: str):
         """
         提交新的文本片段.
         """
@@ -307,7 +334,7 @@ class StreamTTSBatch(ABC):
     @abstractmethod
     def commit(self):
         """
-        结束提交.
+        结束文本片段的提交. tts 应该要能生成文本完整的音频.
         """
         pass
 
@@ -321,46 +348,14 @@ class StreamTTSBatch(ABC):
     @abstractmethod
     async def wait_until_done(self, timeout: float | None = None):
         """
-        阻塞等待这个 batch 结束.
+        阻塞等待这个 batch 结束. 包含两种情况:
+        1. closed: 被提前关闭.
+        2. done: 按逻辑顺序是先完成 commit 后, 再完成 tts, 才能算 done.
         """
         pass
 
 
-class StreamTTSSession(ABC):
-    """
-    单个音频 TTS 的 session.
-    """
-
-    @abstractmethod
-    async def new_batch(self, batch_id: str, callback: Callable[[np.ndarray | None], None]) -> StreamTTSBatch:
-        """
-        创建一个 batch.
-        """
-        pass
-
-    @abstractmethod
-    async def clear(self) -> None:
-        """
-        关闭所有的 batch 解析.
-        """
-        pass
-
-    @abstractmethod
-    def is_closed(self) -> bool:
-        """
-        session 是否关闭.
-        """
-        pass
-
-    @abstractmethod
-    async def close(self) -> None:
-        """
-        关闭所有的 batch, 结束这个 tts 流.
-        """
-        pass
-
-
-class StreamTTS(ABC):
+class TTS(ABC):
     """
     实现一个可拆卸的 TTS 模块, 用来解析文本到语音.
     名义上是 Stream TTS, 实际上也可以不是.
@@ -368,9 +363,19 @@ class StreamTTS(ABC):
     """
 
     @abstractmethod
-    async def start_session(self, session_id: str = "") -> StreamTTSSession:
+    def new_batch(self, batch_id: str = "", *, callback: TTSAudioCallback | None = None) -> TTSBatch:
         """
-        启动一个 session, 所有的解析都在这个 session 里.
+        创建一个 batch.
+        这个 batch 有独立的生命周期阻塞逻辑 (wait until done)
+        可以用来感知到 tts 是否已经完成了.
+        完成的音频数据会发送给 callback. callback 应该要立刻播放音频.
+        """
+        pass
+
+    @abstractmethod
+    async def clear(self) -> None:
+        """
+        清空所有进行中的 tts batch.
         """
         pass
 
@@ -383,15 +388,36 @@ class StreamTTS(ABC):
         pass
 
     @abstractmethod
-    def use_config(self, config_key: str) -> None:
+    def use_voice(self, config_key: str) -> None:
         """
-        选择一个配置好的 config key.
+        选择一个配置好的音色.
+        :param config_key: 与 tts_info 中一致.
         """
         pass
 
     @abstractmethod
-    def set_config(self, config: Dict[str, Any]) -> None:
+    def set_voice(self, config: Dict[str, Any]) -> None:
         """
-        设置输出的 config
+        设置一个临时的 voice config.
         """
         pass
+
+    @abstractmethod
+    async def start(self) -> None:
+        """
+        启动 tts 服务. 理论上一创建 Batch 就会尽快进行解析.
+        """
+        pass
+
+    @abstractmethod
+    async def close(self) -> None:
+        """
+        关闭 tts 服务.
+        """
+        pass
+
+    async def __aenter__(self):
+        await self.start()
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close()

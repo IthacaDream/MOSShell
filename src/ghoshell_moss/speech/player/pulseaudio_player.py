@@ -1,7 +1,7 @@
 import asyncio
 import numpy as np
 from ghoshell_moss.depends import check_pulseaudio
-from ghoshell_moss.concepts.speech import AudioType
+from ghoshell_moss.concepts.speech import AudioFormat
 from ghoshell_common.contracts import LoggerItf
 
 if check_pulseaudio():
@@ -92,7 +92,7 @@ async def test_pulse_audio_player():
             sine_wave = 0.3 * np.sin(2 * np.pi * 440 * t)
 
             # 添加音频片段
-            end_time = await player.add(sine_wave, AudioType.PCM_F32LE, 0, sample_rate)
+            end_time = await player.add(sine_wave, AudioFormat.PCM_F32LE, 0, sample_rate)
             print(f"预计完成时间: {end_time}")
 
             # 等待播放完成
