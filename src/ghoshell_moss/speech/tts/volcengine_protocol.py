@@ -1,437 +1,549 @@
-# https://www.volcengine.com/docs/6561/1329505#%E7%A4%BA%E4%BE%8Bsamples
-from typing import Union
-from websockets.asyncio.connection import Connection
-from typing import Optional, Dict, Tuple
-from typing_extensions import Self, Literal
-from pydantic import BaseModel, Field
-from ghoshell_common.helpers import uuid
-from enum import Enum
-import os
-import json
+import io
+import logging
+import struct
+from dataclasses import dataclass
+from enum import IntEnum
+from typing import Callable, List
+
+import websockets
+
+logger = logging.getLogger(__name__)
+
+__all__ = [
+    'MsgType', 'MsgTypeFlagBits', 'Message', 'EventType',
+    'start_session', 'start_connection', 'receive_message', 'task_request',
+    'finish_session', 'cancel_session', 'finish_connection',
+    'audio_only_client', 'full_client_request', 'wait_for_event',
+]
 
 
-class EventCode(int, Enum):
-    # Connect 类事件
-    START_CONNECTION = 1  # StartConnection, Websocket 阶段申请创建连接（在 HTTP 建立 Upgrade 后）
-    FINISH_CONNECTION = 2  # FinishConnection, 结束连接
-    CONNECTION_STARTED = 50  # ConnectionStarted, 成功建立
-    CONNECTION_FAILED = 51  # ConnectionFailed, 建连失败
-    CONNECTION_FINISHED = 52  # ConnectionFinished 结束连接成功
+class MsgType(IntEnum):
+    """Message type enumeration"""
 
-    # Session 类事件
-    START_SESSION = 100  # StartSession, Websocket 阶段申请创建会话
-    FINISH_SESSION = 102  # FinishSession, 声明结束会话（上行）
-    SESSION_STARTED = 150  # SessionStarted, 成功开始会话
-    SESSION_CANCELED = 151  # SessionCanceled, 已取消会话
-    SESSION_FINISHED = 152  # SessionFinished, 会话已结束（上行&下行）
-    SESSION_FAILED = 153  # SessionFailed, 会话失败
+    Invalid = 0
+    FullClientRequest = 0b1
+    AudioOnlyClient = 0b10
+    FullServerResponse = 0b1001
+    AudioOnlyServer = 0b1011
+    FrontEndResultServer = 0b1100
+    Error = 0b1111
 
-    # 数据类事件
-    TASK_REQUEST = 200  # TaskRequest, 传输请求内容
-    TTS_SENTENCE_START = 350  # TTSSentenceStart, TTS 返回句内容开始
-    TTS_SENTENCE_END = 351  # TTSSentenceEnd, TTS 返回句内容结束
-    TTS_RESPONSE = 352  # TTSResponse, TTS 返回的音频内容
+    # Alias
+    ServerACK = AudioOnlyServer
+
+    def __str__(self) -> str:
+        return self.name if self.name else f"MsgType({self.value})"
 
 
-class User(BaseModel):
-    uid: str = Field(default="", description="")
+class MsgTypeFlagBits(IntEnum):
+    """Message type flag bits"""
+
+    NoSeq = 0  # Non-terminal packet with no sequence
+    PositiveSeq = 0b1  # Non-terminal packet with sequence > 0
+    LastNoSeq = 0b10  # Last packet with no sequence
+    NegativeSeq = 0b11  # Last packet with sequence < 0
+    WithEvent = 0b100  # Payload contains event number (int32)
 
 
-class AudioParams(BaseModel):
-    format: Literal["mp3", "pcm", "ogg_opus"] = Field(default="pcm")
-    sample_rate: int = Field(
-        default=44100, description="8000,16000,22050,24000,32000,44100,48000")
-    loudness_rate: Optional[int] = Field(default=0)
-    speech_rate: Optional[int] = Field(default=0)
-    emotion: Optional[str] = Field(default="neutral")
+class VersionBits(IntEnum):
+    """Version bits"""
+
+    Version1 = 1
+    Version2 = 2
+    Version3 = 3
+    Version4 = 4
 
 
-class ReqParams(BaseModel):
-    audio_params: AudioParams = Field(default_factory=AudioParams)
-    speaker: str = Field(default="zh_female_cancan_mars_bigtts")
-    additions: Optional[str] = Field(default=None)
+class HeaderSizeBits(IntEnum):
+    """Header size bits"""
+
+    HeaderSize4 = 1
+    HeaderSize8 = 2
+    HeaderSize12 = 3
+    HeaderSize16 = 4
 
 
-class Session(BaseModel):
+class SerializationBits(IntEnum):
+    """Serialization method bits"""
+
+    Raw = 0
+    JSON = 0b1
+    Thrift = 0b11
+    Custom = 0b1111
+
+
+class CompressionBits(IntEnum):
+    """Compression method bits"""
+
+    None_ = 0
+    Gzip = 0b1
+    Custom = 0b1111
+
+
+class EventType(IntEnum):
+    """Event type enumeration"""
+
+    None_ = 0  # Default event
+
+    # 1 ~ 49 Upstream Connection events
+    StartConnection = 1
+    StartTask = 1  # Alias of StartConnection
+    FinishConnection = 2
+    FinishTask = 2  # Alias of FinishConnection
+
+    # 50 ~ 99 Downstream Connection events
+    ConnectionStarted = 50  # Connection established successfully
+    TaskStarted = 50  # Alias of ConnectionStarted
+    ConnectionFailed = 51  # Connection failed (possibly due to authentication failure)
+    TaskFailed = 51  # Alias of ConnectionFailed
+    ConnectionFinished = 52  # Connection ended
+    TaskFinished = 52  # Alias of ConnectionFinished
+
+    # 100 ~ 149 Upstream Session events
+    StartSession = 100
+    CancelSession = 101
+    FinishSession = 102
+
+    # 150 ~ 199 Downstream Session events
+    SessionStarted = 150
+    SessionCanceled = 151
+    SessionFinished = 152
+    SessionFailed = 153
+    UsageResponse = 154  # Usage response
+    ChargeData = 154  # Alias of UsageResponse
+
+    # 200 ~ 249 Upstream general events
+    TaskRequest = 200
+    UpdateConfig = 201
+
+    # 250 ~ 299 Downstream general events
+    AudioMuted = 250
+
+    # 300 ~ 349 Upstream TTS events
+    SayHello = 300
+
+    # 350 ~ 399 Downstream TTS events
+    TTSSentenceStart = 350
+    TTSSentenceEnd = 351
+    TTSResponse = 352
+    TTSEnded = 359
+    PodcastRoundStart = 360
+    PodcastRoundResponse = 361
+    PodcastRoundEnd = 362
+
+    # 450 ~ 499 Downstream ASR events
+    ASRInfo = 450
+    ASRResponse = 451
+    ASREnded = 459
+
+    # 500 ~ 549 Upstream dialogue events
+    ChatTTSText = 500  # (Ground-Truth-Alignment) text for speech synthesis
+
+    # 550 ~ 599 Downstream dialogue events
+    ChatResponse = 550
+    ChatEnded = 559
+
+    # 650 ~ 699 Downstream dialogue events
+    # Events for source (original) language subtitle
+    SourceSubtitleStart = 650
+    SourceSubtitleResponse = 651
+    SourceSubtitleEnd = 652
+    # Events for target (translation) language subtitle
+    TranslationSubtitleStart = 653
+    TranslationSubtitleResponse = 654
+    TranslationSubtitleEnd = 655
+
+    def __str__(self) -> str:
+        return self.name if self.name else f"EventType({self.value})"
+
+
+@dataclass
+class Message:
+    """Message object
+
+    Message format:
+    0                 1                 2                 3
+    | 0 1 2 3 4 5 6 7 | 0 1 2 3 4 5 6 7 | 0 1 2 3 4 5 6 7 | 0 1 2 3 4 5 6 7 |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |    Version      |   Header Size   |     Msg Type    |      Flags      |
+    |   (4 bits)      |    (4 bits)     |     (4 bits)    |     (4 bits)    |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    | Serialization   |   Compression   |           Reserved                |
+    |   (4 bits)      |    (4 bits)     |           (8 bits)                |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |                                                                       |
+    |                   Optional Header Extensions                          |
+    |                     (if Header Size > 1)                              |
+    |                                                                       |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |                                                                       |
+    |                           Payload                                     |
+    |                      (variable length)                                |
+    |                                                                       |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
     """
-    session 数据.
-    """
-    user: User = Field(default_factory=User)
-    event: int = EventCode.START_SESSION.value
-    req_params: ReqParams = Field(default_factory=ReqParams)
 
-    def to_payload_bytes(self) -> bytes:
-        config = self
-        data = config.model_dump_json(exclude_none=True)
-        return data.encode()
+    version: VersionBits = VersionBits.Version1
+    header_size: HeaderSizeBits = HeaderSizeBits.HeaderSize4
+    type: MsgType = MsgType.Invalid
+    flag: MsgTypeFlagBits = MsgTypeFlagBits.NoSeq
+    serialization: SerializationBits = SerializationBits.JSON
+    compression: CompressionBits = CompressionBits.None_
 
-    def to_payload_str(self) -> str:
-        config = self
-        data = config.model_dump_json(exclude_none=True)
-        return data
+    event: EventType = EventType.None_
+    session_id: str = ""
+    connect_id: str = ""
+    sequence: int = 0
+    error_code: int = 0
 
-    def to_request_payload_bytes(self, text: str) -> bytes:
-        data = self.model_dump(exclude_none=True)
-        data["req_params"]["text"] = text
-        data["event"] = EventCode.TASK_REQUEST.value
-        j = json.dumps(data, ensure_ascii=False)
-        return j.encode()
+    payload: bytes = b""
 
+    @classmethod
+    def from_bytes(cls, data: bytes) -> "Message":
+        """Create message object from bytes"""
+        if len(data) < 3:
+            raise ValueError(
+                f"Data too short: expected at least 3 bytes, got {len(data)}"
+            )
 
-def is_error_frame(frame: bytes) -> bool:
-    # 检查协议版本和头部大小
-    if frame[0] != 0b00010001:
-        return False
+        type_and_flag = data[1]
+        msg_type = MsgType(type_and_flag >> 4)
+        flag = MsgTypeFlagBits(type_and_flag & 0b00001111)
 
-    # 检查消息类型
-    if frame[1] != 0b11110000:
-        return False
+        msg = cls(type=msg_type, flag=flag)
+        msg.unmarshal(data)
+        return msg
 
-    # 检查序列化方法和压缩方法
-    if frame[2] != 0b00010000:
-        return False
+    def marshal(self) -> bytes:
+        """Serialize message to bytes"""
+        buffer = io.BytesIO()
 
-    # 检查保留字节
-    if frame[3] != 0b00000000:
-        return False
+        # Write header
+        header = [
+            (self.version << 4) | self.header_size,
+            (self.type << 4) | self.flag,
+            (self.serialization << 4) | self.compression,
+        ]
 
-    # 如果以上条件都满足，则是异常帧
-    return True
+        header_size = 4 * self.header_size
+        if padding := header_size - len(header):
+            header.extend([0] * padding)
 
+        buffer.write(bytes(header))
 
-def is_normal_frame(frame: bytes) -> bool:
-    # 检查协议版本和头部大小
-    if frame[0] != 0b00010001:
-        return False
+        # Write other fields
+        writers = self._get_writers()
+        for writer in writers:
+            writer(buffer)
 
-    # 检查消息类型
-    if frame[1] not in [0b00000000, 0b00000001, 0b00000010, 0b00000011]:
-        return False
+        return buffer.getvalue()
 
-    # 检查序列化方法和压缩方法
-    if frame[2] not in [0b00000000, 0b00010000, 0b00100000, 0b00110000]:
-        return False
+    def unmarshal(self, data: bytes) -> None:
+        """Deserialize message from bytes"""
+        buffer = io.BytesIO(data)
 
-    # 检查压缩方法
-    if frame[2] & 0b00001111 not in [0b0000, 0b0001]:
-        return False
+        # Read version and header size
+        version_and_header_size = buffer.read(1)[0]
+        self.version = VersionBits(version_and_header_size >> 4)
+        self.header_size = HeaderSizeBits(version_and_header_size & 0b00001111)
 
-    # 检查保留字节
-    if frame[3] != 0b00000000:
-        return False
+        # Skip second byte
+        buffer.read(1)
 
-    # 如果以上条件都满足，则是正常帧
-    return True
+        # Read serialization and compression methods
+        serialization_compression = buffer.read(1)[0]
+        self.serialization = SerializationBits(serialization_compression >> 4)
+        self.compression = CompressionBits(serialization_compression & 0b00001111)
 
+        # Skip header padding
+        header_size = 4 * self.header_size
+        read_size = 3
+        if padding_size := header_size - read_size:
+            buffer.read(padding_size)
 
-PROTOCOL_VERSION = 0b0001
-DEFAULT_HEADER_SIZE = 0b0001
+        # Read other fields
+        readers = self._get_readers()
+        for reader in readers:
+            reader(buffer)
 
-# Message Type:
-FULL_CLIENT_REQUEST = 0b0001
-AUDIO_ONLY_RESPONSE = 0b1011
-FULL_SERVER_RESPONSE = 0b1001
-ERROR_INFORMATION = 0b1111
+        # Check for remaining data
+        remaining = buffer.read()
+        if remaining:
+            raise ValueError(f"Unexpected data after message: {remaining}")
 
-# Message Type Specific Flags
-MsgTypeFlagNoSeq = 0b0000  # Non-terminal packet with no sequence
-MsgTypeFlagPositiveSeq = 0b1  # Non-terminal packet with sequence > 0
-MsgTypeFlagLastNoSeq = 0b10  # last packet with no sequence
-MsgTypeFlagNegativeSeq = 0b11  # Payload contains event number (int32)
-MsgTypeFlagWithEvent = 0b100
-# Message Serialization
-NO_SERIALIZATION = 0b0000
-JSON = 0b0001
-# Message Compression
-COMPRESSION_NO = 0b0000
-COMPRESSION_GZIP = 0b0001
+    def _get_writers(self) -> List[Callable[[io.BytesIO], None]]:
+        """Get list of writer functions"""
+        writers = []
 
-EVENT_NONE = 0
-EVENT_Start_Connection = 1
+        if self.flag == MsgTypeFlagBits.WithEvent:
+            writers.extend([self._write_event, self._write_session_id])
 
-EVENT_FinishConnection = 2
+        if self.type in {
+            MsgType.FullClientRequest,
+            MsgType.FullServerResponse,
+            MsgType.FrontEndResultServer,
+            MsgType.AudioOnlyClient,
+            MsgType.AudioOnlyServer,
+        }:
+            if self.flag in [MsgTypeFlagBits.PositiveSeq, MsgTypeFlagBits.NegativeSeq]:
+                writers.append(self._write_sequence)
+        elif self.type == MsgType.Error:
+            writers.append(self._write_error_code)
+        else:
+            raise ValueError(f"Unsupported message type: {self.type}")
 
-EVENT_ConnectionStarted = 50  # 成功建连
+        writers.append(self._write_payload)
+        return writers
 
-EVENT_ConnectionFailed = 51  # 建连失败（可能是无法通过权限认证）
+    def _get_readers(self) -> List[Callable[[io.BytesIO], None]]:
+        """Get list of reader functions"""
+        readers = []
 
-EVENT_ConnectionFinished = 52  # 连接结束
+        if self.type in {
+            MsgType.FullClientRequest,
+            MsgType.FullServerResponse,
+            MsgType.FrontEndResultServer,
+            MsgType.AudioOnlyClient,
+            MsgType.AudioOnlyServer,
+        }:
+            if self.flag in [MsgTypeFlagBits.PositiveSeq, MsgTypeFlagBits.NegativeSeq]:
+                readers.append(self._read_sequence)
+        elif self.type == MsgType.Error:
+            readers.append(self._read_error_code)
+        else:
+            raise ValueError(f"Unsupported message type: {self.type}")
 
-# 上行Session事件
-EVENT_StartSession = 100
+        if self.flag == MsgTypeFlagBits.WithEvent:
+            readers.extend(
+                [self._read_event, self._read_session_id, self._read_connect_id]
+            )
 
-EVENT_FinishSession = 102
-# 下行Session事件
-EVENT_SessionStarted = 150
-EVENT_SessionFinished = 152
+        readers.append(self._read_payload)
+        return readers
 
-EVENT_SessionFailed = 153
+    def _write_event(self, buffer: io.BytesIO) -> None:
+        """Write event"""
+        buffer.write(struct.pack(">i", self.event))
 
-# 上行通用事件
-EVENT_TaskRequest = 200
+    def _write_session_id(self, buffer: io.BytesIO) -> None:
+        """Write session ID"""
+        if self.event in [
+            EventType.StartConnection,
+            EventType.FinishConnection,
+            EventType.ConnectionStarted,
+            EventType.ConnectionFailed,
+        ]:
+            return
 
-# 下行TTS事件
-EVENT_TTSSentenceStart = 350
+        session_id_bytes = self.session_id.encode("utf-8")
+        size = len(session_id_bytes)
+        if size > 0xFFFFFFFF:
+            raise ValueError(f"Session ID size ({size}) exceeds max(uint32)")
 
-EVENT_TTSSentenceEnd = 351
+        buffer.write(struct.pack(">I", size))
+        if size > 0:
+            buffer.write(session_id_bytes)
 
-EVENT_TTSResponse = 352
+    def _write_sequence(self, buffer: io.BytesIO) -> None:
+        """Write sequence number"""
+        buffer.write(struct.pack(">i", self.sequence))
 
+    def _write_error_code(self, buffer: io.BytesIO) -> None:
+        """Write error code"""
+        buffer.write(struct.pack(">I", self.error_code))
 
-class Header:
-    def __init__(self,
-                 protocol_version=PROTOCOL_VERSION,
-                 header_size=DEFAULT_HEADER_SIZE,
-                 message_type: int = 0,
-                 message_type_specific_flags: int = 0,
-                 serial_method: int = NO_SERIALIZATION,
-                 compression_type: int = COMPRESSION_NO,
-                 reserved_data=0):
-        self.header_size = header_size
-        self.protocol_version = protocol_version
-        self.message_type = message_type
-        self.message_type_specific_flags = message_type_specific_flags
-        self.serial_method = serial_method
-        self.compression_type = compression_type
-        self.reserved_data = reserved_data
+    def _write_payload(self, buffer: io.BytesIO) -> None:
+        """Write payload"""
+        size = len(self.payload)
+        if size > 0xFFFFFFFF:
+            raise ValueError(f"Payload size ({size}) exceeds max(uint32)")
 
-    def as_bytes(self) -> bytes:
-        return bytes([
-            (self.protocol_version << 4) | self.header_size,
-            (self.message_type << 4) | self.message_type_specific_flags,
-            (self.serial_method << 4) | self.compression_type,
-            self.reserved_data
-        ])
+        buffer.write(struct.pack(">I", size))
+        buffer.write(self.payload)
 
+    def _read_event(self, buffer: io.BytesIO) -> None:
+        """Read event"""
+        event_bytes = buffer.read(4)
+        if event_bytes:
+            self.event = EventType(struct.unpack(">i", event_bytes)[0])
 
-class Params:
-    def __init__(self, event: int = EVENT_NONE, session_id: str = None, sequence: int = None):
-        self.event = event
-        self.sessionId = session_id
-        self.errorCode: int = 0
-        self.connectionId: str | None = None
-        self.response_meta_json: str | None = None
-        self.sequence = sequence
+    def _read_session_id(self, buffer: io.BytesIO) -> None:
+        """Read session ID"""
+        if self.event in [
+            EventType.StartConnection,
+            EventType.FinishConnection,
+            EventType.ConnectionStarted,
+            EventType.ConnectionFailed,
+            EventType.ConnectionFinished,
+        ]:
+            return
 
-    # 转成 byte 序列
-    def as_bytes(self) -> bytes:
-        option_bytes = bytearray()
-        if self.event != EVENT_NONE:
-            option_bytes.extend(self.event.to_bytes(4, "big", signed=True))
-        if self.sessionId is not None:
-            session_id_bytes = str.encode(self.sessionId)
-            size = len(session_id_bytes).to_bytes(4, "big", signed=True)
-            option_bytes.extend(size)
-            option_bytes.extend(session_id_bytes)
-        if self.sequence is not None:
-            option_bytes.extend(self.sequence.to_bytes(4, "big", signed=True))
-        return option_bytes
+        size_bytes = buffer.read(4)
+        if size_bytes:
+            size = struct.unpack(">I", size_bytes)[0]
+            if size > 0:
+                session_id_bytes = buffer.read(size)
+                if len(session_id_bytes) == size:
+                    self.session_id = session_id_bytes.decode("utf-8")
 
+    def _read_connect_id(self, buffer: io.BytesIO) -> None:
+        """Read connection ID"""
+        if self.event in [
+            EventType.ConnectionStarted,
+            EventType.ConnectionFailed,
+            EventType.ConnectionFinished,
+        ]:
+            size_bytes = buffer.read(4)
+            if size_bytes:
+                size = struct.unpack(">I", size_bytes)[0]
+                if size > 0:
+                    self.connect_id = buffer.read(size).decode("utf-8")
 
-class Response:
-    def __init__(self, header: Header, params: Params):
-        self.params = params
-        self.header = header
-        self.payload: bytes | None = None
+    def _read_sequence(self, buffer: io.BytesIO) -> None:
+        """Read sequence number"""
+        sequence_bytes = buffer.read(4)
+        if sequence_bytes:
+            self.sequence = struct.unpack(">i", sequence_bytes)[0]
 
-    def is_audio(self) -> bool:
-        return self.params.event == EVENT_TTSResponse and self.header.message_type == AUDIO_ONLY_RESPONSE
+    def _read_error_code(self, buffer: io.BytesIO) -> None:
+        """Read error code"""
+        error_code_bytes = buffer.read(4)
+        if error_code_bytes:
+            self.error_code = struct.unpack(">I", error_code_bytes)[0]
 
-    def is_connection_started(self) -> bool:
-        return self.params.event == EVENT_ConnectionStarted
+    def _read_payload(self, buffer: io.BytesIO) -> None:
+        """Read payload"""
+        size_bytes = buffer.read(4)
+        if size_bytes:
+            size = struct.unpack(">I", size_bytes)[0]
+            if size > 0:
+                self.payload = buffer.read(size)
 
-    def get_audio_data(self) -> bytes | None:
-        return self.payload
-
-    def is_session_done(self) -> bool:
-        return self.params.event in (EVENT_SessionFailed, EVENT_SessionFinished)
-
-    def is_connection_done(self) -> bool:
-        return self.params.event in (EVENT_ConnectionFailed, EVENT_ConnectionFinished)
-
-    def __str__(self):
-        return str(dict(
-            optional=self.params.__dict__,
-            header=self.header.__dict__,
-            payload=len(self.payload) if self.payload else None,
-        ))
-
-
-# 发送事件
-async def send_event(
-        ws: Connection,
-        header: bytes,
-        optional: bytes | None = None,
-        payload: bytes = None,
-):
-    """
-    send event to websocket server
-    """
-    full_client_request = bytearray(header)
-    if optional is not None:
-        full_client_request.extend(optional)
-    if payload is not None:
-        payload_size = len(payload).to_bytes(4, 'big', signed=True)
-        full_client_request.extend(payload_size)
-        full_client_request.extend(payload)
-    await ws.send(full_client_request)
-
-
-# 读取 res 数组某段 字符串内容
-def read_res_content(res: bytes, offset: int) -> Tuple[str, int]:
-    content_size = int.from_bytes(res[offset: offset + 4], 'big')
-    offset += 4
-    content = res[offset: offset + content_size].decode()
-    offset += content_size
-    return content, offset
-
-
-# 读取 payload
-def read_res_payload(res: bytes, offset: int) -> Tuple[bytes, int]:
-    payload_size = int.from_bytes(res[offset: offset + 4], 'big')
-    offset += 4
-    payload = res[offset: offset + payload_size]
-    offset += payload_size
-    return payload, offset
-
-
-# 解析响应结果
-def unwrap_response(res) -> Response:
-    if isinstance(res, str):
-        raise RuntimeError(res)
-    response = Response(Header(), Params())
-    # 解析结果
-    # header
-    header = response.header
-    num = 0b00001111
-    header.protocol_version = res[0] >> 4 & num
-    header.header_size = res[0] & 0x0f
-    header.message_type = (res[1] >> 4) & num
-    header.message_type_specific_flags = res[1] & 0x0f
-    header.serialization_method = res[2] >> num
-    header.message_compression = res[2] & 0x0f
-    header.reserved = res[3]
-    #
-    offset = 4
-    optional = response.params
-    if header.message_type == FULL_SERVER_RESPONSE or AUDIO_ONLY_RESPONSE:
-        # read event
-        if header.message_type_specific_flags == MsgTypeFlagWithEvent:
-            optional.event = int.from_bytes(res[offset:8], 'big')
-            offset += 4
-            if optional.event == EVENT_NONE:
-                return response
-            # read connectionId
-            elif optional.event == EVENT_ConnectionStarted:
-                optional.connectionId, offset = read_res_content(res, offset)
-            elif optional.event == EVENT_ConnectionFailed:
-                optional.response_meta_json, offset = read_res_content(res, offset)
-            elif (optional.event == EVENT_SessionStarted
-                  or optional.event == EVENT_SessionFailed
-                  or optional.event == EVENT_SessionFinished):
-                optional.sessionId, offset = read_res_content(res, offset)
-                optional.response_meta_json, offset = read_res_content(res, offset)
-            else:
-                optional.sessionId, offset = read_res_content(res, offset)
-                response.payload, offset = read_res_payload(res, offset)
-
-    elif header.message_type == ERROR_INFORMATION:
-        optional.errorCode = int.from_bytes(res[offset:offset + 4], "big", signed=True)
-        offset += 4
-        response.payload, offset = read_res_payload(res, offset)
-    return response
+    def __str__(self) -> str:
+        """String representation"""
+        if self.type in [MsgType.AudioOnlyServer, MsgType.AudioOnlyClient]:
+            if self.flag in [MsgTypeFlagBits.PositiveSeq, MsgTypeFlagBits.NegativeSeq]:
+                return f"MsgType: {self.type}, EventType:{self.event}, Sequence: {self.sequence}, PayloadSize: {len(self.payload)}"
+            return f"MsgType: {self.type}, EventType:{self.event}, PayloadSize: {len(self.payload)}"
+        elif self.type == MsgType.Error:
+            return f"MsgType: {self.type}, EventType:{self.event}, ErrorCode: {self.error_code}, Payload: {self.payload.decode('utf-8', 'ignore')}"
+        else:
+            if self.flag in [MsgTypeFlagBits.PositiveSeq, MsgTypeFlagBits.NegativeSeq]:
+                return f"MsgType: {self.type}, EventType:{self.event}, Sequence: {self.sequence}, Payload: {self.payload.decode('utf-8', 'ignore')}"
+            return f"MsgType: {self.type}, EventType:{self.event}, Payload: {self.payload.decode('utf-8', 'ignore')}"
 
 
-def get_payload_bytes(
-        uid='1234',
-        event=EVENT_NONE,
-        text='',
-        speaker='',
-        audio_format='mp3',
-        audio_sample_rate=24000,
-):
-    return str.encode(json.dumps(
-        {
-            "user": {"uid": uid},
-            "event": event,
-            "namespace": "BidirectionalTTS",
-            "req_params": {
-                "text": text,
-                "speaker": speaker,
-                "audio_params": {
-                    "format": audio_format,
-                    "sample_rate": audio_sample_rate
-                }
-            }
-        }
-    ))
+async def receive_message(websocket: websockets.ClientConnection) -> Message:
+    """Receive message from websocket"""
+    try:
+        data = await websocket.recv()
+        if isinstance(data, str):
+            raise ValueError(f"Unexpected text message: {data}")
+        elif isinstance(data, bytes):
+            msg = Message.from_bytes(data)
+            logger.info(f"Received: {msg}")
+            return msg
+        else:
+            raise ValueError(f"Unexpected message type: {type(data)}")
+    except Exception as e:
+        logger.error(f"Failed to receive message: {e}")
+        raise
 
 
-async def start_connection(ws: Connection):
-    """
-    开启 connection.
-    """
-    header = Header(message_type=FULL_CLIENT_REQUEST, message_type_specific_flags=MsgTypeFlagWithEvent).as_bytes()
-    optional = Params(event=EVENT_Start_Connection).as_bytes()
-    payload = str.encode("{}")
-    return await send_event(ws, header, optional, payload)
+async def wait_for_event(
+        websocket: websockets.ClientConnection,
+        msg_type: MsgType,
+        event_type: EventType,
+) -> Message:
+    """Wait for specific event"""
+    msg = await receive_message(websocket)
+    if msg.type != msg_type or msg.event != event_type:
+        raise ValueError(f"Unexpected message: {msg}")
+    if msg.type == msg_type and msg.event == event_type:
+        return msg
+
+
+async def full_client_request(
+        websocket: websockets.ClientConnection, payload: bytes
+) -> None:
+    """Send full client message"""
+    msg = Message(type=MsgType.FullClientRequest, flag=MsgTypeFlagBits.NoSeq)
+    msg.payload = payload
+    logger.info(f"Sending: {msg}")
+    await websocket.send(msg.marshal())
+
+
+async def audio_only_client(
+        websocket: websockets.ClientConnection, payload: bytes, flag: MsgTypeFlagBits
+) -> None:
+    """Send audio-only client message"""
+    msg = Message(type=MsgType.AudioOnlyClient, flag=flag)
+    msg.payload = payload
+    logger.info(f"Sending: {msg}")
+    await websocket.send(msg.marshal())
+
+
+async def start_connection(websocket: websockets.ClientConnection) -> None:
+    """Start connection"""
+    msg = Message(type=MsgType.FullClientRequest, flag=MsgTypeFlagBits.WithEvent)
+    msg.event = EventType.StartConnection
+    msg.payload = b"{}"
+    logger.info(f"Sending: {msg}")
+    await websocket.send(msg.marshal())
+
+
+async def finish_connection(websocket: websockets.ClientConnection) -> None:
+    """Finish connection"""
+    msg = Message(type=MsgType.FullClientRequest, flag=MsgTypeFlagBits.WithEvent)
+    msg.event = EventType.FinishConnection
+    msg.payload = b"{}"
+    logger.info(f"Sending: {msg}")
+    await websocket.send(msg.marshal())
 
 
 async def start_session(
-        ws: Connection,
-        session_id: str,
-        session_payload: bytes,
-):
-    """
-    创建 session.
-    """
-    header = Header(message_type=FULL_CLIENT_REQUEST,
-                    message_type_specific_flags=MsgTypeFlagWithEvent,
-                    serial_method=JSON
-                    ).as_bytes()
-    optional = Params(event=EVENT_StartSession, session_id=session_id).as_bytes()
-    return await send_event(ws, header, optional, session_payload)
+        websocket: websockets.ClientConnection, payload: bytes, session_id: str
+) -> None:
+    """Start session"""
+    msg = Message(type=MsgType.FullClientRequest, flag=MsgTypeFlagBits.WithEvent)
+    msg.event = EventType.StartSession
+    msg.session_id = session_id
+    msg.payload = payload
+    logger.info(f"Sending: {msg}")
+    await websocket.send(msg.marshal())
 
 
 async def finish_session(
-        ws: Connection,
-        session_id: str,
-):
-    """
-    关闭一个 session.
-    """
-    header = Header(message_type=FULL_CLIENT_REQUEST,
-                    message_type_specific_flags=MsgTypeFlagWithEvent,
-                    serial_method=JSON
-                    ).as_bytes()
-    optional = Params(event=EVENT_FinishSession, session_id=session_id).as_bytes()
-    payload = str.encode('{}')
-    return await send_event(ws, header, optional, payload)
+        websocket: websockets.ClientConnection, session_id: str
+) -> None:
+    """Finish session"""
+    msg = Message(type=MsgType.FullClientRequest, flag=MsgTypeFlagBits.WithEvent)
+    msg.event = EventType.FinishSession
+    msg.session_id = session_id
+    msg.payload = b"{}"
+    logger.info(f"Sending: {msg}")
+    await websocket.send(msg.marshal())
 
 
-async def send_full_client_request(
-        ws: Connection,
-        session_id: str,
-        task_reqeust_payload: bytes,
-):
-    """
-    发送文本.
-    """
-    header = Header(message_type=FULL_CLIENT_REQUEST,
-                    message_type_specific_flags=MsgTypeFlagWithEvent,
-                    serial_method=JSON).as_bytes()
-    optional = Params(event=EVENT_TaskRequest, session_id=session_id).as_bytes()
-    return await send_event(ws, header, optional, task_reqeust_payload)
+async def cancel_session(
+        websocket: websockets.ClientConnection, session_id: str
+) -> None:
+    """Cancel session"""
+    msg = Message(type=MsgType.FullClientRequest, flag=MsgTypeFlagBits.WithEvent)
+    msg.event = EventType.CancelSession
+    msg.session_id = session_id
+    msg.payload = b"{}"
+    logger.info(f"Sending: {msg}")
+    await websocket.send(msg.marshal())
 
 
-async def finish_connection(ws: Connection):
-    """
-    关闭连接.
-    """
-    header = Header(message_type=FULL_CLIENT_REQUEST,
-                    message_type_specific_flags=MsgTypeFlagWithEvent,
-                    serial_method=JSON
-                    ).as_bytes()
-    optional = Params(event=EVENT_FinishConnection).as_bytes()
-    payload = str.encode('{}')
-    return await send_event(ws, header, optional, payload)
+async def task_request(
+        websocket: websockets.ClientConnection, payload: bytes, session_id: str
+) -> None:
+    """Send task request"""
+    msg = Message(type=MsgType.FullClientRequest, flag=MsgTypeFlagBits.WithEvent)
+    msg.event = EventType.TaskRequest
+    msg.session_id = session_id
+    msg.payload = payload
+    logger.info(f"Sending: {msg}")
+    await websocket.send(msg.marshal())
