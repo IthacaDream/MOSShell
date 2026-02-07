@@ -1,45 +1,54 @@
 [project]
 name = "ghoshell-moss"
-version = "0.1.0"
+version = "0.1.0-alpha"
 description = "LLM-oriented operating system shell, providing interpreter for llm to control everything"
 authors = [
-    { name = "thirdgerb", email = "thirdgerb@gmail.com" }
+    { name = "thirdgerb" },
+    { name = "17wang" }
 ]
-license = { text = "MIT" }
+license = { text = "Apache License 2.0" }
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "ghoshell-common>=0.4.0.dev1",
-    "ghoshell-container>=0.3.0.dev1",
-    "zmq>=0.0.0",
-    "numpy>=2.2.6",
-    "click>=8.3.0",
-    "websockets>=15.0.1",
+    "ghoshell-common>=0.5.0",
+    "ghoshell-container>=0.3.1",
+    "openai>=2.8.1",
+    "pillow>=12.1.0",
 ]
 
 [project.optional-dependencies]
 zmq = [
+    "zmq>=0.0.0",
     "aiozmq>=1.0.0",
+    "psutil>=7.2.1",
 ]
 mcp = [
     "mcp[cli]>=1.17.0",
 ]
-demo = [
-    "live2d-py>=0.5.4",
-    "pygame>=2.6.1",
-    "pyside6>=6.10.0",
+wss = [
+    "websockets>=15.0.1",
 ]
-llm = [
-    "litellm>=1.78.5",
-]
-agent = [
-    "prompt-toolkit>=3.0.52",
-    "rich>=14.2.0",
+redis = [
+    "fakeredis>=2.32.1",
+    "redis>=7.0.1",
 ]
 audio = [
     "pulsectl>=24.12.0",
     "pyaudio>=0.2.14",
     "scipy>=1.15.3",
+]
+
+# 所有测试性的依赖放一起
+contrib = [
+    "litellm>=1.78.5",
+    "live2d-py>=0.5.4,<0.6.0",
+    "mermaid-py>=0.8.1",
+    "mss>=10.1.0",
+    "prompt-toolkit>=3.0.52",
+    "pygame>=2.6.1",
+    "pyqt6>=6.10.2",
+    "python-mpv-jsonipc>=1.2.1",
+    "rich>=14.2.0",
 ]
 
 [tool.setuptools]
@@ -50,6 +59,7 @@ packages = [
 
 [tool.pytest.ini_options]
 asyncio_default_fixture_loop_scope = "function"
+
 
 [tool.pdm.build]
 includes = []
@@ -63,5 +73,8 @@ dev = [
     "pytest>=8.3.5",
     "pytest-asyncio>=1.1.0",
     "anyio>=4.10.0",
+    "mcp>=1.21.0",
+    "fastapi>=0.121.1",
+    "uvicorn>=0.37.0",
 ]
 

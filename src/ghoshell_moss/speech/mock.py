@@ -1,7 +1,8 @@
+
 from typing import Optional, List, Dict
 
-from ghoshell_moss.concepts.speech import Speech, SpeechStream
-from ghoshell_moss.helpers.asyncio_utils import ThreadSafeEvent
+from ghoshell_moss.core.concepts.speech import Speech, SpeechStream
+from ghoshell_moss.core.helpers.asyncio_utils import ThreadSafeEvent
 from ghoshell_common.helpers import uuid
 
 import threading

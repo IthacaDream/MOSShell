@@ -1,6 +1,6 @@
 from ghoshell_moss.speech.mock import MockSpeech
-from ghoshell_moss.ctml.interpreter import CTMLInterpreter
-from ghoshell_moss.concepts.command import PyCommand, make_command_group
+from ghoshell_moss.core.ctml.interpreter import CTMLInterpreter
+from ghoshell_moss.core.concepts.command import PyCommand, make_command_group
 from collections import deque
 import asyncio
 import pytest

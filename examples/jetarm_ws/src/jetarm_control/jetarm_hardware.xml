@@ -1,0 +1,9 @@
+<library path="jetarm_hardware">
+  <class name="jetarm_control/JetArmHardware"
+         type="jetarm_control::JetArmHardware"
+         base_class_type="hardware_interface::SystemInterface">
+    <description>
+      ROS2 Control hardware interface for JetArm 6-DOF BUS servo arm.
+    </description>
+  </class>
+</library>

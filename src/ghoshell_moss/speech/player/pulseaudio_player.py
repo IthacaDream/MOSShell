@@ -1,11 +1,14 @@
+
 import asyncio
 import numpy as np
-from ghoshell_moss.depends import check_pulseaudio
-from ghoshell_moss.concepts.speech import AudioFormat
+from ghoshell_moss.core.concepts.speech import AudioFormat
 from ghoshell_common.contracts import LoggerItf
 
-if check_pulseaudio():
+try:
     import pulsectl
+
+except Exception as e:
+    raise ImportError(f"failed to import audio dependencies, please try to install ghoshell-shell[audio]: {e}")
 
 from ghoshell_moss.speech.player.base_player import BaseAudioStreamPlayer
 
@@ -72,4 +75,3 @@ class PulseAudioStreamPlayer(BaseAudioStreamPlayer):
     def _audio_stream_write(self, data: np.ndarray):
         # 写入音频数据（阻塞调用）
         self.pulse.stream_write(self.stream, data.tobytes())
-

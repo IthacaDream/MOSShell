@@ -4,12 +4,12 @@ import pytest
 from pydantic import Field
 
 from ghoshell_moss import Interpreter
-from ghoshell_moss.concepts.states import StateBaseModel, StateStore, MemoryStateStore, StateModel
+from ghoshell_moss.core.concepts.states import StateBaseModel, StateStore, MemoryStateStore, StateModel
 
 
 @pytest.mark.asyncio
 async def test_shell_state_store_baseline():
-    from ghoshell_moss.shell import new_shell
+    from ghoshell_moss.core.shell import new_shell
 
     shell = new_shell()
     chan = shell.main_channel.new_child('a')
@@ -58,7 +58,7 @@ async def test_shell_state_store_baseline():
 
 @pytest.mark.asyncio
 async def test_shell_state_store_share():
-    from ghoshell_moss.shell import new_shell
+    from ghoshell_moss.core.shell import new_shell
 
     shell = new_shell()
     a_chan = shell.main_channel.new_child('a')

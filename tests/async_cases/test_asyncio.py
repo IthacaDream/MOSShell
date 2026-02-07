@@ -1,3 +1,4 @@
+import threading
 from typing import Awaitable
 import asyncio
 import time
@@ -206,3 +207,249 @@ async def test_asyncio_call_soon():
     _ = loop.create_task(foo())
     await event.wait()
     assert done[0] == 1
+
+
+@pytest.mark.asyncio
+async def test_asyncio_future():
+    fut = asyncio.Future()
+    assert not fut.done()
+    fut.set_result(123)
+    assert 123 == fut.result()
+    assert fut.done()
+
+
+@pytest.mark.asyncio
+async def test_future_in_diff_thread():
+    import threading
+    fut = asyncio.Future()
+    done = []
+
+    def wait_fut():
+        async def wait_futu():
+            await fut
+            assert fut.result() == 123
+            done.append(1)
+
+        asyncio.run(wait_futu())
+
+    def set_fut_result():
+        fut.set_result(123)
+        time.sleep(0.3)
+
+    t1 = threading.Thread(target=wait_fut)
+    t2 = threading.Thread(target=wait_fut)
+    t3 = threading.Thread(target=set_fut_result)
+    t3.start()
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+    t3.join()
+    assert fut.result() == 123
+    assert len(done) == 2
+
+
+@pytest.mark.asyncio
+async def test_future_cancel_is_done():
+    fut = asyncio.Future()
+    fut.cancel()
+    assert fut.cancelled()
+    assert fut.done()
+
+
+@pytest.mark.asyncio
+async def test_future_exception_is_done():
+    fut = asyncio.Future()
+    e = Exception("hello")
+    fut.set_exception(e)
+    assert fut.done()
+
+
+@pytest.mark.asyncio
+async def test_future_set_result_is_done():
+    fut = asyncio.Future()
+    fut.set_result(123)
+    assert fut.done()
+
+
+@pytest.mark.asyncio
+async def test_future_cancel():
+    fut = asyncio.Future()
+    fut.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await fut
+
+
+@pytest.mark.asyncio
+async def test_future_call_done_callback_before_done():
+    fut = asyncio.Future()
+    check = []
+
+    def done_callback(_fut: asyncio.Future):
+        assert _fut.result() == 123
+        if _fut.done():
+            check.append(1)
+
+    fut.add_done_callback(done_callback)
+    fut.set_result(123)
+    r = await fut
+    assert r == 123
+
+    assert len(check) == 0
+
+
+def test_cancel_future_in_other_thread():
+    from queue import Queue
+
+    future_queue = Queue()
+    done = []
+
+    async def thread_a_produce_future():
+        future = asyncio.Future()
+        future_queue.put_nowait(future)
+        try:
+            await future
+        except asyncio.CancelledError:
+            done.append(1)
+        except Exception:
+            done.append(0)
+
+    def thread_a_main():
+        asyncio.run(thread_a_produce_future())
+        done.append(1)
+
+    def thread_b_consume_future():
+        try:
+            future: asyncio.Future = future_queue.get()
+            future.get_loop().call_soon_threadsafe(future.cancel)
+        except Exception:
+            done.append(0)
+
+    t_a = threading.Thread(target=thread_a_main)
+    t_b = threading.Thread(target=thread_b_consume_future)
+    t_a.start()
+    t_b.start()
+    t_a.join()
+    t_b.join()
+    assert done[0] == 1
+
+
+def test_set_exp_future_in_other_thread():
+    from queue import Queue
+
+    future_queue = Queue()
+    done = []
+
+    async def thread_a_produce_future():
+        future = asyncio.Future()
+        future_queue.put_nowait(future)
+        try:
+            await future
+        except Exception as e:
+            done.append(str(e))
+
+    def thread_a_main():
+        asyncio.run(thread_a_produce_future())
+
+    def thread_b_consume_future():
+        future: asyncio.Future = future_queue.get()
+        future.get_loop().call_soon_threadsafe(future.set_exception, RuntimeError("hello"))
+
+    t_a = threading.Thread(target=thread_a_main)
+    t_b = threading.Thread(target=thread_b_consume_future)
+    t_a.start()
+    t_b.start()
+    t_a.join()
+    t_b.join()
+    assert done[0] == "hello"
+
+
+def test_set_result_future_in_other_thread():
+    from queue import Queue
+
+    future_queue = Queue()
+    done = []
+
+    async def thread_a_produce_future():
+        future = asyncio.Future()
+        future_queue.put_nowait(future)
+        r = await future
+        assert r == 123
+        done.append(r)
+
+    def thread_a_main():
+        asyncio.run(thread_a_produce_future())
+
+    def thread_b_consume_future():
+        future: asyncio.Future = future_queue.get()
+        future.get_loop().call_soon_threadsafe(future.set_result, 123)
+
+    t_a = threading.Thread(target=thread_a_main)
+    t_b = threading.Thread(target=thread_b_consume_future)
+    t_a.start()
+    t_b.start()
+    t_a.join()
+    t_b.join()
+    assert done[0] == 123
+
+
+@pytest.mark.asyncio
+async def test_future_result_and_exception():
+    future = asyncio.Future()
+
+    def foo():
+        exp = Exception("hello")
+        future.set_exception(exp)
+
+    foo()
+    assert future.exception() is not None
+    with pytest.raises(Exception):
+        # result will always raise exception.
+        assert future.result() is None
+
+
+@pytest.mark.asyncio
+async def test_async_iterable():
+    from typing import AsyncIterable
+
+    async def foo() -> AsyncIterable[int]:
+        for i in range(10):
+            yield i
+
+    arr = []
+    async for k in foo():
+        arr.append(k)
+
+    assert len(arr) == 10
+    r = foo()
+    async for k in r:
+        arr.append(k)
+    assert len(arr) == 20
+
+
+@pytest.mark.asyncio
+async def test_async_iterable_item():
+    from typing import AsyncIterable
+
+    class Int(int):
+        pass
+
+    async def foo(num: int) -> AsyncIterable[Int]:
+        for i in range(num):
+            yield Int(i)
+
+    arr = []
+    async for k in foo(10):
+        arr.append(k)
+
+    assert len(arr) == 10
+    r = foo(5)
+    async for k in r:
+        arr.append(k)
+    assert len(arr) == 15
+
+    items = foo(10)
+    arr = []
+    async for k in items:
+        arr.append(k)
+    assert len(arr) == 10

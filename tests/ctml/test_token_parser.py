@@ -1,7 +1,7 @@
 from typing import List
-from ghoshell_moss.concepts.command import CommandToken, CommandTokenType
-from ghoshell_moss.concepts.errors import InterpretError
-from ghoshell_moss.ctml.token_parser import CTMLTokenParser
+from ghoshell_moss.core.concepts.command import CommandToken, CommandTokenType
+from ghoshell_moss.core.concepts.errors import InterpretError
+from ghoshell_moss.core.ctml.token_parser import CTMLTokenParser
 from collections import deque
 
 
@@ -148,6 +148,23 @@ def test_token_with_cdata():
     assert expect == foo_deltas
 
 
+def test_token_with_cdata_content():
+    content = """
+<mac_jxa:run_jxa><![CDATA[
+(function() {
+    const Calendar = Application('Calendar');
+    Calendar.includeStandardAdditions = true;
+    Calendar.activate();
+    return "已为你打开日历应用";
+})();
+]]></mac_jxa:run_jxa>
+"""
+    q = []
+    CTMLTokenParser.parse(q.append, iter(content), root_tag="ctml")
+    assert q.pop() is None
+    assert len(q) > 1
+
+
 def test_token_with_prefix():
     content = "<speaker__say>hello</speaker__say>"
     q = []
@@ -194,6 +211,18 @@ def test_namespace_tag():
 
 def test_parser_with_chinese():
     content = '<foo.bar:baz>你好啊</foo.bar:baz>'
+    q: List[CommandToken] = []
+    CTMLTokenParser.parse(q.append, iter(content), root_tag="speak")
+    assert q.pop() is None
+    q = q[1:-1]
+
+    assert "".join([t.content for t in q]) == content
+
+
+def test_token_parser_with_json():
+    content = '''
+<jetarm:run_trajectory>{"joint_names": ["gripper", "wrist_roll", "wrist_pitch", "elbow_pitch", "shoulder_pitch", "shoulder_roll"], "points": [{"positions": [2.16, 11.16, -60.0, -135.0, 60.0, -0.36], "time_from_start": 0.0}, {"positions": [5.0, 15.0, -55.0, -130.0, 55.0, 2.0], "time_from_start": 1.0}, {"positions": [2.16, 11.16, -60.0, -135.0, 60.0, -0.36], "time_from_start": 2.0}]}</jetarm:run_trajectory>
+'''
     q: List[CommandToken] = []
     CTMLTokenParser.parse(q.append, iter(content), root_tag="speak")
     assert q.pop() is None

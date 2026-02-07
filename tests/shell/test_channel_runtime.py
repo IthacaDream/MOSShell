@@ -1,7 +1,7 @@
 import logging
 
 from typing import List
-from ghoshell_moss.shell.channel_runtime import ChannelRuntime
+from ghoshell_moss.core.shell.channel_runtime import ChannelRuntime
 from ghoshell_container import Container
 from ghoshell_moss import PyChannel, PyCommand, BaseCommandTask, Channel, CommandTask
 import pytest
@@ -38,7 +38,10 @@ async def test_channel_runtime_impl_baseline():
 
 
 @pytest.mark.asyncio
-async def test_child_channel_runtime_is_running():
+async def test_child_channel_runtime_is_not_running():
+    """
+    由于现在 Channel Broker 不再递归启动了, 所以不应该有任何子 channel 被启动.
+    """
     main = PyChannel(name="")
 
     @main.build.command()
@@ -53,7 +56,8 @@ async def test_child_channel_runtime_is_running():
 
     runtime = ChannelRuntime(Container(), main, callback)
     async with runtime:
-        assert a.is_running()
+        assert main.is_running()
+        assert not a.is_running()
         assert main.children().get('a') is a
         commands = runtime.commands()
         assert "bar" in commands

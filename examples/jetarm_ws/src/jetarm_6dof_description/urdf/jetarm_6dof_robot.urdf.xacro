@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="utf-8"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="jetarm_6dof">
+    <xacro:arg name="prefix" default=""/>
+
+    <!-- 1. Core robot description - ALWAYS KEEP -->
+    <xacro:include filename="$(find jetarm_6dof_description)/urdf/jetarm_6dof_description.urdf.xacro"/>
+    <xacro:include filename="$(find jetarm_6dof_description)/urdf/materials.xacro"/>
+
+    <!-- 2. REAL HARDWARE Transmission - NEW! -->
+    <xacro:include filename="$(find jetarm_6dof_description)/urdf/jetarm.transmission.xacro" />
+
+    <!-- Used for fixing robot to the "world" -->
+    <link name="$(arg prefix)world"/>
+
+    <!-- 3. Instantiate the robot -->
+    <xacro:jetarm_6dof parent="$(arg prefix)world" prefix="$(arg prefix)">
+    	<origin xyz="0 0 0" rpy="0 0 0"/>
+    </xacro:jetarm_6dof>
+
+    <!-- 4. Apply the REAL HARDWARE transmissions -->
+    <xacro:jetarm_hardware_transmissions prefix="$(arg prefix)"/>
+    <ros2_control name="JetArmSystem" type="system">
+      <hardware>
+        <plugin>jetarm_control/JetArmHardware</plugin>
+        <param name="device">/dev/ttyCH341USB0</param>
+        <param name="baudrate">1000000</param>
+      </hardware>
+
+      <!-- 6 个关节 -->
+      <joint name="joint1">
+        <command_interface name="position"/>
+        <state_interface name="position"/>
+        <state_interface name="velocity"/>
+        <state_interface name="effort"/>
+        <param name="servo_id">1</param>
+        <param name="offset_ticks">500</param>
+        <param name="scale">0.00418879</param>
+        <param name="direction">1</param>
+      </joint>
+
+      <joint name="joint2">
+        <command_interface name="position"/>
+        <state_interface name="position"/>
+        <state_interface name="velocity"/>
+        <state_interface name="effort"/>
+        <param name="servo_id">2</param>
+        <param name="offset_ticks">500</param>
+        <param name="scale">0.00418879</param>
+        <param name="direction">1</param>
+      </joint>
+
+      <joint name="joint3">
+        <command_interface name="position"/>
+        <state_interface name="position"/>
+        <state_interface name="velocity"/>
+        <state_interface name="effort"/>
+        <param name="servo_id">3</param>
+        <param name="offset_ticks">500</param>
+        <param name="scale">0.00418879</param>
+        <param name="direction">1</param>
+      </joint>
+
+      <joint name="joint4">
+        <command_interface name="position"/>
+        <state_interface name="position"/>
+        <state_interface name="velocity"/>
+        <state_interface name="effort"/>
+        <param name="servo_id">4</param>
+        <param name="offset_ticks">500</param>
+        <param name="scale">0.00418879</param>
+        <param name="direction">1</param>
+      </joint>
+
+      <joint name="joint5">
+        <command_interface name="position"/>
+        <state_interface name="position"/>
+        <state_interface name="velocity"/>
+        <state_interface name="effort"/>
+        <param name="servo_id">5</param>
+        <param name="offset_ticks">500</param>
+        <param name="scale">0.00418879</param>
+        <param name="direction">1</param>
+      </joint>
+
+      <joint name="r_joint">
+        <command_interface name="position"/>
+        <state_interface name="position"/>
+        <state_interface name="velocity"/>
+        <state_interface name="effort"/>
+        <param name="servo_id">10</param>
+        <param name="offset_ticks">500</param>
+        <param name="scale">0.00418879</param>
+        <param name="direction">1</param>
+      </joint>
+    </ros2_control>
+</robot>

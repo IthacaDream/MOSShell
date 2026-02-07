@@ -1,7 +1,7 @@
 import threading
 
-from ghoshell_moss.concepts.command import PyCommand, BaseCommandTask, CommandTaskState, CommandTaskStack, CommandTask
-from ghoshell_moss.concepts.errors import CommandError, CommandErrorCode
+from ghoshell_moss.core.concepts.command import PyCommand, BaseCommandTask, CommandTaskState, CommandTaskStack, CommandTask
+from ghoshell_moss.core.concepts.errors import CommandError, CommandErrorCode
 import pytest
 import asyncio
 

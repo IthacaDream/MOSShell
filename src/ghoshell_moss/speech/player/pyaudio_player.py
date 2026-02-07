@@ -1,12 +1,14 @@
+
 import asyncio
 import numpy as np
 from typing import Optional
-from ghoshell_moss.depends import check_pyaudio
-from ghoshell_moss.concepts.speech import AudioFormat
+from ghoshell_moss.core.concepts.speech import AudioFormat
 from ghoshell_common.contracts import LoggerItf
 
-if check_pyaudio():
+try:
     import pyaudio
+except ImportError as e:
+    raise ImportError(f"failed to import audio dependencies, please try to install ghoshell-shell[audio]: {e}")
 
 from ghoshell_moss.speech.player.base_player import BaseAudioStreamPlayer
 
