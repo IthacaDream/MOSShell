@@ -1,0 +1,35 @@
+jetarm_hardware:
+  ros__parameters:
+    device: "/dev/ttyUSB0"
+    baudrate: "1000000"
+    joints:
+      - name: "joint1"
+        servo_id: "1"
+        scale: "0.00418879"       # 保留换算
+        direction: "1"            # 保留方向
+        # 移除: offset_ticks (避免自动归零)
+
+      - name: "joint2"
+        servo_id: "2"
+        scale: "0.00418879"
+        direction: "1"
+
+      - name: "joint3"
+        servo_id: "3"
+        scale: "0.00418879"
+        direction: "1"
+
+      - name: "joint4"
+        servo_id: "4"
+        scale: "0.00418879"
+        direction: "1"
+
+      - name: "joint5"
+        servo_id: "5"
+        scale: "0.00418879"
+        direction: "1"
+
+      - name: "r_joint"
+        servo_id: "10"
+        scale: "0.00418879"
+        direction: "1"

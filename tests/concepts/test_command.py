@@ -1,5 +1,5 @@
 from typing import AsyncIterable
-from ghoshell_moss.concepts.command import PyCommand, CommandType, CommandMeta
+from ghoshell_moss.core.concepts.command import PyCommand, CommandType, CommandMeta
 import asyncio
 import pytest
 

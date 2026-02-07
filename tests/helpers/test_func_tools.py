@@ -1,5 +1,5 @@
 from typing import Coroutine, Awaitable
-from ghoshell_moss.helpers.func import awaitable_caller
+from ghoshell_moss.core.helpers.func import awaitable_caller
 import pytest
 
 

@@ -1,9 +1,10 @@
+
 import asyncio
 import time
 import numpy as np
 from abc import ABC, abstractmethod
-from ghoshell_moss.concepts.speech import StreamAudioPlayer, AudioFormat
-from ghoshell_moss.helpers.asyncio_utils import ThreadSafeEvent
+from ghoshell_moss.core.concepts.speech import StreamAudioPlayer, AudioFormat
+from ghoshell_moss.core.helpers.asyncio_utils import ThreadSafeEvent
 from ghoshell_common.contracts import LoggerItf
 import scipy.signal as signal
 import queue
@@ -66,6 +67,7 @@ class BaseAudioStreamPlayer(StreamAudioPlayer, ABC):
             return
 
         # 启动音频工作线程
+        # todo: 改成 asyncio.to_thread task
         self._thread = threading.Thread(target=self._audio_worker, daemon=True)
         self._thread.start()
         self.logger.info("PyAudio 播放器已启动")

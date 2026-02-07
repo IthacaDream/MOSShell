@@ -1,0 +1,41 @@
+joint_trajectory_controller:
+  ros__parameters:
+    joints:
+      - joint1
+      - joint2
+      - joint3
+      - joint4
+      - joint5
+      - r_joint
+
+    command_interfaces:
+      - position
+
+    state_interfaces:
+      - position
+      - velocity
+
+    # 核心优化参数
+    state_publish_rate: 20.0
+    action_monitor_rate: 20.0
+    
+    # 关键：放宽约束容差
+    constraints:
+      stopped_velocity_tolerance: 5.0  # 增加停止速度容差
+      goal_time: 5.0  # 增加目标时间容差
+
+    # 增加看门狗超时时间
+    command_watchdog_timeout: 5.0  # 增加命令超时
+    state_watchdog_timeout: 6.0    # 增加状态超时
+
+    # 添加平滑滤波参数
+    use_smoothing: true  # 启用平滑滤波
+    smoothing_filter_bandwidth: 2.0  # 降低滤波带宽（更平滑）
+    
+    # 降低控制频率（如果硬件支持）
+    control_period: 0.05  # 20Hz 控制频率
+    
+    # 禁用部分严格检查
+    allow_partial_joints_goal: true  # 允许部分关节目标
+    open_loop_control: false
+    stop_trajectory_duration: 2.0  # 增加停止轨迹持续时间

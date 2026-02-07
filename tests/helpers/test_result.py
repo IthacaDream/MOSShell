@@ -1,4 +1,4 @@
-from ghoshell_moss.helpers.result import ThreadSafeResult
+from ghoshell_moss.core.helpers.result import ThreadSafeResult
 
 import pytest
 import asyncio

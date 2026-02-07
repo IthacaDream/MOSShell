@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<robot xmlns:xacro="http://ros.org/wiki/xacro">
+
+    <!--
+        TRANSMISSION MACROS FOR THE JETARM
+        ==================================
+        Usage:
+        - For REAL HARDWARE (Position Control):
+          <xacro:hardware_transmission name="joint1"/>
+    -->
+
+    <!-- MACRO 1: For REAL HARDWARE (Position Control) -->
+    <xacro:macro name="hardware_transmission" params="name">
+        <transmission name="${name}_trans">
+            <type>transmission_interface/SimpleTransmission</type>
+            <joint name="${name}">
+                <!-- CHANGED TO PositionJointInterface for real servos -->
+                <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+            </joint>
+            <actuator name="${name}_motor">
+                <!-- CHANGED TO PositionJointInterface for real servos -->
+                <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+                <mechanicalReduction>1</mechanicalReduction>
+            </actuator>
+        </transmission>
+    </xacro:macro>
+
+
+    <!-- CONVENIENCE MACRO: Apply real hardware transmission to all 6 JetArm joints -->
+    <xacro:macro name="jetarm_hardware_transmissions" params="prefix">
+        <xacro:hardware_transmission name="${prefix}joint1"/>
+        <xacro:hardware_transmission name="${prefix}joint2"/>
+        <xacro:hardware_transmission name="${prefix}joint3"/>
+        <xacro:hardware_transmission name="${prefix}joint4"/>
+        <xacro:hardware_transmission name="${prefix}joint5"/>
+        <xacro:hardware_transmission name="${prefix}r_joint"/> <!-- Gripper -->
+        <!-- If you have a separate joint for the left part of the gripper, add it here -->
+        <!-- <xacro:hardware_transmission name="${prefix}l_joint"/> -->
+    </xacro:macro>
+
+</robot>

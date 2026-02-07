@@ -1,12 +1,12 @@
 from typing import Iterable, List
 import pytest
 
-from ghoshell_moss.ctml.token_parser import CTMLTokenParser
-from ghoshell_moss.ctml.elements import CommandTaskElementContext
-from ghoshell_moss.concepts.command import PyCommand, BaseCommandTask, Command, CommandToken
-from ghoshell_moss.concepts.interpreter import CommandTaskParserElement
+from ghoshell_moss.core.ctml.token_parser import CTMLTokenParser
+from ghoshell_moss.core.ctml.elements import CommandTaskElementContext
+from ghoshell_moss.core.concepts.command import PyCommand, BaseCommandTask, Command, CommandToken
+from ghoshell_moss.core.concepts.interpreter import CommandTaskParserElement
 from ghoshell_moss.speech.mock import MockSpeech
-from ghoshell_moss.helpers.asyncio_utils import ThreadSafeEvent
+from ghoshell_moss.core.helpers.asyncio_utils import ThreadSafeEvent
 from collections import deque
 from dataclasses import dataclass
 import asyncio

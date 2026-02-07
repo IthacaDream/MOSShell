@@ -1,4 +1,4 @@
-from ghoshell_moss.helpers.token_filters import SpecialTokenMatcher
+from ghoshell_moss.core.helpers.token_filters import SpecialTokenMatcher
 
 
 def test_special_token_matcher_baseline():

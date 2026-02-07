@@ -1,6 +1,8 @@
-from ghoshell_moss.channels.py_channel import PyChannel
-from ghoshell_moss.concepts.command import PyCommand, CommandTask
-from ghoshell_moss.concepts.channel import Channel
+from typing import List
+from ghoshell_moss.message import Message, new_text_message
+from ghoshell_moss.core.py_channel import PyChannel
+from ghoshell_moss.core.concepts.command import PyCommand, CommandTask
+from ghoshell_moss.core.concepts.channel import Channel
 import pytest
 
 chan = PyChannel(name="test")
@@ -150,6 +152,70 @@ async def test_py_channel_execute_task() -> None:
 
     main.build.command()(foo)
     async with main.bootstrap() as client:
-        task = main.create_task("foo")
+        task = main.create_command_task("foo")
         result = await main.execute_task(task)
         assert result == 123
+
+
+@pytest.mark.asyncio
+async def test_py_channel_desc_and_doc_with_ctx() -> None:
+    main = PyChannel(name="main")
+
+    def foo_doc() -> str:
+        _chan = Channel.get_from_context()
+        return _chan.name()
+
+    async def foo() -> int:
+        _t = CommandTask.get_from_context()
+        _chan = Channel.get_from_context()
+        assert _t is not None
+        assert _chan is not None
+        return 123
+
+    main.build.command(doc=foo_doc)(foo)
+    async with main.bootstrap() as client:
+        foo = main.broker.get_command("foo")
+        assert "main" in foo.meta().interface
+
+
+@pytest.mark.asyncio
+async def test_py_channel_bind():
+    class Foo:
+        def __init__(self, val: int):
+            self.val = val
+
+    main = PyChannel(name="main")
+    main.build.with_binding(Foo, Foo(123))
+
+    @main.build.command()
+    async def foo() -> int:
+        _chan = Channel.get_from_context()
+        foo = _chan.get_contract(Foo)
+        return foo.val
+
+    async with main.bootstrap() as broker:
+        _foo = broker.get_command("foo")
+        assert await _foo() == 123
+
+
+@pytest.mark.asyncio
+async def test_py_channel_context() -> None:
+    main = PyChannel(name="main")
+
+    messages = [new_text_message("hello", role="system")]
+
+    def foo() -> List[Message]:
+        return messages
+
+    # 添加 context message 函数.
+    main.build.with_context_messages(foo)
+
+    async with main.bootstrap() as broker:
+        # 启动时 meta 中包含了生成的 messages.
+        meta = broker.meta()
+        assert len(meta.context) == 1
+        messages.append(new_text_message("world", role="system"))
+
+        # 更新后, messages 也变更了.
+        await broker.refresh_meta()
+        assert len(broker.meta().context) == 2

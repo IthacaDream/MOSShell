@@ -1,3 +1,4 @@
+
 import logging
 from typing import Optional, Any
 
@@ -9,8 +10,8 @@ from ghoshell_moss.speech.volcengine_tts.protocol import (
     receive_message, cancel_session, task_request,
     EventType, wait_for_event, MsgType,
 )
-from ghoshell_moss.concepts.speech import TTS, TTSBatch, TTSInfo, TTSAudioCallback, AudioFormat
-from ghoshell_moss.helpers.asyncio_utils import ThreadSafeEvent
+from ghoshell_moss.core.concepts.speech import TTS, TTSBatch, TTSInfo, TTSAudioCallback, AudioFormat
+from ghoshell_moss.core.helpers.asyncio_utils import ThreadSafeEvent
 from ghoshell_common.helpers import uuid
 from ghoshell_common.contracts import LoggerItf
 from websockets.exceptions import ConnectionClosed, ConnectionClosedOK
@@ -486,8 +487,8 @@ class VolcengineTTS(TTS):
     async def _main_loop(self):
         """ tts main connection loop"""
         # 没有关闭前, 一直执行这个循环.
-        try:
-            while not self._closing_event.is_set():
+        while not self._closing_event.is_set():
+            try:
                 if len(self._unfinished_batches) > 0:
                     batch = self._unfinished_batches.popleft()
                 else:
@@ -508,12 +509,15 @@ class VolcengineTTS(TTS):
                     await task
                 finally:
                     self._consume_pending_batches_task = None
-        except asyncio.CancelledError:
-            # 不需要记录.
-            pass
-        finally:
-            self._consume_pending_batches_task = None
-            self.logger.info("TTS main loop is closed")
+            except asyncio.CancelledError:
+                # 不需要记录.
+                self.logger.info("TTS cancelled")
+                pass
+            except Exception as e:
+                self.logger.warning(f"TTS main loop got exception: {e}")
+            finally:
+                self._consume_pending_batches_task = None
+                self.logger.info("TTS main loop is closed")
 
     async def _start_consuming_batch_loop(self, batch: VolcengineTTSBatch):
         try:
@@ -590,15 +594,15 @@ class VolcengineTTS(TTS):
             # 开始接受音频的流程.
             receive_task = asyncio.create_task(self._receive_batch_audio_from_server(batch, connection))
             # 等两个都完成, 才能进入下一步.
-            send_and_receive = asyncio.gather(send_task, receive_task)
+            send_and_receive = asyncio.gather(send_task, receive_task, return_exceptions=True)
             batch_closed = asyncio.create_task(batch.done.wait())
             done, pending = await asyncio.wait([send_and_receive, batch_closed], return_when=asyncio.FIRST_COMPLETED)
-            if batch_closed in done:
-                if not receive_task.done():
-                    receive_task.cancel()
-                if not send_task.done():
-                    send_task.cancel()
-            await send_and_receive
+            for t in pending:
+                t.cancel()
+            result = await send_and_receive
+            for r in result:
+                if isinstance(r, Exception):
+                    self.logger.exception(r)
 
             # 正常完成返回 true
             return True
@@ -687,6 +691,10 @@ class VolcengineTTS(TTS):
                         np_data = np.frombuffer(audio_data, dtype=np.int16)
                         callback(np_data)
             self.logger.info("batch %s receive task done", batch_id)
+        except asyncio.CancelledError:
+            pass
+        except (ConnectionClosedOK, ConnectionClosed):
+            pass
         finally:
             # batch 永远要设置为关闭.
             batch.done.set()
@@ -736,6 +744,7 @@ class VolcengineTTS(TTS):
     async def close(self) -> None:
         if self._closing_event.is_set():
             return
+        self.logger.info("closing...")
         self._closing_event.set()
         if self._main_loop_task is not None:
             self._main_loop_task.cancel()

@@ -1,11 +1,12 @@
+
 from typing import List, Optional, Dict
 
-from ghoshell_moss.concepts.speech import (
+from ghoshell_moss.core.concepts.speech import (
     Speech, SpeechStream, StreamAudioPlayer,
     TTS, TTSBatch,
     AudioFormat,
 )
-from ghoshell_moss.helpers.asyncio_utils import ThreadSafeEvent
+from ghoshell_moss.core.helpers.asyncio_utils import ThreadSafeEvent
 from ghoshell_common.contracts import LoggerItf
 from ghoshell_common.helpers import uuid
 import numpy as np
@@ -176,6 +177,7 @@ class TTSSpeech(Speech):
         await self._tts.close()
         await self._player.close()
         self._closed_event.set()
+        self.logger.info("TTS Speech is closed")
 
     async def wait_closed(self) -> None:
         await self._closed_event.wait()

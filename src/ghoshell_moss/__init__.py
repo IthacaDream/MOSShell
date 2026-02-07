@@ -1,47 +1,12 @@
-from ghoshell_moss.concepts.command import (
-    CommandToken, CommandTokenType,
-    Command, CommandMeta, PyCommand,
-    CommandTaskState, CommandTaskStateType,
-    CommandTask, BaseCommandTask,
-    CommandTaskStack,
+
+from ghoshell_moss.core import *
+from ghoshell_moss.message import *
+from ghoshell_container import (
+    get_container, set_container, Container, IoCContainer,
 )
 
-from ghoshell_moss.concepts.errors import (
-    CommandError,
-    CommandErrorCode,
-    FatalError,
-    InterpretError,
-)
+"""
+Ghoshell MOSS 库的 facade, 用来存放最常用的类库引用.
 
-from ghoshell_moss.concepts.channel import (
-    Channel,
-    ChannelMeta,
-    ChannelBroker,
-    ChannelProvider,
-    ChannelFullPath,
-    ChannelPaths,
-)
-
-from ghoshell_moss.concepts.speech import (
-    Speech,
-    SpeechStream,
-)
-
-from ghoshell_moss.concepts.interpreter import (
-    Interpreter,
-    CommandTokenParser,
-    CommandTaskParserElement,
-)
-
-from ghoshell_moss.concepts.shell import (
-    MOSSShell,
-)
-
-from ghoshell_moss.channels import (
-    PyChannel, PyChannelBuilder, PyChannelBroker
-)
-
-from ghoshell_moss.shell import (
-    new_shell,
-    MainChannel,
-)
+考虑只对外暴露最基础的常用函数. 
+"""

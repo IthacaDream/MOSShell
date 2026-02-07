@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>jetarm_control</name>
+  <version>0.0.1</version>
+  <description>JetArm STM32 BUS servo driver</description>
+  <maintainer email="thirdgerb@example.com">ThirdGerb</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>rclcpp</depend>
+  <depend>hardware_interface</depend>
+  <depend>pluginlib</depend>
+  <depend>joint_trajectory_controller</depend>
+  <depend>joint_state_broadcaster</depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
