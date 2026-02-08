@@ -146,3 +146,4 @@ cython_debug/
 
 .setup_env
 .uv_cache
+.ruff_cache
