@@ -1,12 +1,11 @@
 import asyncio
-from datetime import datetime
-import traceback
-from typing import Any, Dict, List, Optional, Literal
-
-from ghoshell_moss.message import Text, Message
-from ghoshell_moss_contrib.agent.chat.base import BaseChat
-
 import logging
+import traceback
+from datetime import datetime
+from typing import Any
+
+from ghoshell_moss.message import Message, Text
+from ghoshell_moss_contrib.agent.chat.base import BaseChat
 
 logger = logging.getLogger("QueueChat")
 
@@ -26,7 +25,7 @@ class QueueChat(BaseChat):
         self.output_queue = output_queue
 
         # 存储完整的对话历史
-        self.conversation_history: List[Dict] = []
+        self.conversation_history: list[dict] = []
 
         # 当前正在处理的AI回复
         self.current_ai_response: str = ""
@@ -59,11 +58,7 @@ class QueueChat(BaseChat):
         timestamp = datetime.now().strftime("%H:%M:%S")
 
         # 保存到历史记录
-        self.conversation_history.append({
-            "role": "user",
-            "content": message,
-            "timestamp": timestamp
-        })
+        self.conversation_history.append({"role": "user", "content": message, "timestamp": timestamp})
 
         # 发送到输出队列
         self._send_output(role="user", text=message)
@@ -99,11 +94,9 @@ class QueueChat(BaseChat):
             self._send_output(role="assistant", text=self.current_ai_response, is_final=True)
 
             # 保存到历史记录
-            self.conversation_history.append({
-                "role": "assistant",
-                "content": self.current_ai_response,
-                "timestamp": timestamp
-            })
+            self.conversation_history.append(
+                {"role": "assistant", "content": self.current_ai_response, "timestamp": timestamp}
+            )
 
         self.current_ai_response = ""
         self.is_streaming = False
@@ -113,9 +106,7 @@ class QueueChat(BaseChat):
         """打印异常信息"""
         # 格式化异常信息
         if isinstance(exception, Exception):
-            exc_info = traceback.format_exception(
-                type(exception), exception, exception.__traceback__
-            )
+            exc_info = traceback.format_exception(type(exception), exception, exception.__traceback__)
             error_msg = "".join(exc_info)
         else:
             error_msg = str(exception)
@@ -143,7 +134,7 @@ class QueueChat(BaseChat):
             try:
                 # 阻塞等待输入队列的消息
                 request = await self.input_queue.get()
-                logger.info(f"收到用户输入: {request}")
+                logger.info("收到用户输入: %s", request)
 
                 # 处理空输入
                 if request is None:
@@ -177,17 +168,17 @@ class QueueChat(BaseChat):
 
                 # 处理其他未知请求类型
                 else:
-                    logger.warning(f"未知请求类型: {request}")
+                    logger.warning("未知请求类型: %s", request)
                     self.print_exception("未知请求类型")
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"处理输入消息时出错: {e}")
+                logger.exception("处理输入消息时出错")
                 self.print_exception(e, "处理输入消息时出错")
             finally:
                 self.input_queue.task_done()
 
-    def get_conversation_history(self) -> List[Dict]:
+    def get_conversation_history(self) -> list[dict]:
         """获取对话历史"""
         return self.conversation_history.copy()
 
@@ -197,4 +188,4 @@ class QueueChat(BaseChat):
 
     def close(self):
         self.is_closed.set()
-        self.input_queue.put_nowait(None) # 发送关闭信号
+        self.input_queue.put_nowait(None)  # 发送关闭信号

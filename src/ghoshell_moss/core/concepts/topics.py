@@ -1,19 +1,10 @@
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Coroutine, Iterable
-from typing import (
-    Any,
-    ClassVar,
-    Generic,
-    Optional,
-    Protocol,
-    TypedDict,
-    TypeVar,
-    Union,
-)
+from typing import Any, ClassVar, Generic, Optional, Protocol, TypeVar, Union
 
 from ghoshell_common.helpers import generate_import_path, uuid
 from pydantic import BaseModel, Field
-from typing_extensions import Self
+from typing_extensions import Self, TypedDict
 
 __all__ = ["ReqTopicModel", "Topic", "TopicBaseModel", "TopicCallback", "TopicModel"]
 

@@ -19,12 +19,12 @@ install-uv: ## Install uv if missing
 
 .PHONY: install-python
 install-python: ## Install Python via uv if missing
-	@echo "==> Ensuring Python 3.12 is available (via uv)"
-	@if uv python find 3.12 >/dev/null 2>&1; then \
-		echo "Python 3.12 already available"; \
+	@echo "==> Ensuring Python 3.10 is available (via uv)"
+	@if uv python find 3.10 >/dev/null 2>&1; then \
+		echo "Python 3.10 already available"; \
 	else \
-		echo "Python 3.12 not found. Installing..."; \
-		uv python install 3.12; \
+		echo "Python 3.10 not found. Installing..."; \
+		uv python install 3.10; \
 	fi
 
 .PHONY: uv-venv
@@ -38,7 +38,7 @@ uv-venv: ## Create project virtualenv with uv if missing
 	fi
 
 .PHONY: install-uv-pyenv
-install-uv-pyenv: install-uv install-python uv-venv ## Install uv, Python 3.12, and venv
+install-uv-pyenv: install-uv install-python uv-venv ## Install uv, Python 3.10, and venv
 
 .PHONY: install-prek
 install-prek: ## Install prek and repo git hooks.
@@ -48,7 +48,7 @@ install-prek: ## Install prek and repo git hooks.
 	@uv tool run prek install
 
 .PHONY: prepare
-prepare: install-uv install-python uv-venv install-prek ## Setup uv, Python 3.12, venv, and prek hooks.
+prepare: install-uv install-python uv-venv install-prek ## Setup uv, Python 3.10, venv, and prek hooks.
 	@echo "==> Syncing dependencies for all workspace packages"
 	@uv sync --dev --all-extras
 

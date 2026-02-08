@@ -9,6 +9,7 @@ minecraft_bot 示例提供了一个可对话、可交互的 Minecraft 机器人�
 ## 功能特性
 
 当前已集成的机器人行为能力包括：
+
 - 🚶‍♂️ **移动控制** - 在游戏世界中自由移动
 - 👥 **跟随玩家** - 自动跟随指定玩家
 - 🔍 **物品查找** - 寻找游戏中的特定物品
@@ -28,33 +29,41 @@ minecraft_bot/
 ```
 
 # 环境准备
+
 ## Minecraft 客户端安装
 
 ### 下载 HMCL 启动器
+
 访问 [HMCL 官网](https://hmcl.huangyuhui.net/download/) 下载启动器。
 
 ### 安装 Minecraft 1.21.8 版本
+
 1. 启动 HMCL 启动器
-2. 点击"安装游戏"
-3. 选择 "Minecraft 1.21.8" 版本
-4. 点击"安装"完成客户端安装
+1. 点击"安装游戏"
+1. 选择 "Minecraft 1.21.8" 版本
+1. 点击"安装"完成客户端安装
 
 ## 安装 Minecraft Server
 
 ### 使用 Docker 启动服务器
+
 ```bash
 cd server
 docker-compose up -d
 ```
+
 第一次启动容器时会自动下载 Minecraft 1.21.8 版本的服务器文件。
 
 ### 检查服务状态
+
 等待服务启动完成，检查端口是否正常监听：
+
 ```bash
 docker-compose logs -f 
 ```
 
 出现以下日志表示服务启动成功：
+
 ```
 [03:30:22] [Server thread/INFO]: Done (5.274s)! For help, type "help"
 [03:30:22] [Server thread/INFO]: Starting remote control listener
@@ -63,23 +72,28 @@ docker-compose logs -f
 ```
 
 ### 配置服务器
+
 服务器启动后，在 `server/data` 目录下会生成配置文件：
+
 - `server.properties` - 服务器主配置文件
 - `whitelist.json` - 白名单配置
 - ...
 
 **重要配置修改：**
 编辑 `server.properties`，将 `online-mode` 设置为 `false`：
+
 ```properties
 online-mode=false
 ```
 
 编辑 `server.properties`，将 `gamemode` 设置为 `creative`（防止被小怪攻击）：
+
 ```properties
 gamemode=creative
 ```
 
 修改后重启容器使配置生效：
+
 ```bash
 docker-compose restart
 ```
@@ -91,9 +105,9 @@ docker-compose restart
 ## 加入服务器
 
 1. **启动 Minecraft 游戏**
-2. **选择"多人游戏"**
-3. **添加服务器**，地址设置为 `127.0.0.1`
-4. **加入服务器**
+1. **选择"多人游戏"**
+1. **添加服务器**，地址设置为 `127.0.0.1`
+1. **加入服务器**
 
 ## 启动机器人
 
@@ -116,9 +130,11 @@ VOLCENGINE_STREAM_TTS_ACCESS_TOKEN=your_volcengine_stream_tts_access_token_here
 ```
 
 在项目根目录下运行以下命令启动机器人：
+
 ```bash
 python main.py [--speech]
 ```
+
 第一次执行会自动安装 Node.js 依赖
 
 机器人将自动连接到服务器并出现在游戏中。默认机器人用户名为 `Jarvis`。
@@ -127,6 +143,7 @@ python main.py [--speech]
 ## 交互方式
 
 机器人启动后，您可以通过游戏内的聊天功能（按t）与机器人交互：
+
 - 发送消息给机器人
 - 使用指令控制机器人行为
 - 机器人会根据 MOSS 架构进行智能响应
@@ -153,16 +170,19 @@ PORT = 25565             # 服务器端口
 ## 常见问题
 
 1. **无法连接服务器**
+
    - 检查 Docker 容器是否正常运行：`docker-compose ps`
    - 确认服务器端口 25565 是否被占用
    - 验证 `online-mode=false` 配置是否正确
 
-2. **机器人无法启动**
+1. **机器人无法启动**
+
    - 检查 Python 和 Node.js 依赖是否安装完整
    - 确认 Minecraft 服务器已启动并运行正常
    - 查看控制台错误日志进行排查
 
-3. **机器人无响应**
+1. **机器人无响应**
+
    - 检查网络连接状态
    - 确认机器人是否成功连接到服务器
    - 验证游戏内聊天功能是否正常
@@ -170,6 +190,7 @@ PORT = 25565             # 服务器端口
 # 技术架构
 
 本项目基于以下技术栈：
+
 - **MOSS 架构** - 提供智能对话和决策能力
 - **Mineflayer** - Minecraft 机器人控制库
 - **Python-JavaScript 桥接** - 实现跨语言调用

@@ -62,7 +62,6 @@ def main(args=None):
 
     @main_channel.build.command()
     async def reset_body():
-
         # 发送目标
         joint_names = ["joint1", "joint2", "joint3", "joint4", "joint5", "r_joint"]
         positions = [0.0, 1.0, -1.57, -1.57, 0.2, 0.0]
