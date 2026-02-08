@@ -31,15 +31,11 @@ contrib = [
     "pyqt6>=6.10.2",
     "python-mpv-jsonipc>=1.2.1",
     "rich>=14.2.0",
-    "javascript>=1!1.2.6"
+    "javascript>=1!1.2.6",
 ]
 
 [tool.setuptools]
 packages = ["src"]
-
-
-[tool.pytest.ini_options]
-asyncio_default_fixture_loop_scope = "function"
 
 
 [tool.pdm.build]
@@ -51,10 +47,13 @@ build-backend = "pdm.backend"
 
 [dependency-groups]
 dev = [
+    "ruff>=0.15.0",
     "pytest>=8.3.5",
     "pytest-asyncio>=1.1.0",
     "anyio>=4.10.0",
     "mcp>=1.21.0",
     "fastapi>=0.121.1",
     "uvicorn>=0.37.0",
+    "mdformat>=1.0.0",
+    "mdformat-gfm>=1.0.0",
 ]

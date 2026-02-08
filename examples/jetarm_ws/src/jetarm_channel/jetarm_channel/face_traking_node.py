@@ -135,7 +135,6 @@ class FaceTrackingNode(Node):
             self.image_queue.put(bgr_image)
 
     def main(self):
-
         while self.running:
             bgr_image = self.image_queue.get()
 

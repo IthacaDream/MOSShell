@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from ghoshell_moss import Text, Message
+from ghoshell_moss import Message, Text
 from ghoshell_moss_contrib.agent.chat.queue import QueueChat
 
 
@@ -34,6 +34,3 @@ async def test_queue_chat():
     chat.close()
     await runner
     assert chat.is_closed.is_set()
-
-
-

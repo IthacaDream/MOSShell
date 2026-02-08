@@ -2,7 +2,7 @@ import os
 import sys
 
 import dotenv
-from ghoshell_common.contracts import LocalWorkspaceProvider, Workspace, WorkspaceConfigs
+from ghoshell_common.contracts import LocalWorkspaceProvider
 
 from ghoshell_moss.speech import make_baseline_tts_speech
 from ghoshell_moss.speech.player.pyaudio_player import PyAudioStreamPlayer

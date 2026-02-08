@@ -4,12 +4,12 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from enum import Enum
-from typing import Any, ClassVar, Optional, TypedDict
+from typing import Any, ClassVar, Optional
 
 import numpy as np
 from ghoshell_common.helpers import uuid
 from pydantic import BaseModel, Field
-from typing_extensions import Self
+from typing_extensions import Self, TypedDict
 
 from ghoshell_moss.core.concepts.command import CommandTask
 

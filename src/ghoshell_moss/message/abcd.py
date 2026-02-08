@@ -2,12 +2,17 @@ import json
 from abc import ABC, abstractmethod
 from copy import deepcopy
 from enum import Enum
-from typing import Any, ClassVar, Literal, Optional, Protocol, TypedDict, is_typeddict
+from typing import Any, ClassVar, Literal, Optional, Protocol
 
 from ghoshell_common.helpers import timestamp_ms, uuid_md5
 from PIL import Image
 from pydantic import BaseModel, Field, ValidationError
-from typing_extensions import Self
+from typing_extensions import Self, TypedDict
+
+try:
+    from typing import is_typeddict
+except ImportError:  # pragma: no cover
+    from typing_extensions import is_typeddict
 
 __all__ = [
     "Addition",

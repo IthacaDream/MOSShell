@@ -29,7 +29,6 @@ class TTSSpeechStream(SpeechStream):
         tts_batch: TTSBatch,
         logger: LoggerItf,
     ):
-
         batch_id = tts_batch.batch_id()
         super().__init__(id=batch_id)
 
