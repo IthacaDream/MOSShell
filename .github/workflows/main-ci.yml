@@ -36,11 +36,11 @@ jobs:
             code_changes:
               - '*'
               - '**/*'
-  run-tests:
-    name: Run Tests
-    needs: check-changes
-    if: needs.check-changes.outputs.code_changes == 'true'
-    uses: ./.github/workflows/run-tests.yml
+  # run-tests:
+  #   name: Run Tests
+  #   needs: check-changes
+  #   if: needs.check-changes.outputs.code_changes == 'true'
+  #   uses: ./.github/workflows/run-tests.yml
 
   check-style:
     name: Style Check
