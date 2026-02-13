@@ -68,6 +68,8 @@ class ThreadSafeStreamReceiver(Generic[ItemT]):
     def __next__(self) -> ItemT:
         if len(self._queue) > 0:
             item = self._queue.popleft()
+            if len(self._queue) == 0:
+                self._added.clear()
             if isinstance(item, Exception):
                 raise item
             elif item is None:
@@ -104,6 +106,8 @@ class ThreadSafeStreamReceiver(Generic[ItemT]):
     async def __anext__(self) -> ItemT:
         if len(self._queue) > 0:
             item = self._queue.popleft()
+            if len(self._queue) == 0:
+                self._added.clear()
             if isinstance(item, Exception):
                 raise item
             elif item is None:
