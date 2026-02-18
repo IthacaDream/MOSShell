@@ -219,3 +219,5 @@ async def test_py_channel_context() -> None:
         # 更新后, messages 也变更了.
         await broker.refresh_meta()
         assert len(broker.meta().context) == 2
+        assert broker.meta().context[0].contents == [{"type": "text", "data": {"text": "hello"}}]
+        assert broker.meta().context[1].contents == [{"type": "text", "data": {"text": "world"}}]
