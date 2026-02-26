@@ -10,7 +10,7 @@
 ## Run
 
 1. 确保依赖已安装：`uv sync --active --all-extras`
-2. 运行 proxy（它会自动启动 provider 子进程）：
+1. 运行 proxy（它会自动启动 provider 子进程）：
 
 ```bash
 python examples/vision_exam_script_channel/vision_proxy.py

@@ -14,4 +14,3 @@
 ```bash
 python examples/script_channel_hub_demo/main.py
 ```
-
