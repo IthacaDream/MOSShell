@@ -1,4 +1,5 @@
 import asyncio
+import os
 from typing import Coroutine
 
 from typing_extensions import Self
@@ -30,6 +31,7 @@ import zenoh
 import contextlib
 import logging
 import threading
+import psutil
 
 __all__ = ['AppCell', 'MossModeCell', 'MatrixImpl']
 
@@ -440,6 +442,31 @@ class MatrixImpl(Matrix):
                 wait_done.append(t)
             await asyncio.gather(*wait_done, return_exceptions=True)
 
+    async def _ensure_parent_process_exists(self) -> None:
+        if self.env.parent_pid == 0:
+            return
+        try:
+            parent = psutil.Process(int(self.env.parent_pid))
+        except (ValueError, TypeError, psutil.NoSuchProcess):
+            return
+
+        while not self._closing_event.is_set():
+            if not parent.is_running():
+                self.close()
+                break
+            await asyncio.sleep(2)
+
+    @contextlib.asynccontextmanager
+    async def _ensure_parent_process_exists_ctx_manager(self):
+        task = asyncio.create_task(self._ensure_parent_process_exists())
+        try:
+            yield
+        finally:
+            if task and not task.done():
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+
     async def __aenter__(self) -> Self:
         if self._started:
             raise RuntimeError("Matrix already started")
@@ -463,6 +490,7 @@ class MatrixImpl(Matrix):
             # ensure topic service lifecycle
             await self._async_exit_stack.enter_async_context(topic_service)
             await self._async_exit_stack.enter_async_context(self._ensure_task_group_canceled_ctx_manager())
+            await self._async_exit_stack.enter_async_context(self._ensure_parent_process_exists_ctx_manager())
             if event := self._cell_alive_events.get(self._cell_address):
                 event.set()
             self.logger.info("%s initialized with env: %s", self._log_prefix, self.env.dump_moss_env(
