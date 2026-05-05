@@ -23,17 +23,17 @@ from ghoshell_moss.core.helpers.asyncio_utils import ThreadSafeEvent
 
 class Provider2ProxyConnection(Connection):
     def __init__(
-        self,
-        *,
-        provider_2_proxy_queue: Queue[ChannelEvent | None],
-        proxy_2_provider_queue: Queue[ChannelEvent],
+            self,
+            *,
+            provider_2_proxy_queue: Queue[ChannelEvent | None],
+            proxy_2_provider_queue: Queue[ChannelEvent],
     ):
         self._closed = ThreadSafeEvent()
         self._send_queue = provider_2_proxy_queue
         self._recv_queue = proxy_2_provider_queue
         self._is_available = True
 
-    def is_available(self) -> bool:
+    def is_connected(self) -> bool:
         return not self._closed.is_set() and self._is_available
 
     async def recv(self, timeout: float | None = None) -> ChannelEvent:
@@ -41,7 +41,7 @@ class Provider2ProxyConnection(Connection):
             raise ConnectionClosedError("Connection closed")
         left = Timeleft(timeout or 0.0)
 
-        def _recv_from_client() -> ChannelEvent:
+        def _recv_from_proxy() -> ChannelEvent:
             while not self._closed.is_set():
                 try:
                     _timeout = left.left()
@@ -50,7 +50,7 @@ class Provider2ProxyConnection(Connection):
                 except Empty:
                     continue
 
-        receiving = asyncio.create_task(asyncio.to_thread(_recv_from_client))
+        receiving = asyncio.create_task(asyncio.to_thread(_recv_from_proxy))
         closed = asyncio.create_task(self._closed.wait())
         done, pending = await asyncio.wait([receiving, closed], return_when=asyncio.FIRST_COMPLETED)
         for t in pending:
@@ -77,16 +77,16 @@ class Provider2ProxyConnection(Connection):
 
 class Proxy2ProviderConnection(Connection):
     def __init__(
-        self,
-        *,
-        provider_2_proxy_queue: Queue[ChannelEvent | None],
-        proxy_2_provider_queue: Queue[ChannelEvent],
+            self,
+            *,
+            provider_2_proxy_queue: Queue[ChannelEvent | None],
+            proxy_2_provider_queue: Queue[ChannelEvent],
     ):
         self._closed = ThreadSafeEvent()
         self._send_queue = proxy_2_provider_queue
         self._recv_queue = provider_2_proxy_queue
 
-    def is_available(self) -> bool:
+    def is_connected(self) -> bool:
         return not self._closed.is_set()
 
     async def recv(self, timeout: float | None = None) -> ChannelEvent:
@@ -95,7 +95,7 @@ class Proxy2ProviderConnection(Connection):
 
         _left = Timeleft(timeout or 0.0)
 
-        def _recv_from_server() -> ChannelEvent | None:
+        def _recv_from_provider() -> ChannelEvent | None:
             while not self._closed.is_set():
                 try:
                     _timeout = _left.left()
@@ -104,7 +104,7 @@ class Proxy2ProviderConnection(Connection):
                 except Empty:
                     continue
 
-        receiving = asyncio.create_task(asyncio.to_thread(_recv_from_server))
+        receiving = asyncio.create_task(asyncio.to_thread(_recv_from_provider))
         closed = asyncio.create_task(self._closed.wait())
         done, pending = await asyncio.wait([receiving, closed], return_when=asyncio.FIRST_COMPLETED)
         for t in pending:
@@ -132,49 +132,59 @@ class Proxy2ProviderConnection(Connection):
 
 class ThreadChannelProvider(DuplexChannelProvider):
     def __init__(
-        self,
-        *,
-        provider_connection: Provider2ProxyConnection,
-        container: IoCContainer | None = None,
+            self,
+            *,
+            provider_connection: Provider2ProxyConnection,
+            container: IoCContainer | None = None,
     ):
+        self._origin_connection = provider_connection
+        self._origin_container = container
         super().__init__(
             provider_connection=provider_connection, container=Container(parent=container, name="ThreadChannelProvider")
+        )
+
+    def copy(self) -> "ThreadChannelProvider":
+        return ThreadChannelProvider(
+            provider_connection=self._origin_connection,
+            container=self._origin_container,
         )
 
 
 class ThreadChannelProxy(DuplexChannelProxy):
     def __init__(
-        self,
-        *,
-        name: str,
-        to_server_connection: Proxy2ProviderConnection,
+            self,
+            *,
+            name: str,
+            to_provider_connection: Proxy2ProviderConnection,
+            description: str = "",
     ):
         super().__init__(
             name=name,
-            to_server_connection=to_server_connection,
+            description=description,
+            to_provider_connection=to_provider_connection,
         )
 
 
 def create_thread_channel(
-    name: str,
-    container: IoCContainer | None = None,
+        name: str,
+        container: IoCContainer | None = None,
 ) -> tuple[ThreadChannelProvider, ThreadChannelProxy]:
     proxy_2_provider_queue = Queue()
     provider_2_proxy_queue = Queue()
-    server_side_connection = Provider2ProxyConnection(
+    provider_side_connection = Provider2ProxyConnection(
         provider_2_proxy_queue=provider_2_proxy_queue,
         proxy_2_provider_queue=proxy_2_provider_queue,
     )
-    client_side_connection = Proxy2ProviderConnection(
+    proxy_side_connection = Proxy2ProviderConnection(
         provider_2_proxy_queue=provider_2_proxy_queue,
         proxy_2_provider_queue=proxy_2_provider_queue,
     )
-    _server = ThreadChannelProvider(
-        provider_connection=server_side_connection,
+    _provider = ThreadChannelProvider(
+        provider_connection=provider_side_connection,
         container=container,
     )
     _proxy = ThreadChannelProxy(
-        to_server_connection=client_side_connection,
+        to_provider_connection=proxy_side_connection,
         name=name,
     )
-    return _server, _proxy
+    return _provider, _proxy

@@ -1,3 +1,4 @@
+import orjson as json
 import time
 from abc import ABC
 from typing import Any, ClassVar, Optional
@@ -5,30 +6,29 @@ from typing import Any, ClassVar, Optional
 from ghoshell_common.helpers import uuid
 from pydantic import BaseModel, Field
 from typing_extensions import Self, TypedDict
-
+from ghoshell_moss.core.concepts.command import CommandTaskResult
 from ghoshell_moss.core.concepts.channel import ChannelMeta
 from ghoshell_moss.core.concepts.errors import CommandErrorCode
+from ghoshell_moss.core.concepts.topic import Topic
 
 __all__ = [
     "ChannelEvent",
     "ChannelEventModel",
     "ChannelMetaUpdateEvent",
-    "ClearCallEvent",
-    "ClearDoneEvent",
+    "ClearEvent",
     "CommandCallEvent",
+    "CommandDeltaEvent",
     "CommandCancelEvent",
     "CommandDoneEvent",
-    "CommandPeekEvent",
     "CreateSessionEvent",
     "HeartbeatEvent",
-    "PausePolicyDoneEvent",
-    "PausePolicyEvent",
     "ProviderErrorEvent",
     "ReconnectSessionEvent",
-    "RunPolicyDoneEvent",
-    "RunPolicyEvent",
     "SessionCreatedEvent",
     "SyncChannelMetasEvent",
+    "ProviderPubTopicEvent",
+    "ProviderSubTopicEvent",
+    "ProxyPubTopicEvent",
 ]
 
 """
@@ -44,24 +44,28 @@ Proxy 消费并且重构 Channel 能力.
 class ChannelEvent(TypedDict):
     event_id: str
     event_type: str
-    session_id: Optional[str]
+    connection_id: Optional[str]
     timestamp: float
-    data: Optional[dict[str, Any]]
+    data: str
 
 
 class ChannelEventModel(BaseModel, ABC):
     event_type: ClassVar[str] = ""
 
     event_id: str = Field(default_factory=uuid, description="event id for transport")
-    session_id: str = Field(default="", description="channel client id")
+    connection_id: str = Field(default="", description="channel proxy id")
     timestamp: float = Field(default_factory=lambda: round(time.time(), 4), description="timestamp")
 
     def to_channel_event(self) -> ChannelEvent:
-        data = self.model_dump(exclude_none=True, exclude={"event_type", "channel_id", "channel_name", "event_id"})
+        data = self.model_dump_json(
+            exclude_none=True,
+            exclude={"event_type", "channel_id", "channel_name", "event_id"},
+            ensure_ascii=False,
+        )
         return ChannelEvent(
             event_id=self.event_id,
             event_type=self.event_type,
-            session_id=self.session_id,
+            connection_id=self.connection_id,
             data=data,
             timestamp=self.timestamp,
         )
@@ -70,15 +74,24 @@ class ChannelEventModel(BaseModel, ABC):
     def from_channel_event(cls, channel_event: ChannelEvent) -> Optional[Self]:
         if cls.event_type != channel_event["event_type"]:
             return None
-        data = channel_event.get("data", {})
+        data_str = channel_event.get("data", None)
+        if not data_str:
+            data = {}
+        else:
+            data = json.loads(data_str)
         data["event_id"] = channel_event["event_id"]
-        data["session_id"] = channel_event["session_id"]
+        data["connection_id"] = channel_event["connection_id"]
         data["timestamp"] = channel_event["timestamp"]
         return cls(**data)
 
+    def __str__(self):
+        value = super.__str__(self)
+        return value[:200]
 
+
+# todo: 想要拿掉业务逻辑的 heart beat. 应该完全交给 connection 自己的逻辑去实现. 比如 ping pong 也好.
 class HeartbeatEvent(ChannelEventModel):
-    """心跳事件，由客户端发送，服务器响应"""
+    """心跳事件，由 Proxy 发送，Provider 响应"""
 
     event_type: ClassVar[str] = "moss.heartbeat"
     direction: str = Field(default="request", description="请求或响应: request/response")
@@ -87,31 +100,31 @@ class HeartbeatEvent(ChannelEventModel):
 # --- proxy event --- #
 
 
-class RunPolicyEvent(ChannelEventModel):
-    """开始运行 channel 的 policy"""
-
-    event_type: ClassVar[str] = "moss.channel.proxy.policy.run"
-    chan: str = Field(description="channel name")
-
-
-class PausePolicyEvent(ChannelEventModel):
-    """暂停某个 channel 的 policy 运行状态"""
-
-    event_type: ClassVar[str] = "moss.channel.proxy.policy.pause"
-    chan: str = Field(description="channel name")
-
-
-class ClearCallEvent(ChannelEventModel):
+class ClearEvent(ChannelEventModel):
     """发出讯号给某个 channel, 执行状态清空的逻辑"""
 
-    event_type: ClassVar[str] = "moss.channel.proxy.clear.call"
+    event_type: ClassVar[str] = "moss.channel.proxy.clear"
     chan: str = Field(description="channel name")
+
+
+class ProxyPubTopicEvent(ChannelEventModel):
+    event_type: ClassVar[str] = "moss.channel.proxy.pub_topic"
+    topic: Topic = Field(description="published topic")
+
+
+class CommandDeltaEvent(ChannelEventModel):
+    """delta 传输事件"""
+
+    event_type: ClassVar[str] = "moss.channel.proxy.command.delta"
+    command_id: str = Field(description="command id")
+    chunk: Optional[str] = Field(default=None, description="chunk")
+    command_token: Optional[dict] = Field(default=None, description="command token")
 
 
 class CommandCallEvent(ChannelEventModel):
     """发起一个 command 的调用."""
 
-    # todo: 未来要加一个用 command_id 轮询 server 状态的事件. 用来避免通讯丢失.
+    # todo: 未来要加一个用 command_id 轮询 provider 状态的事件. 用来避免通讯丢失.
 
     event_type: ClassVar[str] = "moss.channel.proxy.command.call"
     name: str = Field(description="command name")
@@ -121,10 +134,11 @@ class CommandCallEvent(ChannelEventModel):
     kwargs: dict[str, Any] = Field(default_factory=dict, description="kwargs of the command")
     tokens: str = Field("", description="command tokens")
     context: dict[str, Any] = Field(default_factory=dict, description="context of the command")
+    call_id: str = Field(default="")
 
     def not_available(self, msg: str = "") -> "CommandDoneEvent":
         return CommandDoneEvent(
-            session_id=self.session_id,
+            connection_id=self.connection_id,
             command_id=self.command_id,
             errcode=CommandErrorCode.NOT_AVAILABLE.value,
             errmsg=msg or f"command `{self.chan}:{self.name}` not available",
@@ -134,14 +148,14 @@ class CommandCallEvent(ChannelEventModel):
 
     def cancel(self) -> "CommandCancelEvent":
         return CommandCancelEvent(
-            session_id=self.session_id,
+            connection_id=self.connection_id,
             command_id=self.command_id,
             chan=self.chan,
         )
 
-    def done(self, result: Any, errcode: int, errmsg: str) -> "CommandDoneEvent":
+    def done(self, result: CommandTaskResult | None, errcode: int, errmsg: str) -> "CommandDoneEvent":
         return CommandDoneEvent(
-            session_id=self.session_id,
+            connection_id=self.connection_id,
             command_id=self.command_id,
             errcode=errcode,
             errmsg=errmsg,
@@ -151,19 +165,13 @@ class CommandCallEvent(ChannelEventModel):
 
     def not_found(self, msg: str = "") -> "CommandDoneEvent":
         return CommandDoneEvent(
-            session_id=self.session_id,
+            connection_id=self.connection_id,
             command_id=self.command_id,
             errcode=CommandErrorCode.NOT_FOUND.value,
             errmsg=msg or f"command `{self.chan}:{self.name}` not found",
             chan=self.chan,
             result=None,
         )
-
-
-class CommandPeekEvent(ChannelEventModel):
-    event_type: ClassVar[str] = "moss.channel.proxy.command.peek"
-    chan: str = Field(description="channel name")
-    command_id: str = Field(description="command id")
 
 
 class CommandCancelEvent(ChannelEventModel):
@@ -182,19 +190,19 @@ class SyncChannelMetasEvent(ChannelEventModel):
 
 class ReconnectSessionEvent(ChannelEventModel):
     """
-    Proxy 告知 Provider 传送的事件 Session Id 未对齐, 需要重新建立 session, 双方清空状态.
+    Proxy 告知 Provider 传送的事件 Session Id 未对齐, 需要重新建立 connection, 双方清空状态.
     """
 
-    event_type: ClassVar[str] = "moss.channel.proxy.session.reconnect"
+    event_type: ClassVar[str] = "moss.channel.proxy.connection.reconnect"
 
 
 class SessionCreatedEvent(ChannelEventModel):
     """
-    proxy 告知 provider session 已经确认并创建了.
+    proxy 告知 provider connection 已经确认并创建了.
     握手后期待服务端发送 UpdateChannelMeta 事件进行同步.
     """
 
-    event_type: ClassVar[str] = "moss.channel.proxy.session.created"
+    event_type: ClassVar[str] = "moss.channel.proxy.connection.created"
 
 
 # --- provider event --- #
@@ -205,7 +213,21 @@ class CreateSessionEvent(ChannelEventModel):
     握手事件, provider 侧尝试与 proxy 进行握手, 确定 Session.
     """
 
-    event_type: ClassVar[str] = "moss.channel.provider.session.create"
+    event_type: ClassVar[str] = "moss.channel.provider.connection.create"
+    listening_topics: list[str] = Field(
+        default_factory=list,
+        description="listening topics",
+    )
+
+
+class ProviderPubTopicEvent(ChannelEventModel):
+    event_type: ClassVar[str] = "moss.channel.provider.pub_topic"
+    topic: Topic = Field(description="published topic")
+
+
+class ProviderSubTopicEvent(ChannelEventModel):
+    event_type: ClassVar[str] = "moss.channel.provider.sub_topic"
+    topic_name: str = Field(description="topic name")
 
 
 class CommandDoneEvent(ChannelEventModel):
@@ -214,21 +236,7 @@ class CommandDoneEvent(ChannelEventModel):
     command_id: str = Field(description="command id")
     errcode: int = Field(default=0, description="command errcode")
     errmsg: Optional[str] = Field(default=None, description="command errmsg")
-    result: Any = Field(default=None, description="result of the command")
-
-
-class ClearDoneEvent(ChannelEventModel):
-    event_type: ClassVar[str] = "moss.channel.provider.clear.done"
-    chan: str = Field(description="channel name")
-
-
-class RunPolicyDoneEvent(ChannelEventModel):
-    event_type: ClassVar[str] = "moss.channel.provider.policy.run_done"
-
-
-class PausePolicyDoneEvent(ChannelEventModel):
-    event_type: ClassVar[str] = "moss.channel.provider.policy.pause_done"
-    chan: str = Field(description="channel name")
+    result: CommandTaskResult | None = Field(default=None, description="result of the command")
 
 
 class ChannelMetaUpdateEvent(ChannelEventModel):
@@ -242,3 +250,6 @@ class ProviderErrorEvent(ChannelEventModel):
     event_type: ClassVar[str] = "moss.channel.provider.error"
     errcode: int = Field(description="error code")
     errmsg: str = Field(description="error message")
+
+    def __repr__(self):
+        return f"<error code=`{self.errcode}` message=`{self.errmsg}`>"

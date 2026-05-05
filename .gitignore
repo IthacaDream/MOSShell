@@ -1,5 +1,7 @@
 # ide
+.moss_ws/
 .idea/
+.claude/
 dist
 debug.log
 .DS_Store

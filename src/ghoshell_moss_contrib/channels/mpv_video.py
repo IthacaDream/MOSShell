@@ -107,7 +107,7 @@ def create_command_executor(command_name: str, command_args: list[dict[str, Any]
     return command_executor
 
 
-@mpv_chan.build.with_description()
+@mpv_chan.build.description()
 def description():
     video_config = VideoConfig.load(mpv_chan.broker.container)
 
@@ -156,7 +156,7 @@ def stop():
     stop current playing video or audio
     """
     mpv = mpv_chan.broker.container.force_fetch(MPV)
-    mpv.stop()
+    mpv.close()
 
 
 def build_mpv_chan(container: IoCContainer):

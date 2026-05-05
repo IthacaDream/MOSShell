@@ -8,9 +8,9 @@ import live2d.v3 as live2d
 import pygame
 from ghoshell_container import Container
 
-from ghoshell_moss.speech import Speech, make_baseline_tts_speech
-from ghoshell_moss.speech.player.pyaudio_player import PyAudioStreamPlayer
-from ghoshell_moss.speech.volcengine_tts import VolcengineTTS, VolcengineTTSConf
+from ghoshell_moss.core.speech import Speech, make_baseline_tts_speech
+from ghoshell_moss.core.speech.player.pyaudio_player import PyAudioStreamPlayer
+from ghoshell_moss.core.speech.volcengine_tts import VolcengineTTS, VolcengineTTSConf
 from ghoshell_moss_contrib.agent import ModelConf, SimpleAgent
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -31,7 +31,7 @@ from miku_channels.leg import left_leg_chan, right_leg_chan
 from miku_channels.necktie import necktie_chan
 from miku_provider import init_live2d, init_pygame
 
-from ghoshell_moss.core.shell import new_shell
+from ghoshell_moss import new_ctml_shell
 from ghoshell_moss_contrib.example_ws import get_example_speech, workspace_container
 
 # 全局状态
@@ -86,11 +86,11 @@ async def run_agent(container: Container, speech: Speech | None = None):
     loop = asyncio.get_running_loop()
 
     # 创建 Shell
-    shell = new_shell(container=container)
+    shell = new_ctml_shell(parent_container=container)
 
     async def speaking():
         try:
-            while not shell.is_close():
+            while shell.is_running():
                 if speaking_event.is_set():
                     await speak(duration=0.3)
                 else:

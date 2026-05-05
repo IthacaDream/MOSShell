@@ -1,0 +1,83 @@
+import asyncio
+from collections import deque
+
+import pytest
+
+from ghoshell_moss.core.concepts.command import PyCommand, make_command_group
+from ghoshell_moss.core.ctml.interpreter import CTMLInterpreter
+# from ghoshell_moss.core.helpers import get_console_logger
+from ghoshell_moss.core.speech.mock import MockSpeech
+
+# logger = get_console_logger(level="ERROR")
+
+
+@pytest.mark.asyncio
+async def test_interpreter_baseline():
+    async def foo() -> int:
+        return 123
+
+    queue = deque()
+    interpreter = CTMLInterpreter(
+        kind="",
+        commands=make_command_group(PyCommand(foo)),
+        stream_id="test",
+        speech=MockSpeech(),
+        callback=queue.append,
+        # logger=logger,
+    )
+
+    content = "<foo>h</foo>"
+
+    async with interpreter:
+        # system prompt is not none
+        assert len(interpreter.meta_instruction()) > 0
+        for c in content:
+            interpreter.feed(c)
+        interpreter.commit()
+        await interpreter.wait_compiled()
+        # 所有的 input 被 buffer 了.
+        assert content == interpreter.received_text()
+        assert len(list(interpreter.parsed_tokens())) == 5
+        for token in interpreter.parsed_tokens():
+            if token.name == "foo":
+                assert token.chan == ""
+
+        # 实际生成的是 <scope enter> <foo /> <__content__> <scope exit>
+        assert len(queue) == 5
+        assert queue.pop() is None
+        assert len(interpreter.compiled_tasks()) == 4
+
+
+@pytest.mark.asyncio
+async def test_interpreter_cancel():
+    async def foo() -> int:
+        return 123
+
+    queue = deque()
+    interpreter = CTMLInterpreter(
+        kind="",
+        commands=make_command_group(PyCommand(foo)),
+        stream_id="test",
+        speech=MockSpeech(),
+        callback=queue.append,
+    )
+
+    content = ["<foo>", "hello", "</foo>"]
+
+    async def consumer():
+        async with interpreter:
+            for c in content:
+                interpreter.feed(c)
+                await asyncio.sleep(0.1)
+
+            await interpreter.wait_tasks()
+
+    async def cancel():
+        await asyncio.sleep(0.2)
+        await interpreter.close(cancel_executing=True)
+
+    await asyncio.gather(cancel(), consumer())
+    inputted = interpreter.received_text()
+    # 有一部分输入, 但是输入不完整.
+    assert len(inputted) > 0
+    assert content != inputted

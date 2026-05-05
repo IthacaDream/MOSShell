@@ -3,11 +3,11 @@ from .duplex import (
     Connection,
     ConnectionClosedError,
     ConnectionNotAvailable,
-    DuplexChannelBroker,
+    DuplexChannelRuntime,
     DuplexChannelProvider,
     DuplexChannelProxy,
-    DuplexChannelStub,
 )
 from .duplex.protocol import *
-from .py_channel import PyChannel, PyChannelBroker, PyChannelBuilder
-from .shell import DefaultShell, MainChannel, new_shell
+from .py_channel import PyChannel, StateChannelRuntime, PyChannelBuilder
+from .ctml.shell import CTMLShell, create_ctml_main_chan, new_ctml_shell
+from .blueprint import *

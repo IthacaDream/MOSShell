@@ -222,7 +222,7 @@ You must complete the presentation on the current page firstly, then call the co
 """
 
     async def context_messages(self):
-        message = Message.new(role="user", name="__slide_frame__")
+        message = Message.new(name="__slide_frame__")
 
         if not self.is_playing:
             message.with_content(Text(text="Not play any slides yet"))
@@ -245,8 +245,8 @@ You must complete the presentation on the current page firstly, then call the co
     def as_channel(self) -> PyChannel:
         player_chan = PyChannel(name="player")
 
-        player_chan.build.with_description()(self.description)
-        player_chan.build.with_context_messages(self.context_messages)
+        player_chan.build.description()(self.description)
+        player_chan.build.context_messages(self.context_messages)
 
         player_chan.build.command()(self.play)
         player_chan.build.command()(self.to_page)
@@ -277,7 +277,7 @@ class SlideStudio:
         self.player.viewer.hide()
 
     async def context_messages(self):
-        message = Message.new(role="user", name="__studio__")
+        message = Message.new(name="__studio__")
         slide_texts = [f"name:{s.name} description:{s.description}" for s in self._assets.refresh()]
         if not slide_texts:
             message.with_content("There has no slides in Slide Studio")
@@ -286,10 +286,10 @@ class SlideStudio:
         return [message]
 
     def as_channel(self):
-        studio_chan = PyChannel(name="slide_studio", block=True)
+        studio_chan = PyChannel(name="slide_studio", blocking=True)
 
-        studio_chan.build.with_description()(self.description)
-        studio_chan.build.with_context_messages(self.context_messages)
+        studio_chan.build.description()(self.description)
+        studio_chan.build.context_messages(self.context_messages)
 
         studio_chan.build.command()(self.show)
         studio_chan.build.command()(self.hide)

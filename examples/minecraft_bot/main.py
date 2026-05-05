@@ -10,11 +10,11 @@ from ghoshell_container import Container
 from javascript import On, require
 
 from ghoshell_moss import PyChannel
-from ghoshell_moss.core.shell import new_shell
+from ghoshell_moss.core import new_ctml_shell
 from ghoshell_moss.message import Message, Text
-from ghoshell_moss.speech import make_baseline_tts_speech
-from ghoshell_moss.speech.player.pyaudio_player import PyAudioStreamPlayer
-from ghoshell_moss.speech.volcengine_tts import VolcengineTTS, VolcengineTTSConf
+from ghoshell_moss.core.speech import make_baseline_tts_speech
+from ghoshell_moss.core.speech.player.pyaudio_player import PyAudioStreamPlayer
+from ghoshell_moss.core.speech.volcengine_tts import VolcengineTTS, VolcengineTTSConf
 from ghoshell_moss_contrib.agent import ModelConf, SimpleAgent
 from ghoshell_moss_contrib.agent.chat.queue import QueueChat
 
@@ -68,7 +68,7 @@ def handle_spawn(*args):
 @On(bot, "chat")
 def handle_msg(this, sender, message, *args):
     if sender and (sender != BOT_USERNAME):
-        moss_message = Message.new(role="user", name=sender).with_content(Text(text=f"{sender}: {message}"))
+        moss_message = Message.new(name=sender).with_content(Text(text=f"{sender}: {message}"))
         chat.input_queue.put_nowait(moss_message)
 
 
@@ -77,7 +77,7 @@ bot_chan = PyChannel(name=BOT_USERNAME.lower())
 to_follow_player = ""
 
 
-@bot_chan.build.on_policy_run
+@bot_chan.build.idle
 async def on_policy_run():
     global to_follow_player
     while to_follow_player != "":
@@ -110,10 +110,10 @@ async def stop_follow_player():
     to_follow_player = ""
 
 
-@bot_chan.build.with_context_messages
+@bot_chan.build.context_messages
 async def context_messages():
     pos = bot.entity.position
-    message = Message.new(role="user", name="__minecraft_bot__").with_content(
+    message = Message.new(name="__minecraft_bot__").with_content(
         Text(text=f"你当前的位置是：{pos.toString()}，周围的方块信息如下："),
     )
     for x_offset in range(-3, 3):  # 东西
@@ -197,7 +197,7 @@ async def find_blocks(block_name: str, max_distance: int = 128, count=10):
     if bot.registry.blocksByName[block_name] is None:
         return f"{block_name} is not a block name"
 
-    ids = [bot.registry.blocksByName[block_name].id]
+    ids = [bot.registry.blocksByName[block_name].moment_id]
     blocks = bot.findBlocks({"matching": ids, "maxDistance": max_distance, "count": count})
 
     return f"找到 {blocks.length} 个 {block_name} 方块：{blocks}"
@@ -257,7 +257,7 @@ async def main():
         player = PyAudioStreamPlayer()
         tts = VolcengineTTS(conf=VolcengineTTSConf(default_speaker="zh_male_ruyayichen_saturn_bigtts"))
         speech = make_baseline_tts_speech(player=player, tts=tts)
-    shell = new_shell(speech=speech)
+    shell = new_ctml_shell(speech=speech)
     shell.main_channel.import_channels(bot_chan)
     agent = SimpleAgent(
         instruction=f"你叫{BOT_USERNAME}，举止谈吐儒雅脱俗，生活在minecraft世界中",
@@ -281,7 +281,7 @@ async def dry_test():
     container = init()
     await asyncio.sleep(1)
 
-    async with bot_chan.run_in_ctx(container=container):
+    async with bot_chan.bootstrap(container=container):
         res = await find_blocks("oak_log")
         await dig_target(x=8, y=73, z=21)
         pass

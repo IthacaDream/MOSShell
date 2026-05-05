@@ -13,7 +13,7 @@ from typing import Optional
 
 from ghoshell_common.contracts import DefaultFileStorage, LoggerItf
 
-from ghoshell_moss.core.concepts.channel import Channel, ChannelProvider
+from ghoshell_moss.core.concepts.channel import Channel, ChannelProvider, MutableChannel
 from ghoshell_moss_contrib.prototypes.ros2_robot.abcd import RobotController
 from ghoshell_moss_contrib.prototypes.ros2_robot.main_channel import build_robot_main_channel
 from ghoshell_moss_contrib.prototypes.ros2_robot.manager import JointValueParser, YamlStorageRobotManager
@@ -23,7 +23,7 @@ from .ros2_controller import Ros2Controller
 
 __all__ = ["MAIN_CHANNEL_BUILDER", "Ros2RobotControllerNode", "run_node"]
 
-MAIN_CHANNEL_BUILDER = Callable[[Channel, RobotController], Channel]
+MAIN_CHANNEL_BUILDER = Callable[[MutableChannel, RobotController], Channel]
 
 
 class Ros2LoggerAdapter(LoggerItf):

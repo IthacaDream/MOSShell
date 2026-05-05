@@ -1,7 +1,7 @@
 import asyncio
 
 from ghoshell_moss.message.contents import Base64Image
-from ghoshell_moss.transports.zmq_channel.zmq_channel import ZMQChannelProxy
+from ghoshell_moss.bridges.zmq_channel.zmq_channel import ZMQChannelProxy
 from ghoshell_moss_contrib.gui.image_viewer import SimpleImageViewer, run_img_viewer
 
 if __name__ == "__main__":
@@ -18,10 +18,10 @@ if __name__ == "__main__":
                 await broker.wait_connected()
                 while True:
                     await asyncio.sleep(2)
-                    if not proxy.is_running():
+                    if not broker.is_running():
                         continue
-                    await proxy.broker.refresh_meta()
-                    meta = proxy.broker.meta()
+                    await broker.refresh_metas()
+                    meta = broker.self_meta()
                     for msg in meta.context:
                         for ct in msg.contents:
                             if i := Base64Image.from_content(ct):

@@ -8,17 +8,17 @@ if check_agent():
     from ghoshell_moss_contrib.agent.chat.console import ConsoleChat
 from ghoshell_common.helpers import uuid
 
-from ghoshell_moss.core.concepts.speech import Speech, SpeechStream
+from ghoshell_moss.contracts.speech import Speech, SpeechStream
 
 
 class ChatRenderSpeechStream(SpeechStream):
     def __init__(
-        self,
-        batch_id: str,
-        output: Callable[[str], None],
-        *,
-        on_start: asyncio.Event,
-        close: asyncio.Event,
+            self,
+            batch_id: str,
+            output: Callable[[str], None],
+            *,
+            on_start: asyncio.Event,
+            close: asyncio.Event,
     ):
         super().__init__(id=batch_id)
         self._output = output
@@ -51,7 +51,10 @@ class ChatRenderSpeechStream(SpeechStream):
         if self.cmd_task is not None:
             self.cmd_task.tokens = self._buffered
 
-    async def astart(self) -> None:
+    async def fail(self, err: Exception) -> None:
+        return
+
+    async def start_play(self) -> None:
         if self._started:
             return
         if len(self._buffered) > 0:
@@ -60,17 +63,23 @@ class ChatRenderSpeechStream(SpeechStream):
         self._on_start.set()
         self._main_loop_task = asyncio.create_task(self._main_loop())
 
-    async def aclose(self):
-        self.close()
+    async def close(self):
+        self.close_sync()
 
-    def close(self) -> None:
+    def close_sync(self) -> None:
         self.commit()
         self._close_event.set()
+
+    async def start_synthesis(self) -> None:
+        return
+
+    def is_closed(self) -> bool:
+        return self._close_event.is_set()
 
     def buffered(self) -> str:
         return self._buffered
 
-    async def wait(self) -> None:
+    async def wait_played(self) -> None:
         if self._main_loop_task:
             await self._main_loop_task
 
@@ -79,7 +88,7 @@ class ChatRenderSpeech(Speech):
     def __init__(self, render: ConsoleChat):
         self.render = render
         self.last_stream_close_event = asyncio.Event()
-        self._outputted = {}
+        self._outputted: dict[str, str] = {}
         self._closed_event = asyncio.Event()
 
     def new_stream(self, *, batch_id: Optional[str] = None) -> SpeechStream:
@@ -87,10 +96,12 @@ class ChatRenderSpeech(Speech):
         last_stream_close_event = self.last_stream_close_event
         new_close_event = asyncio.Event()
         self.last_stream_close_event = new_close_event
-        self._outputted[batch_id] = []
+        self._outputted[batch_id] = ''
 
         def _output(item: str):
-            self._outputted[batch_id].add_task_with_paths(item)
+            value = self._outputted.get(batch_id, '')
+            value += item
+            self._outputted[batch_id] = value
             self.render.update_ai_response(item)
 
         return ChatRenderSpeechStream(batch_id, _output, on_start=last_stream_close_event, close=new_close_event)
@@ -106,6 +117,9 @@ class ChatRenderSpeech(Speech):
 
     async def start(self) -> None:
         pass
+
+    def is_running(self) -> bool:
+        return not self._closed_event.is_set()
 
     async def close(self) -> None:
         self._closed_event.set()
