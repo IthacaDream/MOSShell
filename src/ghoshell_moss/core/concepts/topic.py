@@ -1,3 +1,7 @@
+"""
+在 Shell 体系里实现的强类型数据 (Topic) 广播体系, 用于做复杂的实现.
+"""
+
 from abc import ABC, abstractmethod
 from typing import Generic, TypeVar, Literal, Any, Protocol, Annotated
 from pydantic import BaseModel, Field, ValidationError

@@ -1,3 +1,7 @@
+"""
+基于流式解释器实现的 Shell, 也是躯体的封装. 它负责理解躯体, 解释模型输出, 并行多轨调度 command 等.
+"""
+
 import asyncio
 import contextlib
 from abc import ABC, abstractmethod

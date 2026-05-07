@@ -9,7 +9,10 @@ from pathlib import Path
 from ghoshell_common.helpers import uuid
 from importlib import resources
 from pydantic import BaseModel, Field
-from ghoshell_moss.core.ctml.meta import CTML_VERSION, get_moss_ctml_meta_instruction
+from ghoshell_moss.core.ctml.versions import (
+    CTML_VERSION, search_version_file_in_dir, default_moss_ctml_meta_instruction_directory,
+    get_version_from_filename,
+)
 import os
 import dotenv
 import sys
@@ -42,7 +45,7 @@ __all__ = [
 
     # dir path
     'WORKSPACE_SOURCE_DIR',
-    'META_INSTRUCTION_FILENAME',
+    'META_CONFIG_FILENAME',
     'WORKSPACE_ENV_FILENAME',
     'WORKSPACE_ENV_EXAMPLE_FILENAME',
 ]
@@ -56,7 +59,7 @@ from ghoshell_moss.contracts.configs import ConfigType
 # workspace 的绝对路径优先从环境变量寻找, 找不到时按目录发现机制寻找.
 # 路径发现的逻辑是: os getcwd 下, 递归搜索父级目录下, home 目录下.
 DEFAULT_WORKSPACE_DIR_NAME = '.moss_ws'
-META_INSTRUCTION_FILENAME = 'MOSS.md'
+META_CONFIG_FILENAME = 'MOSS.md'
 
 # env 文件名. workspace 启动时会从其目录下读取环境变量文件 (by loadenv)
 WORKSPACE_ENV_FILENAME = '.env'
@@ -64,6 +67,7 @@ WORKSPACE_ENV_EXAMPLE_FILENAME = '.env.example'
 
 # 源码预期所在的目录.
 WORKSPACE_SOURCE_DIR = 'src'
+SOURCE_MODES_PACKAGE = 'MOSS.modes'
 
 # --- stubs --- #
 # workspace 的原始文件所处的 package 路径.
@@ -102,7 +106,7 @@ MOSSEnvKey = Literal[
 ]
 
 
-class MetaConfig(BaseModel):
+class MOSSMeta(BaseModel):
     """
     meta instruction from the environment
     """
@@ -110,7 +114,14 @@ class MetaConfig(BaseModel):
         default=CTML_VERSION,
         description="当前 MOSS 默认使用的提示词版本."
     )
-    content: str = Field(
+    default_mode: str = Field(
+        default=DEFAULT_MOSS_MODE,
+        description="启动时默认的模式",
+    )
+    default_session_scope: str = Field(
+        default=DEFAULT_SESSION_SCOPE,
+    )
+    system_prompt: str = Field(
         default="",
         description="补充到 CTML meta instruction 后面的内容. version 为空, 这里应该包含完整的 meta instruction"
     )
@@ -123,7 +134,7 @@ class MetaConfig(BaseModel):
         import frontmatter
         post = frontmatter.load(str(file.absolute()))
         data = post.metadata
-        data['content'] = post.content
+        data['system_prompt'] = post.content
         return cls(**data)
 
 
@@ -146,18 +157,24 @@ class Environment:
         self._workspace_path = workspace_path
         self._env_file = self._workspace_path.joinpath(WORKSPACE_ENV_FILENAME)
         self._source_path = self._workspace_path.joinpath(WORKSPACE_SOURCE_DIR)
-        self._meta_instruction_path = self._workspace_path.joinpath(META_INSTRUCTION_FILENAME)
-        if self._meta_instruction_path.is_file() and self._meta_instruction_path.exists():
-            self._meta_config = MetaConfig.from_file(self._meta_instruction_path)
+        self._meta_config_path = self._workspace_path.joinpath(META_CONFIG_FILENAME)
+        if self._meta_config_path.is_file() and self._meta_config_path.exists():
+            self._meta_config = MOSSMeta.from_file(self._meta_config_path)
         else:
-            self._meta_config = MetaConfig()
+            self._meta_config = MOSSMeta()
 
         if mode is None:
-            mode = os.environ.get(ENV_MOSS_MODE_KEY, DEFAULT_MOSS_MODE)
+            mode = os.environ.get(
+                ENV_MOSS_MODE_KEY,
+                self._meta_config.default_mode or DEFAULT_MOSS_MODE,
+            )
         self._moss_mode = mode
 
         # 永远要有正确的 session scope 和 session id.
-        self._session_scope = session_scope or os.environ.get(ENV_SESSION_SCOPE_KEY, DEFAULT_SESSION_SCOPE)
+        self._session_scope = session_scope or os.environ.get(
+            ENV_SESSION_SCOPE_KEY,
+            self._meta_config.default_session_scope or DEFAULT_SESSION_SCOPE
+        )
         self._session_id: str = session_id or os.environ.get(ENV_SESSION_ID_KEY, '')
         if not self._session_id:
             self._session_id = uuid()
@@ -187,16 +204,19 @@ class Environment:
         self._ghost_name = ghost_name
         os.environ[ENV_GHOST_NAME_KEY] = ghost_name
 
-    def get_ctml_prompt(self, ctml_version: str) -> str | None:
-        """在当前环境约定的 workspace 下寻找 ctml 指定版本. """
-        filename = ctml_version if ctml_version.endswith('.md') else ctml_version + '.md'
-        expect_file = self.workspace_path.joinpath("ctml_prompts").joinpath(filename).resolve()
-        if not expect_file.exists():
-            try:
-                return get_moss_ctml_meta_instruction(ctml_version)
-            except FileNotFoundError:
-                return None
-        return expect_file.read_text()
+    def ctml_prompts_dir(self) -> Path:
+        return self.workspace_path.joinpath("ctml_versions")
+
+    def ctml_versions(self) -> dict[str, Path]:
+        versions = search_version_file_in_dir(default_moss_ctml_meta_instruction_directory())
+        version_name_to_files = {}
+        for version_file in versions:
+            version_name = get_version_from_filename(version_file.name)
+            version_name_to_files[version_name] = version_file
+        for version_file in search_version_file_in_dir(self.ctml_prompts_dir()):
+            version_name = get_version_from_filename(version_file.name)
+            version_name_to_files[version_name] = version_file
+        return version_name_to_files
 
     @classmethod
     def discover(cls) -> Self:
@@ -301,7 +321,7 @@ class Environment:
         # 从父级目录中查找.
         search_dir = cwd
         while search_dir != user_home:
-            if search_dir.joinpath(META_INSTRUCTION_FILENAME).exists():
+            if search_dir.joinpath(META_CONFIG_FILENAME).exists():
                 # 返回找得到 MOSS.md 文件的目录作为 workspace 根目录.
                 # 对于将 workspace 作为 project 使用的场景, 这样比较方便.
                 return search_dir.absolute()
@@ -360,6 +380,12 @@ class Environment:
         """
         return self._workspace_path
 
+    def modes_dir(self) -> Path:
+        path = self.source_dir
+        for module_name in DEFAULT_MOSS_MODE.split('.'):
+            path = path.joinpath(module_name)
+        return path.absolute()
+
     @property
     def env_file(self) -> Path:
         """
@@ -388,10 +414,10 @@ class Environment:
 
     @property
     def meta_instruction_file(self) -> Path:
-        return self._meta_instruction_path.absolute()
+        return self._meta_config_path.absolute()
 
     @property
-    def meta_config(self) -> MetaConfig:
+    def meta_config(self) -> MOSSMeta:
         return self._meta_config
 
     @property

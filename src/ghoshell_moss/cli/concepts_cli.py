@@ -12,90 +12,85 @@ from ghoshell_moss.cli.utils import (
     print_error, print_info, print_panel, echo,
     print_simple_panel, print_simple_table, console
 )
+from ghoshell_moss.core.codex.discover import scan_package
+from ghoshell_moss.core.codex import reflect_any_by_import_path
 
-__all__ = ['show_concepts']
+__all__ = ['show_core_concepts']
 # 假设这是挂载在主 app 下的子 typer
 
 CONCEPT_PACKAGE = "ghoshell_moss.core.concepts"
+BLUEPRINT_PACKAGE = "ghoshell_moss.core.blueprint"
+CONTRACTS_PACKAGE = "ghoshell_moss.contracts"
+HOST_ABCD_PACKAGE = "ghoshell_moss.host.abcd"
+
+codex_app = typer.Typer(
+    short_help="Show moss concepts",
+    help="Show moss concepts by reflect source code, follow `code as prompt` principle",
+    no_args_is_help=True,
+)
 
 
-def _get_concept_modules() -> List[str]:
-    """
-    获取 ghoshell_moss.core.concepts 下的模块列表
-    """
-    try:
-        package = importlib.import_module(CONCEPT_PACKAGE)
-        if not hasattr(package, '__path__'):
-            return []
-
-        modules = [
-            name for _, name, is_pkg in pkgutil.iter_modules(package.__path__)
-            if not is_pkg and name != "__init__"
-        ]
-        return sorted(modules)
-    except (ImportError, Exception) as e:
-        # 在 CLI 工具中，这种内部错误建议用 print_error
-        print_error(f"Failed to access concept package: {e}")
-        return []
-
-
-def _get_concept_description(module_name: str) -> str:
-    """
-    获取概念模块的描述（第一个无主的字符串）
-    """
-    try:
-        # 构建模块文件路径
-        package = importlib.import_module(CONCEPT_PACKAGE)
-        if not hasattr(package, '__path__'):
-            return ""
-
-        package_path = package.__path__[0] if isinstance(package.__path__, list) else package.__path__
-        module_file = os.path.join(package_path, f"{module_name}.py")
-
-        if not os.path.exists(module_file):
-            return ""
-
-        # 读取文件并解析 AST
-        with open(module_file, 'r', encoding='utf-8') as f:
-            content = f.read()
-
-        tree = ast.parse(content)
-
-        # 方法1: 使用 ast.get_docstring 获取模块文档字符串
-        desc = ast.get_docstring(tree)
-        if desc:
-            # 清理多余的空白和换行，合并为单行
-            desc = ' '.join(desc.split())
-            return desc
-
-        # 方法2: 遍历模块的语句，找到第一个字符串表达式
-        for node in tree.body:
-            if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
-                if isinstance(node.value.value, str):
-                    desc = node.value.value.strip()
-                    if desc:
-                        desc = ' '.join(desc.split())
-                        return desc
-    except Exception:
-        # 任何错误都返回空字符串
-        pass
-
-    return ""
-
-
-def show_concepts(
+@codex_app.command(
+    name='core',
+    help="list or show detail of the core concepts of moss structure",
+)
+def show_core_concepts(
         module_name: Optional[str] = typer.Argument(
             None,
-            help="Specific concept module to reflect. If omitted, lists all available modules."
+            help="Specific core concept module to reflect. If omitted, lists all available modules."
         )
 ):
+    _show_package_module(CONCEPT_PACKAGE, module_name)
+
+
+@codex_app.command(
+    name='blueprint',
+    help="list or show detail of the blueprint of building model-oriented operating system from MOSS",
+)
+def show_blueprint(
+        module_name: Optional[str] = typer.Argument(
+            None,
+            help="Specific blueprint module to reflect. If omitted, lists all available modules."
+        )
+):
+    _show_package_module(BLUEPRINT_PACKAGE, module_name)
+
+
+@codex_app.command(
+    name='contracts',
+    help="list or show detail of the basic abstract dependencies of the MOSS.",
+)
+def show_contracts(
+        module_name: Optional[str] = typer.Argument(
+            None,
+            help="Specific contracts module to reflect. If omitted, lists all available modules."
+        )
+):
+    _show_package_module(CONTRACTS_PACKAGE, module_name)
+
+
+@codex_app.command(
+    name='host',
+    help="list or show detail of the designs of MOSS tui and host implements",
+)
+def show_host(
+        module_name: Optional[str] = typer.Argument(
+            None,
+            help="Specific contracts module to reflect. If omitted, lists all available modules."
+        )
+):
+    _show_package_module(HOST_ABCD_PACKAGE, module_name)
+
+
+def _show_package_module(package: str, module_name: Optional[str] = None) -> None:
     """
     Reflect concept modules from ghoshell_moss.core.concepts.
 
     If MODULE_NAME is provided, reflects that specific module.
     Otherwise, lists all available concept modules.
     """
-    modules = _get_concept_modules()
+    console.print(f"\n[dim]Found modules in package '{package}'[/dim]")
+    modules = list(scan_package(package, parse=lambda x: not x.is_package))
 
     # 情况 A: 用户没有输入模块名，展示列表
     if module_name is None:
@@ -103,11 +98,10 @@ def show_concepts(
             print_info("No concept modules found.")
             return
 
-        # 获取每个模块的描述
         module_descriptions = []
         for mod in modules:
-            desc = _get_concept_description(mod)
-            module_descriptions.append((mod, desc))
+            desc = mod.short_doc
+            module_descriptions.append((mod.module_name, desc))
 
         # 准备表格数据
         table_data = []
@@ -133,17 +127,17 @@ def show_concepts(
         console.print(f"[dim]Tip: Run [bold]moss concepts <name>[/bold] to see details.[/dim]")
         return
 
+    modules_map = {mod.module_name: mod for mod in modules}
+
     # 情况 B: 用户输入了模块名，进行校验
-    if module_name not in modules:
+    if module_name not in modules_map:
         print_error(f"Concept module '{module_name}' not found.")
         print_info("Available modules:")
         for mod in modules:
             print_info(f"  • {mod}")
         raise typer.Exit(code=1)
 
-    # 情况 C: 校验通过，执行反射逻辑
-    from ghoshell_moss.core.codex import reflect_any_by_import_path
-    import_path = f"{CONCEPT_PACKAGE}.{module_name}"
+    import_path = modules_map[module_name].module_path
 
     try:
         print_info(f"Reflecting concept: {import_path}...")

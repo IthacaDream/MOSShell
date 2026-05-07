@@ -1,5 +1,4 @@
 import asyncio
-import os
 from typing import Coroutine
 
 from typing_extensions import Self
@@ -8,10 +7,13 @@ from ghoshell_common.contracts import LoggerItf
 from ghoshell_container import IoCContainer, Container, Provider
 
 from ghoshell_moss import TopicService
-from ghoshell_moss.contracts import Workspace, ConfigStore, WorkspaceYamlConfigStoreProvider
+from ghoshell_moss.contracts import (
+    Workspace, ConfigStore, WorkspaceYamlConfigStoreProvider, BaseSystemPrompter,
+    SystemPrompter,
+)
 from ghoshell_moss.core.blueprint.session import Session
 from ghoshell_moss.core.blueprint.manifests import Manifests
-from ghoshell_moss.core.blueprint.matrix import Matrix, Cell, SystemPrompter, BaseSystemPrompter
+from ghoshell_moss.core.blueprint.matrix import Matrix, Cell
 from ghoshell_moss.host.abcd.app import AppStore, AppInfo
 from ghoshell_moss.host.abcd.host_design import MossMode
 from ghoshell_moss.host.abcd.environment import Environment, DEFAULT_CELL_ADDRESS
@@ -106,6 +108,7 @@ class MatrixImpl(Matrix):
         env.bootstrap()
         self.env = env
         self.apps = app_store
+        self._ctml_version_cache: dict[str, str] = {}
         self._current_mode: MossMode = mode
         self._cell_address = env.cell_address
         self._manifests = manifest
@@ -136,7 +139,6 @@ class MatrixImpl(Matrix):
         )
         self._is_main = self._this_cell.type == 'main'
         self._logger: LoggerItf | logging.Logger | None = logger
-        self._container = self._prepare_container()
         self._started = False
         self._channel_provider_task: asyncio.Task | None = None
         self._event_loop: asyncio.AbstractEventLoop | None = None
@@ -151,12 +153,14 @@ class MatrixImpl(Matrix):
         locker_name = locker_name.replace('/', '_')
         self._process_locker = self._workspace.lock(locker_name)
         self._process_locker_name = locker_name
+        self._system_prompter = self._prepare_system_prompter()
+        self._container = self._prepare_container()
 
     def _prepare_system_prompter(self) -> SystemPrompter:
         prompter = BaseSystemPrompter()
         # ctml 优先.
         prompter.with_prompter("ctml", self.ctml_instruction())
-        prompter.with_prompter("moss_meta_config_content", self.env.meta_config.content)
+        prompter.with_prompter("moss_meta_config_content", self.env.meta_config.system_prompt)
         prompter.with_prompter("moss_mode_instruction", self._current_mode.instruction)
         return prompter
 
@@ -164,9 +168,16 @@ class MatrixImpl(Matrix):
         """返回当前环境中定义的 ctml version """
         return self._current_mode.ctml_version or self.env.meta_config.ctml_version
 
-    def get_ctml_prompt(self, ctml_version: str) -> str | None:
+    def get_ctml_prompt(self, ctml_version: str | None = None) -> str | None:
         """在当前环境约定的 workspace 下寻找 ctml 指定版本. """
-        return self.env.get_ctml_prompt(ctml_version)
+        ctml_version = ctml_version or self.ctml_version()
+        if ctml_version not in self._ctml_version_cache:
+            versions = self.manifests.ctml_versions()
+            version_info = versions.get(ctml_version)
+            if version_info is None:
+                raise KeyError(f"ctml version {ctml_version} not found in manifests")
+            self._ctml_version_cache[ctml_version] = version_info.file.read_text()
+        return self._ctml_version_cache[ctml_version]
 
     def ctml_instruction(self) -> str:
         ctml_version = self.ctml_version()
@@ -180,9 +191,8 @@ class MatrixImpl(Matrix):
         container.set(MossMode, self._current_mode)
         container.set(Workspace, self._workspace)
         container.set(Manifests, self._manifests)
-        system_prompter = self._prepare_system_prompter()
         # system prompter
-        container.set(SystemPrompter, system_prompter)
+        container.set(SystemPrompter, self._system_prompter)
 
         # 注册 manifest providers. 包含环境与模式的双重配置.
         for contract in self._manifests.providers():
@@ -227,6 +237,9 @@ class MatrixImpl(Matrix):
             cell_address=self._this_cell.address,
         ))
         return default_providers
+
+    def moss_system_prompter(self) -> SystemPrompter:
+        return self._system_prompter
 
     @property
     def this(self) -> Cell:
@@ -318,12 +331,6 @@ class MatrixImpl(Matrix):
     @property
     def workspace(self) -> Workspace:
         return self._workspace
-
-    @property
-    def topics(self) -> TopicService:
-        self._check_running()
-        topics = self.container.force_fetch(TopicService)
-        return topics
 
     def is_running(self) -> bool:
         return self._started and not (self._closing_event.is_set() or self._closed_event.is_set())

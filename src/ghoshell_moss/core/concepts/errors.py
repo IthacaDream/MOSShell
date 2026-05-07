@@ -1,3 +1,7 @@
+"""
+MOSS 架构中可复用的异常类型, 主要是 CommandError
+"""
+
 from enum import IntEnum
 from typing_extensions import Self
 
@@ -71,6 +75,7 @@ class PausedError(Exception):
     system is paused
     """
     pass
+
 
 class CommandErrorCode(IntEnum):
     """

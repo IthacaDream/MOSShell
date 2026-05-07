@@ -10,6 +10,7 @@ import os
 import ast
 from pathlib import Path
 from typing import Optional, List, Tuple
+from rich.syntax import Syntax
 
 # 假设你的 app 定义在 main.py 中
 # 注意：在 Typer 中，我们通常使用 app.add_typer 来组合模块
@@ -20,7 +21,7 @@ codex_app = typer.Typer(
 )
 
 from ghoshell_moss.cli.utils import (
-    print_success, print_error, print_info, print_code, print_panel, echo,
+    print_success, print_error, print_info, print_code,
     print_simple_panel, print_simple_table, console
 )
 
@@ -34,7 +35,10 @@ def get_interface(
     """
     from ghoshell_moss.core.codex import reflect_any_by_import_path
     result = reflect_any_by_import_path(import_path)
-    echo(result)
+    console.print(Syntax(
+        result,
+        'python'
+    ))
 
 
 @codex_app.command("get-source")
@@ -117,7 +121,8 @@ def module_info(
         raise typer.Exit(code=1)
 
 
-def _get_package_modules(package_path: str, recursive: bool = False, include_packages: bool = True) -> List[Tuple[str, str, str]]:
+def _get_package_modules(package_path: str, recursive: bool = False, include_packages: bool = True) -> List[
+    Tuple[str, str, str]]:
     """
     获取指定包下的模块和包列表
 
@@ -184,7 +189,8 @@ def _get_item_description(full_path: str, item_type: str) -> str:
         if not hasattr(parent_package, '__path__'):
             return ""
 
-        parent_dir = parent_package.__path__[0] if isinstance(parent_package.__path__, list) else parent_package.__path__
+        parent_dir = parent_package.__path__[0] if isinstance(parent_package.__path__,
+                                                              list) else parent_package.__path__
 
         # 确定要读取的文件
         if item_type == "module":
@@ -232,15 +238,15 @@ def _get_item_description(full_path: str, item_type: str) -> str:
 
 @codex_app.command("list")
 def list_modules(
-    package_path: str = typer.Argument(
-        "ghoshell_moss",
-        help="Python package path to list modules and packages from, e.g.: ghoshell_moss.core.concepts"
-    ),
-    recursive: bool = typer.Option(
-        False,
-        "--recursive", "-r",
-        help="Recursively list items in subpackages"
-    ),
+        package_path: str = typer.Argument(
+            "ghoshell_moss",
+            help="Python package path to list modules and packages from, e.g.: ghoshell_moss.core.concepts"
+        ),
+        recursive: bool = typer.Option(
+            False,
+            "--recursive", "-r",
+            help="Recursively list items in subpackages"
+        ),
 ):
     """
     List all modules and packages in a Python package with their descriptions.
@@ -305,7 +311,8 @@ def list_modules(
         else:
             # 非递归模式下，提示可以递归查看或查看具体包
             tips.append(f"To explore packages recursively, run [bold]moss codex list --recursive[/bold]")
-            tips.append(f"To explore a specific package, run [bold]moss codex list {package_path}.<package_name>[/bold]")
+            tips.append(
+                f"To explore a specific package, run [bold]moss codex list {package_path}.<package_name>[/bold]")
 
     if module_count > 0:
         # 如果有模块，提示可以查看模块详情

@@ -21,8 +21,6 @@ __all__ = [
     'AppStore',
 ]
 
-from ghoshell_moss.core.concepts.channel import ChannelName
-
 
 class AppWatcher(BaseModel):
     """
@@ -75,7 +73,8 @@ class AppInfo(BaseModel):
         pattern=r'^[a-zA-Z0-9_]+$',
     )
     group: str = Field(
-        description='The group of the current app',
+        description="The group of the current app."
+                    "如果以 _ 开头, 无法用通配符匹配.",
         pattern=r'^[a-zA-Z0-9_]+$',
     )
     description: str = Field(
@@ -123,6 +122,14 @@ class AppInfo(BaseModel):
         return self.make_fullname(self.group, self.name)
 
     def match_fullname(self, pattern: str) -> bool:
+        group_wildcard = f"{self.group}/*"
+        if pattern == self.fullname:
+            return True
+        if pattern.startswith('*') and self.fullname.startswith('_'):
+            return False
+        elif pattern == group_wildcard:
+            return True
+
         return fnmatch.fnmatchcase(self.fullname, pattern)
 
     @property
@@ -215,6 +222,7 @@ class AppStore(ABC):
             cls,
             apps: Iterable[AppInfo],
             include: list[AppFullnamePattern] | None = None,
+            *,
             exclude: Optional[list[AppFullnamePattern]] = None
     ) -> Iterable[AppInfo]:
         """
@@ -224,7 +232,7 @@ class AppStore(ABC):
         - 'group/*' (组内全选)
         - '*/app_name' (跨组选同名)
         """
-        include_patterns = set(include) if include is not None else {"*/*"}
+        include_patterns = set(include) if include is not None else {}
         if len(include_patterns) == 0:
             return
 
@@ -234,19 +242,24 @@ class AppStore(ABC):
 
             # 1. 检查是否在包含范围内
             # 使用 fnmatch 实现标准的 Unix 通配符逻辑，比 startswith 更强大
-            is_included = any(
-                app.match_fullname(pat)
-                for pat in include_patterns
-            )
-
+            if include_patterns:
+                is_included = any(
+                    app.match_fullname(pat)
+                    for pat in include_patterns
+                )
+            else:
+                is_included = True
             if not is_included:
                 continue
 
             # 2. 检查是否被排除
-            is_excluded = any(
-                fnmatch.fnmatch(address, pat) or fnmatch.fnmatch(address, f"apps/{pat}")
-                for pat in exclude_patterns
-            )
+            if exclude_patterns:
+                is_excluded = any(
+                    fnmatch.fnmatch(address, pat) or fnmatch.fnmatch(address, f"apps/{pat}")
+                    for pat in exclude_patterns
+                )
+            else:
+                is_excluded = False
 
             if not is_excluded:
                 yield app

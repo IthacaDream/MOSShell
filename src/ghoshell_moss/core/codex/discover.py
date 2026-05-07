@@ -51,6 +51,10 @@ class ModuleManifest:
     is_package: bool = False
 
     @property
+    def module_name(self) -> str:
+        return self.module_path.split('.')[-1]
+
+    @property
     def module(self) -> Any:
         """
         Lazily loads and returns the actual Python ModuleType object.
@@ -129,16 +133,24 @@ def scan_module(module_path: str) -> ModuleManifest:
         raise CodexReflectionError(f"Error scanning module '{module_path}': {e}")
 
 
-def scan_package(package_path: str, max_depth: int = 1) -> Iterator[ModuleManifest]:
+def scan_package(
+        package_path: str,
+        max_depth: int = 1,
+        *,
+        parse: Callable[[ModuleManifest], bool] | None = None,
+) -> Iterator[ModuleManifest]:
     """
     Recursively scans a package and yields ModuleManifests up to max_depth.
 
     Depth 0: Yields only the root package.
     Depth 1: Yields the root package + direct submodules/subpackages.
     """
+    if parse is None:
+        parse = lambda x: True
     try:
         root_manifest = scan_module(package_path)
-        yield root_manifest
+        if parse(root_manifest):
+            yield root_manifest
     except CodexReflectionError:
         return  # Skip if root cannot be scanned
 
@@ -154,11 +166,13 @@ def scan_package(package_path: str, max_depth: int = 1) -> Iterator[ModuleManife
 
                 if module_info.ispkg:
                     # Recursive yield from sub-packages
-                    yield from scan_package(submodule_path, max_depth=max_depth - 1)
+                    yield from scan_package(submodule_path, max_depth=max_depth - 1, parse=parse)
                 else:
                     # Yield single module
                     try:
-                        yield scan_module(submodule_path)
+                        got = scan_module(submodule_path)
+                        if parse(got):
+                            yield got
                     except CodexReflectionError:
                         continue
     except CodexReflectionError:

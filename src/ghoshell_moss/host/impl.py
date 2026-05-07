@@ -1,6 +1,5 @@
 from typing_extensions import Self
 
-from ghoshell_moss.host.abcd import MossAsToolSet
 from ghoshell_moss.host.abcd.host_design import (
     MossHost, MossMode, MossRuntime,
 )
@@ -13,7 +12,7 @@ from ghoshell_moss.host.manifests import PackageManifests, MergedManifests
 from ghoshell_moss.host.app_store import HostAppStore
 from ghoshell_moss.host.modes import list_modes_from_root_package, new_mode
 from ghoshell_moss.host.matrix import MatrixImpl
-from ghoshell_moss.host.toolset import MossAsToolSetImpl
+from ghoshell_moss.host.runtime import MossRuntimeImpl
 import logging
 
 __all__ = ['Host']
@@ -63,6 +62,7 @@ class Host(MossHost):
             namespace="MOSS/app_store/toolset",
             runnable=False,
             bringup=self._moss_mode.bringup_apps,
+            include=self._moss_mode.apps,
         )
         self._matrix = MatrixImpl(
             mode=self._moss_mode,
@@ -79,6 +79,13 @@ class Host(MossHost):
         if _host_instance is None:
             _host_instance = Host()
         return _host_instance
+
+    def reboot(self) -> Self:
+        global _host_instance
+        _host_instance = None
+        new_host = Host(env=self._env)
+        _host_instance = new_host
+        return new_host
 
     @property
     def env(self) -> Environment:
@@ -98,13 +105,13 @@ class Host(MossHost):
         """
         return self._env_modes
 
-    def new_mode(self, name: str, apps: list[str], bring_up_apps: list[str], description: str = "") -> None:
+    def new_mode(self, name: str, apps: list[str], bringup_apps: list[str], description: str = "") -> None:
         """
         create new mode follow convertion
         """
         if name in self._env_modes:
             raise NameError(f"Mode {name} already exists")
-        new_mode(name=name, apps=apps, bring_up_apps=bring_up_apps, description=description)
+        new_mode(name=name, apps=apps, bring_up_apps=bringup_apps, description=description)
 
     def apps(self) -> HostAppStore:
         return self._app_store
@@ -112,8 +119,8 @@ class Host(MossHost):
     def matrix(self) -> Matrix:
         return self._matrix
 
-    def run_as_toolset(self) -> MossAsToolSet:
-        return MossAsToolSetImpl(
+    def run(self) -> MossRuntime:
+        return MossRuntimeImpl(
             env=self.env,
             workspace=self._workspace,
             mode=self._moss_mode,
