@@ -1,3 +1,7 @@
+"""
+Channel (中文名: 经络) : 流式解释器组织 树形/有状态/可流式控制 组件的抽象集合.
+"""
+
 import asyncio
 import contextlib
 import contextvars
@@ -56,10 +60,6 @@ __all__ = [
     "ChannelName",
     "ChannelNamePattern",
 ]
-
-"""
-Channel (中文名: 经络) : 流式解释器组织 树形/有状态/可流式控制 组件的抽象集合. 
-"""
 
 __description__ = "Use Tree-like structure to manage all the Commands of MOSS for AI."
 

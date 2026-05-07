@@ -10,7 +10,8 @@ from ghoshell_common.helpers import uuid
 from importlib import resources
 from pydantic import BaseModel, Field
 from ghoshell_moss.core.ctml.versions import (
-    CTML_VERSION
+    CTML_VERSION, search_version_file_in_dir, default_moss_ctml_meta_instruction_directory,
+    get_version_from_filename,
 )
 import os
 import dotenv
@@ -205,6 +206,17 @@ class Environment:
 
     def ctml_prompts_dir(self) -> Path:
         return self.workspace_path.joinpath("ctml_versions")
+
+    def ctml_versions(self) -> dict[str, Path]:
+        versions = search_version_file_in_dir(default_moss_ctml_meta_instruction_directory())
+        version_name_to_files = {}
+        for version_file in versions:
+            version_name = get_version_from_filename(version_file.name)
+            version_name_to_files[version_name] = version_file
+        for version_file in search_version_file_in_dir(self.ctml_prompts_dir()):
+            version_name = get_version_from_filename(version_file.name)
+            version_name_to_files[version_name] = version_file
+        return version_name_to_files
 
     @classmethod
     def discover(cls) -> Self:

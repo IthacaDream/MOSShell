@@ -6,7 +6,6 @@ from ghoshell_common.helpers import yaml_pretty_dump
 from ghoshell_moss.host import Host
 from .utils import print_host_mode_info, print_simple_table, print_simple_panel
 import subprocess
-import shlex
 import typer
 from rich.syntax import Syntax
 from .utils import console

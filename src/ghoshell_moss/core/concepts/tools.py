@@ -1,3 +1,7 @@
+"""
+将 moss 的 command 体系封装为常用 Agent 的 tool, 为项目兼容性准备.
+"""
+
 import typing
 from typing import Generic, TypeVar, Callable
 from typing_extensions import Self

@@ -1,5 +1,5 @@
 """
-MOSS 架构核心用 Command 来做驱动.
+将 Python 代码中的 Function/Method 封装反射成 MOSS 架构可以理解和调度的 Command 对象.
 
 它包含:
 1. 代码即提示词: 反射代码提供以代码形式描述的提示词.

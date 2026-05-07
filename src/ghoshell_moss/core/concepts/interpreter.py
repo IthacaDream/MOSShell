@@ -1,3 +1,7 @@
+"""
+流式解释器实现, 将模型输出的 token 解释成 Command 的运行拓扑, 并且立刻调度.
+"""
+
 import asyncio
 from abc import ABC, abstractmethod
 from typing import Optional, Callable, Iterable, AsyncIterable
@@ -5,7 +9,7 @@ from typing_extensions import Self
 from ghoshell_moss.core.concepts.errors import CommandErrorCode
 from ghoshell_moss.core.concepts.command import CommandTask, CommandToken
 from ghoshell_moss.core.concepts.channel import ChannelFullPath, ChannelMeta
-from ghoshell_moss.core.concepts.tools import ToolMeta, CommandAsTool
+from ghoshell_moss.core.concepts.tools import CommandAsTool
 from ghoshell_moss.message import Message
 from ghoshell_common.contracts import LoggerItf
 from pydantic import BaseModel, Field
