@@ -108,7 +108,7 @@ class MossRuntimeImpl(MossRuntime):
             await interpreter.wait_compiled()
             if wait_done:
                 await interpreter.wait_stopped()
-        return interpretation.executed_messages()
+        return interpretation.as_messages()
 
     async def moss_interrupt(self) -> list[Message]:
         self._check_running()
