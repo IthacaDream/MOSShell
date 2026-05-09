@@ -51,18 +51,18 @@ class InMemoryResourcesRegistry(ResourceRegistry):
     def _key(self, scheme: str, host: str) -> tuple[str, str]:
         return (scheme, host)
 
-    async def register(self, storage: ResourceStorage) -> None:
+    def register(self, storage: ResourceStorage) -> None:
         key = self._key(storage.scheme(), storage.host)
         self._storages[key] = storage
 
-    async def unregister(self, scheme: str, host: str) -> bool:
+    def unregister(self, scheme: str, host: str) -> bool:
         key = self._key(scheme, host)
         return self._storages.pop(key, None) is not None
 
-    async def schemes(self) -> Sequence[str]:
+    def schemes(self) -> Sequence[str]:
         return list({k[0] for k in self._storages})
 
-    async def hosts(self, scheme: str) -> Sequence[str]:
+    def hosts(self, scheme: str) -> Sequence[str]:
         return [k[1] for k in self._storages if k[0] == scheme]
 
     async def get(self, locator: str) -> ResourceItem | None:
@@ -122,9 +122,9 @@ class InMemoryResourcesRegistry(ResourceRegistry):
             return await storage.help(question)
 
         # host=None: list all hosts for this scheme
-        hosts = await self.hosts(scheme)
+        hosts = self.hosts(scheme)
         if not hosts:
-            return f"scheme '{scheme}' 未注册. 已注册 schemes: {await self.schemes()}"
+            return f"scheme '{scheme}' 未注册. 已注册 schemes: {self.schemes()}"
         lines = [f"scheme '{scheme}' 有 {len(hosts)} 个 host 实例:"]
         for h in hosts:
             storage = self._storages.get(self._key(scheme, h))
@@ -139,7 +139,7 @@ class InMemoryResourcesRegistry(ResourceRegistry):
                 return f"(scheme={scheme}, host={host}) 未注册."
             return storage.usage()
 
-        hosts = await self.hosts(scheme)
+        hosts = self.hosts(scheme)
         if not hosts:
             return f"scheme '{scheme}' 未注册."
         lines = [f"scheme '{scheme}' usage (first host '{hosts[0]}'):"]

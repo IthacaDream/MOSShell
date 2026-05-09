@@ -5,13 +5,12 @@ from abc import ABC, abstractmethod
 
 from ghoshell_moss.core.concepts.channel import Channel, ChannelProxy, ChannelRuntime
 from ghoshell_moss.core.blueprint.session import Session
-from ghoshell_moss.contracts import LoggerItf, ConfigStore, Workspace, SystemPrompter
+from ghoshell_moss.contracts import LoggerItf, ConfigStore, Workspace, SystemPrompter, ResourceRegistry
 from ghoshell_container import IoCContainer
+from ghoshell_moss.core.blueprint.manifests import Manifests
 import asyncio
 
 __all__ = ['Matrix', 'Cell', 'SystemPrompter', 'ScopesKey', 'Fractal']
-
-from ghoshell_moss.core.blueprint.manifests import Manifests
 
 CellTypes = Literal[
     'host',  # 表示为启动网络的主进程节点.
@@ -185,6 +184,10 @@ class Matrix(ABC):
         from ghoshell_container import provide
         provider = provide(abstract, singleton=True)(binding)
         self.container.register(provider)
+
+    def resources(self) -> ResourceRegistry:
+        """返回 matrix 共享的资源中心. """
+        return self.container.force_fetch(ResourceRegistry)
 
     @abstractmethod
     def moss_system_prompter(self) -> SystemPrompter:

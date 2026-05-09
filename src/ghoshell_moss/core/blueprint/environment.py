@@ -37,6 +37,7 @@ __all__ = [
     'DEFAULT_CELL_ADDRESS',
 
     'MOSSEnvKey',
+    "MossMeta",
 
     # stubs
     'MODE_STUB_PACKAGE',
@@ -106,7 +107,7 @@ MOSSEnvKey = Literal[
 ]
 
 
-class MOSSMeta(BaseModel):
+class MossMeta(BaseModel):
     """
     meta instruction from the environment
     """
@@ -168,9 +169,9 @@ class Environment:
         self._source_path = self._workspace_path.joinpath(WORKSPACE_SOURCE_DIR)
         self._meta_config_path = self._workspace_path.joinpath(META_CONFIG_FILENAME)
         if self._meta_config_path.is_file() and self._meta_config_path.exists():
-            self._meta_config = MOSSMeta.from_file(self._meta_config_path)
+            self._meta_config = MossMeta.from_file(self._meta_config_path)
         else:
-            self._meta_config = MOSSMeta()
+            self._meta_config = MossMeta()
 
         if mode is None:
             mode = os.environ.get(
@@ -426,7 +427,7 @@ class Environment:
         return self._meta_config_path.absolute()
 
     @property
-    def meta_config(self) -> MOSSMeta:
+    def meta_config(self) -> MossMeta:
         return self._meta_config
 
     @property

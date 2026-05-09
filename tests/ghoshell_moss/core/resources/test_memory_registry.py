@@ -34,7 +34,7 @@ def registry():
 async def _populated(registry, tmp_path):
     """helper: 注册一个 LocalImageStorage 并返回 (registry, storage)."""
     storage = LocalImageStorage(tmp_path)
-    await registry.register(storage)
+    registry.register(storage)
     return registry, storage
 
 
@@ -42,24 +42,24 @@ async def _populated(registry, tmp_path):
 
 @pytest.mark.asyncio
 async def test_register_and_schemes(registry, tmp_path):
-    assert await registry.schemes() == []
+    assert registry.schemes() == []
 
-    await registry.register(LocalImageStorage(tmp_path))
-    assert "pil-image" in await registry.schemes()
+    registry.register(LocalImageStorage(tmp_path))
+    assert "pil-image" in registry.schemes()
 
 
 @pytest.mark.asyncio
 async def test_unregister(registry, tmp_path):
-    await registry.register(LocalImageStorage(tmp_path))
-    assert await registry.unregister("pil-image", "default") is True
-    assert await registry.schemes() == []
-    assert await registry.unregister("pil-image", "default") is False
+    registry.register(LocalImageStorage(tmp_path))
+    assert registry.unregister("pil-image", "default") is True
+    assert registry.schemes() == []
+    assert registry.unregister("pil-image", "default") is False
 
 
 @pytest.mark.asyncio
 async def test_hosts(registry, tmp_path):
-    await registry.register(LocalImageStorage(tmp_path))
-    assert await registry.hosts("pil-image") == ["default"]
+    registry.register(LocalImageStorage(tmp_path))
+    assert registry.hosts("pil-image") == ["default"]
 
 
 # -- list_metas via registry -------------------------------------------

@@ -18,7 +18,7 @@ from ghoshell_moss.contracts.resource import (
     ResourceMeta,
     ResourceItem,
     ResourceStorage,
-    ResourceRegisterProvider,
+    ResourceStorageFactory,
 )
 from ghoshell_container import IoCContainer, INSTANCE
 
@@ -263,9 +263,13 @@ pil-image: 本地图片资源存储
 # -- Provider -------------------------------------------------------------
 
 
-class LocalImageResourceProvider(ResourceRegisterProvider):
+class LocalImageResourceFactory(ResourceStorageFactory):
     """
     Register LocalImageStorage into the ResourceRegistry during bootstrap.
+
+    Also implements ResourceStorageMeta so it can be discovered by
+    MOSS.manifests.resources scanning.
+
     Uses workspace.assets()/pil-images as the data directory.
     """
 
@@ -277,15 +281,22 @@ class LocalImageResourceProvider(ResourceRegisterProvider):
         self._host = host
         self._assets_sub_path = assets_sub_path
 
-    def singleton(self) -> bool:
-        return True
-
-    def contract(self) -> type[LocalImageStorage]:
-        return LocalImageStorage
-
     def factory(self, con: IoCContainer) -> INSTANCE:
         from ghoshell_moss.contracts.workspace import Workspace
 
         workspace = con.force_fetch(Workspace)
         data_dir = workspace.assets().abspath() / self._assets_sub_path
         return LocalImageStorage(data_dir, host=self._host)
+
+    # -- ResourceStorageMeta --------------------------------------------
+
+    @classmethod
+    def scheme(cls) -> str:
+        return LocalImageStorage.scheme()
+
+    @property
+    def host(self) -> str:
+        return self._host
+
+    def description(self) -> str:
+        return "Local image resource storage backed by JSONL + filesystem"

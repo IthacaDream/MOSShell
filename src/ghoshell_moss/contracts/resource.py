@@ -27,14 +27,15 @@
 from abc import ABC, abstractmethod
 from typing import Generic, TypeVar, Sequence, Union, Type
 from pydantic import BaseModel, Field
-from ghoshell_container import BootstrapProvider, INSTANCE, IoCContainer
+from ghoshell_container import IoCContainer, Bootstrapper
 
 __all__ = [
     "ResourceMeta", "ResourceItem", "ResourceStorage", "ResourceRegistry",
     "Query", "Recollection", 'unpack_query',
     "ClarifyError",
     "RESOURCE_META", "RESOURCE_TYPE", "R",
-    "ResourceRegisterProvider",
+    "ResourceStorageFactory",
+    "ResourceStorageFactoryBootstrapper",
 ]
 
 RESOURCE_TYPE = TypeVar("RESOURCE_TYPE")
@@ -297,9 +298,10 @@ class ResourceStorage(Generic[RESOURCE_META, RESOURCE_TYPE], ABC):
         pass
 
 
-class ResourceStorageMeta(ABC):
+class ResourceStorageFactory(ABC):
     """
     registry 的无副作用自解释配置项.
+
     可以用于做环境发现自解释.
     """
 
@@ -349,7 +351,7 @@ class ResourceRegistry(ABC):
     """
 
     @abstractmethod
-    async def register(self, storage: ResourceStorage) -> None:
+    def register(self, storage: ResourceStorage) -> None:
         """
         注册一个 ResourceStorage 实现.
         以 (storage.scheme(), storage.host) 为键.
@@ -357,7 +359,7 @@ class ResourceRegistry(ABC):
         pass
 
     @abstractmethod
-    async def unregister(self, scheme: str, host: str) -> bool:
+    def unregister(self, scheme: str, host: str) -> bool:
         """
         移除指定 (scheme, host) 的存储.
         :return: True 表示移除成功, False 表示未注册.
@@ -365,14 +367,14 @@ class ResourceRegistry(ABC):
         pass
 
     @abstractmethod
-    async def schemes(self) -> Sequence[str]:
+    def schemes(self) -> Sequence[str]:
         """
         列出所有已注册的 scheme (去重).
         """
         pass
 
     @abstractmethod
-    async def hosts(self, scheme: str) -> Sequence[str]:
+    def hosts(self, scheme: str) -> Sequence[str]:
         """
         列出指定 scheme 下的所有 host.
         """
@@ -437,24 +439,15 @@ class ResourceRegistry(ABC):
         pass
 
 
-class ResourceRegisterProvider(BootstrapProvider, ABC):
+class ResourceStorageFactoryBootstrapper(Bootstrapper):
     """
-    resource provider to register resource to registry when container bootstrapped.
+    resource bootstrapper to register resource to registry when container bootstrapping.
     """
 
-    @abstractmethod
-    def singleton(self) -> bool:
-        pass
-
-    @abstractmethod
-    def contract(self) -> Type[ResourceStorage]:
-        pass
-
-    @abstractmethod
-    def factory(self, con: IoCContainer) -> INSTANCE:
-        pass
+    def __init__(self, storage_factory: ResourceStorageFactory) -> None:
+        self._storage_factory = storage_factory
 
     def bootstrap(self, container: IoCContainer) -> None:
         registry = container.force_fetch(ResourceRegistry)
-        self_resource_storage = container.force_fetch(self.contract())
+        self_resource_storage = self._storage_factory.factory(container)
         registry.register(self_resource_storage)

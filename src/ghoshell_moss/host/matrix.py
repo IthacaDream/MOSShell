@@ -9,7 +9,7 @@ from ghoshell_container import IoCContainer, Container, Provider
 from ghoshell_moss import TopicService
 from ghoshell_moss.contracts import (
     Workspace, ConfigStore, WorkspaceYamlConfigStoreProvider, BaseSystemPrompter,
-    SystemPrompter,
+    SystemPrompter, ResourceStorageFactoryBootstrapper,
 )
 from ghoshell_moss.core.blueprint.session import Session
 from ghoshell_moss.core.blueprint.manifests import Manifests
@@ -208,6 +208,13 @@ class MatrixImpl(Matrix):
             if container.bound(provider.contract()):
                 continue
             container.register(provider)
+
+        # 注册环境发现的所有资源.
+        # todo, 未来可以简单实现一个 host manifests resource storage registry, 自己在 bootstrap 时从 manifests 拿东西.
+        for resource_storage_manifest in self.manifests.resource_storage_manifests():
+            storage_factory = resource_storage_manifest.get_sync()
+            bootstrapper = ResourceStorageFactoryBootstrapper(storage_factory)
+            container.add_bootstrapper(bootstrapper)
 
         if self._logger is not None:
             # 替换掉注册的.
