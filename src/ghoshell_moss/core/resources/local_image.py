@@ -18,7 +18,9 @@ from ghoshell_moss.contracts.resource import (
     ResourceMeta,
     ResourceItem,
     ResourceStorage,
+    ResourceRegisterProvider,
 )
+from ghoshell_container import IoCContainer, INSTANCE
 
 
 # -- Meta & Item -------------------------------------------------------
@@ -26,7 +28,8 @@ from ghoshell_moss.contracts.resource import (
 class LocalImageMeta(ResourceMeta):
     """图片资源元信息."""
 
-    locator: str = Field(default="", description="唯一标识")
+    host: str = Field(default="default", description="Storage 实例标识")
+    path: str = Field(default="", description="host 内的唯一标识")
     description: str = Field(default="", description="描述信息")
     file_name: str = Field(default="", description="文件系统上的文件名")
     width: int | None = Field(default=None, description="图片宽度 (px)")
@@ -86,7 +89,8 @@ class LocalImageStorage(ResourceStorage[LocalImageMeta, Image.Image]):
     INDEX_FILE = "pil-image.jsonl"
     FILES_DIR = "pil-image"
 
-    def __init__(self, data_dir: str | Path) -> None:
+    def __init__(self, data_dir: str | Path, host: str = "default") -> None:
+        self._host = host
         self._data_dir = Path(data_dir)
         self._index_path = self._data_dir / self.INDEX_FILE
         self._files_dir = self._data_dir / self.FILES_DIR
@@ -101,6 +105,12 @@ class LocalImageStorage(ResourceStorage[LocalImageMeta, Image.Image]):
     def scheme_description(cls) -> str:
         return LocalImageMeta.scheme_description()
 
+    # -- instance-level ------------------------------------------------
+
+    @property
+    def host(self) -> str:
+        return self._host
+
     # -- self-describing -----------------------------------------------
 
     def usage(self) -> str:
@@ -112,12 +122,12 @@ pil-image: 本地图片资源存储
   pil-image list              → 列出全部图片 (最多 50)
 
 返回的 ResourceMeta 字段:
-  locator, description, file_name, width, height,
+  host, path, description, file_name, width, height,
   format, file_size, tags, created_at
 
 限制:
   - query 仅支持简单 keyword 匹配, 不支持正则/布尔/语义搜索
-  - 删除和按 locator 查找为 O(n) 全表扫描, 适几百条的数据量"""
+  - 删除和按 path 查找为 O(n) 全表扫描, 适几百条的数据量"""
 
     async def help(self, question: str | None = None) -> str:
         if question is None:
@@ -134,7 +144,7 @@ pil-image: 本地图片资源存储
     # -- CRUD ----------------------------------------------------------
 
     async def list_metas(
-        self, query: str | None = None, limit: int = 50
+            self, query: str | None = None, limit: int = 50
     ) -> Sequence[LocalImageMeta]:
         metas: list[LocalImageMeta] = []
         for line in self._read_lines():
@@ -142,12 +152,12 @@ pil-image: 本地图片资源存储
             if query and not self._match(meta, query):
                 continue
             metas.append(meta)
-            if len(metas) >= limit:
+            if limit >= 0 and len(metas) >= limit:
                 break
         return metas
 
-    async def get(self, locator: str) -> LocalImageItem | None:
-        meta = self._find_meta(locator)
+    async def get(self, path: str) -> LocalImageItem | None:
+        meta = self._find_meta(path)
         if meta is None:
             return None
         file_path = self._files_dir / meta.file_name
@@ -156,22 +166,23 @@ pil-image: 本地图片资源存储
         return LocalImageItem(meta, str(file_path))
 
     async def put(
-        self, item: ResourceItem[LocalImageMeta, Image.Image]
+            self, item: ResourceItem[LocalImageMeta, Image.Image]
     ) -> str:
         meta = item.meta
         image = await item.get()
 
-        # locator — 用调用者给的, 或生成
-        locator = meta.locator
-        if not locator:
-            locator = uuid.uuid4().hex[:12]
-            meta.locator = locator
+        # path — 用调用者给的, 或生成
+        path = meta.path
+        if not path:
+            path = uuid.uuid4().hex[:12]
+            meta.path = path
+        meta.host = self._host
 
-        # file name — 用调用者给的, 或基于 locator
+        # file name — 用调用者给的, 或基于 path
         file_name = meta.file_name
         if not file_name:
             fmt = (image.format or "PNG").lower()
-            file_name = f"{locator}.{fmt}"
+            file_name = f"{path}.{fmt}"
             meta.file_name = file_name
 
         # 保存图片
@@ -188,15 +199,15 @@ pil-image: 本地图片资源存储
 
         # 写入索引
         self._upsert_meta(meta)
-        return locator
+        return meta.locator
 
-    async def delete(self, locator: str) -> bool:
+    async def delete(self, path: str) -> bool:
         lines = self._read_lines()
         found = False
         kept: list[str] = []
         for line in lines:
             meta = LocalImageMeta.model_validate_json(line)
-            if meta.locator == locator:
+            if meta.path == path:
                 found = True
                 file_path = self._files_dir / meta.file_name
                 if file_path.exists():
@@ -218,10 +229,10 @@ pil-image: 本地图片资源存储
                 return True
         return False
 
-    def _find_meta(self, locator: str) -> LocalImageMeta | None:
+    def _find_meta(self, path: str) -> LocalImageMeta | None:
         for line in self._read_lines():
             meta = LocalImageMeta.model_validate_json(line)
-            if meta.locator == locator:
+            if meta.path == path:
                 return meta
         return None
 
@@ -230,7 +241,7 @@ pil-image: 本地图片资源存储
         lines = self._read_lines()
         kept = [
             line for line in lines
-            if LocalImageMeta.model_validate_json(line).locator != meta.locator
+            if LocalImageMeta.model_validate_json(line).path != meta.path
         ]
         kept.append(meta.model_dump_json())
         self._write_lines(kept)
@@ -247,3 +258,34 @@ pil-image: 本地图片资源存储
         if content:
             content += "\n"
         self._index_path.write_text(content, encoding="utf-8")
+
+
+# -- Provider -------------------------------------------------------------
+
+
+class LocalImageResourceProvider(ResourceRegisterProvider):
+    """
+    Register LocalImageStorage into the ResourceRegistry during bootstrap.
+    Uses workspace.assets()/pil-images as the data directory.
+    """
+
+    def __init__(
+            self,
+            host: str = "workspace-assets",
+            assets_sub_path: str = "pil-images",
+    ):
+        self._host = host
+        self._assets_sub_path = assets_sub_path
+
+    def singleton(self) -> bool:
+        return True
+
+    def contract(self) -> type[LocalImageStorage]:
+        return LocalImageStorage
+
+    def factory(self, con: IoCContainer) -> INSTANCE:
+        from ghoshell_moss.contracts.workspace import Workspace
+
+        workspace = con.force_fetch(Workspace)
+        data_dir = workspace.assets().abspath() / self._assets_sub_path
+        return LocalImageStorage(data_dir, host=self._host)

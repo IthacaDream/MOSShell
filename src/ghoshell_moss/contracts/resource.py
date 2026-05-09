@@ -25,15 +25,16 @@
 """
 
 from abc import ABC, abstractmethod
-from typing import Generic, TypeVar, Sequence, Union
-
+from typing import Generic, TypeVar, Sequence, Union, Type
 from pydantic import BaseModel, Field
+from ghoshell_container import BootstrapProvider, INSTANCE, IoCContainer
 
 __all__ = [
     "ResourceMeta", "ResourceItem", "ResourceStorage", "ResourceRegistry",
     "Query", "Recollection", 'unpack_query',
     "ClarifyError",
     "RESOURCE_META", "RESOURCE_TYPE", "R",
+    "ResourceRegisterProvider",
 ]
 
 RESOURCE_TYPE = TypeVar("RESOURCE_TYPE")
@@ -205,17 +206,15 @@ class ResourceStorage(Generic[RESOURCE_META, RESOURCE_TYPE], ABC):
     get/delete 接受 path (storage 已知自己的 scheme 和 host).
     """
 
-    @classmethod
     @abstractmethod
-    def scheme(cls) -> str:
+    def scheme(self) -> str:
         """
         资源的 scheme. 通常委托给 ResourceMeta.scheme().
         """
         pass
 
-    @classmethod
     @abstractmethod
-    def scheme_description(cls) -> str:
+    def scheme_description(self) -> str:
         """
         scheme 的介绍.
         """
@@ -294,6 +293,42 @@ class ResourceStorage(Generic[RESOURCE_META, RESOURCE_TYPE], ABC):
         删除指定资源.
         :param path: host 内的资源路径.
         :return: True 表示删除成功, False 表示资源不存在.
+        """
+        pass
+
+
+class ResourceStorageMeta(ABC):
+    """
+    registry 的无副作用自解释配置项.
+    可以用于做环境发现自解释.
+    """
+
+    @abstractmethod
+    def scheme(self) -> str:
+        """
+        资源的 scheme. 通常委托给 ResourceMeta.scheme().
+        """
+        pass
+
+    @abstractmethod
+    def description(self) -> str:
+        """
+        自身的介绍.
+        """
+        pass
+
+    @property
+    @abstractmethod
+    def host(self) -> str:
+        """
+        实例级标识. 同一 scheme 下区分不同数据集.
+        """
+        pass
+
+    @abstractmethod
+    def factory(self, container: IoCContainer) -> ResourceStorage:
+        """
+        根据环境注册的工厂方法完成 resource storage 的实例化.
         """
         pass
 
@@ -400,3 +435,26 @@ class ResourceRegistry(ABC):
         获取指定 (scheme, host) 的用法说明.
         """
         pass
+
+
+class ResourceRegisterProvider(BootstrapProvider, ABC):
+    """
+    resource provider to register resource to registry when container bootstrapped.
+    """
+
+    @abstractmethod
+    def singleton(self) -> bool:
+        pass
+
+    @abstractmethod
+    def contract(self) -> Type[ResourceStorage]:
+        pass
+
+    @abstractmethod
+    def factory(self, con: IoCContainer) -> INSTANCE:
+        pass
+
+    def bootstrap(self, container: IoCContainer) -> None:
+        registry = container.force_fetch(ResourceRegistry)
+        self_resource_storage = container.force_fetch(self.contract())
+        registry.register(self_resource_storage)

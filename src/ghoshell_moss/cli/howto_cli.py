@@ -13,11 +13,7 @@ All reads go through MarkdownKnowledgeBase (the ResourceStorage).
 import asyncio
 import typer
 from pathlib import Path
-from typing import TYPE_CHECKING
 from .utils import console, print_error, print_info, print_simple_table
-
-if TYPE_CHECKING:
-    from ghoshell_moss.core.resources.markdown_kb import MarkdownKnowledgeBase, MarkdownItem
 
 HOW_TO_ROOT = Path(__file__).resolve().parent / "how_tos"
 
@@ -39,7 +35,7 @@ def load_markdown_knowledge_base(_path: Path):
 kb = load_markdown_knowledge_base(HOW_TO_ROOT)
 
 howto_app = typer.Typer(
-    name="how-to",
+    name="how-tos",
     # Use README first line as help, falling back to a default
     help=[m.description for m in kb.metas if m.path == "README.md"][0]
     if any(m.path == "README.md" for m in kb.metas)
@@ -121,8 +117,8 @@ def ask_question(
 
 @howto_app.command(name="read")
 def read_doc(
-    path: str = typer.Argument(help="Document path, e.g. 'how-to-make-how-to.md'"),
-    raw: bool = typer.Option(False, "--raw", help="Output raw markdown without syntax highlighting."),
+        path: str = typer.Argument(help="Document path, e.g. 'how-to-make-how-to.md'"),
+        raw: bool = typer.Option(False, "--raw", help="Output raw markdown without syntax highlighting."),
 ):
     """Read a how-to document by path."""
     item = asyncio.run(kb.get(path))

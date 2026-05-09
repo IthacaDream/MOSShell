@@ -10,7 +10,7 @@ from ghoshell_moss.core.resources.local_image import (
     LocalImageItem,
     LocalImageStorage,
 )
-from ghoshell_moss.core.resources.memory_registry import InMemoryRegistry
+from ghoshell_moss.core.resources.memory_registry import InMemoryResourcesRegistry
 
 
 class _InMemoryImageItem(LocalImageItem):
@@ -28,7 +28,7 @@ def _red_image(w=100, h=50) -> PILImage.Image:
 
 @pytest.fixture
 def registry():
-    return InMemoryRegistry()
+    return InMemoryResourcesRegistry()
 
 
 async def _populated(registry, tmp_path):
@@ -38,7 +38,7 @@ async def _populated(registry, tmp_path):
     return registry, storage
 
 
-# -- register / unregister / schemes -----------------------------------
+# -- register / unregister / schemes / hosts ---------------------------
 
 @pytest.mark.asyncio
 async def test_register_and_schemes(registry, tmp_path):
@@ -51,9 +51,15 @@ async def test_register_and_schemes(registry, tmp_path):
 @pytest.mark.asyncio
 async def test_unregister(registry, tmp_path):
     await registry.register(LocalImageStorage(tmp_path))
-    assert await registry.unregister("pil-image") is True
+    assert await registry.unregister("pil-image", "default") is True
     assert await registry.schemes() == []
-    assert await registry.unregister("pil-image") is False
+    assert await registry.unregister("pil-image", "default") is False
+
+
+@pytest.mark.asyncio
+async def test_hosts(registry, tmp_path):
+    await registry.register(LocalImageStorage(tmp_path))
+    assert await registry.hosts("pil-image") == ["default"]
 
 
 # -- list_metas via registry -------------------------------------------
@@ -62,11 +68,11 @@ async def test_unregister(registry, tmp_path):
 async def test_list_metas_via_registry(registry, tmp_path):
     reg, storage = await _populated(registry, tmp_path)
     await storage.put(_InMemoryImageItem(
-        LocalImageMeta(locator="x", description="test"), _red_image()))
+        LocalImageMeta(path="x", description="test"), _red_image()))
 
     metas = await reg.list_metas("pil-image")
     assert len(metas) == 1
-    assert metas[0].locator == "x"
+    assert metas[0].locator == "pil-image://default/x"
 
 
 @pytest.mark.asyncio
@@ -75,22 +81,22 @@ async def test_list_metas_unknown_scheme(registry):
     assert metas == []
 
 
-# -- get_by_scheme / get_by_item_type ----------------------------------
+# -- get / get_by_item_type --------------------------------------------
 
 @pytest.mark.asyncio
-async def test_get_by_scheme(registry, tmp_path):
+async def test_get_via_registry(registry, tmp_path):
     reg, storage = await _populated(registry, tmp_path)
     await storage.put(_InMemoryImageItem(
-        LocalImageMeta(locator="beach", description="海滩"), _red_image()))
+        LocalImageMeta(path="beach", description="海滩"), _red_image()))
 
-    item = await reg.get_by_scheme("pil-image", "beach")
+    item = await reg.get("pil-image://default/beach")
     assert item is not None
-    assert item.meta.locator == "beach"
+    assert item.meta.locator == "pil-image://default/beach"
 
 
 @pytest.mark.asyncio
-async def test_get_by_scheme_unknown_scheme(registry):
-    item = await registry.get_by_scheme("no-such", "x")
+async def test_get_unknown_scheme(registry):
+    item = await registry.get("no-such://host/x")
     assert item is None
 
 
@@ -98,12 +104,12 @@ async def test_get_by_scheme_unknown_scheme(registry):
 async def test_get_by_item_type(registry, tmp_path):
     reg, storage = await _populated(registry, tmp_path)
     await storage.put(_InMemoryImageItem(
-        LocalImageMeta(locator="beach", description="海滩"), _red_image()))
+        LocalImageMeta(path="beach", description="海滩"), _red_image()))
 
-    item = await reg.get_by_item_type(LocalImageItem, "beach")
+    item = await reg.get_by_item_type(LocalImageItem, "pil-image://default/beach")
     assert item is not None
     assert isinstance(item, LocalImageItem)
-    assert item.meta.locator == "beach"
+    assert item.meta.locator == "pil-image://default/beach"
 
 
 # -- help / usage via registry -----------------------------------------
