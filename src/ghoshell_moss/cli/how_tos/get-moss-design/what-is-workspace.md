@@ -273,8 +273,8 @@ moss ws where
 深入这些概念：
 
 ```bash
-moss how-tos read for-moss-core-developer/how-matrix-discovers-capabilities.md
-moss how-tos read for-moss-core-developer/how-ioc-container-work-in-moss.md
+moss how-tos read get-moss-design/how-matrix-discovers-capabilities.md
+moss how-tos read get-moss-design/how-ioc-container-work-in-moss.md
 moss how-tos read get-moss-design/glossary.md
 ```
 
