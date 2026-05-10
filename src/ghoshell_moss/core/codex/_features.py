@@ -4,7 +4,6 @@ AI-Native Feature Tracking core functions.
 File-system-based feature tracking using FEATURE.md + YAML frontmatter.
 This is the logic layer — the CLI is a thin convention enforcer that wraps these functions.
 """
-import csv
 import shutil
 from datetime import date
 from pathlib import Path
@@ -73,7 +72,7 @@ def list_features(
 
 
 def get_feature(features_dir: str | Path, feature_id: str) -> Optional[dict]:
-    """Get a single feature's frontmatter by id."""
+    """Get a single feature's frontmatter by id from active/."""
     active_dir = Path(features_dir) / "active" / feature_id
     if not active_dir.is_dir():
         return None
@@ -84,6 +83,33 @@ def get_feature(features_dir: str | Path, feature_id: str) -> Optional[dict]:
     if meta is not None:
         meta["_feature_dir"] = feature_id
     return meta
+
+
+def list_archived_features(
+    features_dir: str | Path,
+) -> list[dict]:
+    """
+    Glob archived/** /FEATURE.md and return parsed frontmatter.
+
+    The archived directory tree itself is the index — no CSV needed.
+    Sorted by archive date (descending), then feature id.
+    """
+    archived_dir = Path(features_dir) / "archived"
+    if not archived_dir.is_dir():
+        return []
+
+    results = []
+    for fm_path in sorted(archived_dir.glob("**/FEATURE.md"), reverse=True):
+        meta = parse_frontmatter(fm_path)
+        if meta is None:
+            continue
+        # Derive archive path info from the directory structure
+        rel = fm_path.parent.relative_to(archived_dir)
+        meta["_archived_path"] = str(rel)
+        meta["_fm_path"] = str(fm_path)
+        results.append(meta)
+
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -200,16 +226,15 @@ def update_feature_status(
 # Archive
 # ---------------------------------------------------------------------------
 
-ARCHIVE_INDEX_HEADER = ["id", "title", "status", "archived_date", "year", "month"]
-
-
 def archive_feature(features_dir: str | Path, feature_id: str) -> bool:
     """
     Archive a completed or abandoned feature:
 
     1. Confirm status is completed/abandoned
     2. Move directory to archived/<year>/<month>/<name>/
-    3. Append to index/features.csv
+
+    The archived directory tree itself is the index — no CSV file needed.
+    Use list_archived_features() to query archived features.
 
     Returns True on success, False if feature not found or not archivable.
     """
@@ -244,24 +269,6 @@ def archive_feature(features_dir: str | Path, feature_id: str) -> bool:
     archived_target.parent.mkdir(parents=True, exist_ok=True)
     shutil.move(str(feat_dir), str(archived_target))
 
-    # Append to index
-    index_dir = features_dir / "index"
-    index_dir.mkdir(parents=True, exist_ok=True)
-    index_path = index_dir / "features.csv"
-    write_header = not index_path.exists()
-    with open(index_path, "a", newline="") as f:
-        writer = csv.writer(f)
-        if write_header:
-            writer.writerow(ARCHIVE_INDEX_HEADER)
-        writer.writerow([
-            feature_id,
-            meta.get("title", ""),
-            status,
-            date.today().isoformat(),
-            year,
-            month,
-        ])
-
     return True
 
 
@@ -284,7 +291,7 @@ def init_features(project_root: str | Path) -> Path:
     project_root = Path(project_root)
     features_dir = project_root / ".ai_partners" / "features"
 
-    for sub in ("active", "archived", "index"):
+    for sub in ("active", "archived"):
         (features_dir / sub).mkdir(parents=True, exist_ok=True)
 
     # Copy specification and template from MOSShell's own features

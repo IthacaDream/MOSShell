@@ -9,9 +9,9 @@ import typer
 
 from ghoshell_moss.core.codex._features import (
     list_features,
+    list_archived_features,
     get_feature,
     create_feature,
-    update_feature_status,
     archive_feature,
     init_features,
     VALID_STATUSES,
@@ -70,20 +70,31 @@ def list_cmd(
         None, "--status", "-s",
         help="Filter by status: draft, in-progress, completed, abandoned, blocked",
     ),
+    archived: bool = typer.Option(
+        False, "--archived", "-a",
+        help="List archived features instead of active ones.",
+    ),
     features_dir: Optional[Path] = typer.Option(
         None, "--dir", "-d",
         help="Path to .ai_partners/features/ directory. Defaults to current project.",
     ),
 ):
     """
-    List all active features with their status and priority.
+    List all active (or archived) features with their status and priority.
     """
     fd = _resolve_dir(features_dir)
     if status and status not in VALID_STATUSES:
         print_error(f"Invalid status '{status}'. Valid: {', '.join(sorted(VALID_STATUSES))}")
         raise typer.Exit(code=1)
 
-    features = list_features(str(fd), status_filter=status)
+    if archived:
+        features = list_archived_features(str(fd))
+        title = "Archived Features"
+    else:
+        features = list_features(str(fd), status_filter=status)
+        title = "Features"
+        if status:
+            title += f" [status={status}]"
 
     if not features:
         print_info("No features found.")
@@ -94,11 +105,17 @@ def list_cmd(
         sid = fm.get("id", "?")
         stat = fm.get("status", "?")
         pri = fm.get("priority", "?")
-        title = fm.get("title", sid)
+        title_str = fm.get("title", sid)
         desc = fm.get("description", "")
         updated = fm.get("updated", "")
-        feat_dir = fm.get("_feature_dir", sid)
-        fm_path = str(fd / "active" / feat_dir / "FEATURE.md")
+
+        if archived:
+            fm_path = fm.get("_fm_path", str(fd / "archived" / fm.get("_archived_path", "") / "FEATURE.md"))
+            archived_at = fm.get("_archived_path", "")
+        else:
+            feat_dir = fm.get("_feature_dir", sid)
+            fm_path = str(fd / "active" / feat_dir / "FEATURE.md")
+            archived_at = ""
 
         status_display = stat
         if stat == "in-progress":
@@ -107,18 +124,27 @@ def list_cmd(
             status_display = f"[bold red]{stat}[/bold red]"
         elif stat == "draft":
             status_display = f"[dim]{stat}[/dim]"
+        elif stat == "completed":
+            status_display = f"[bold cyan]{stat}[/bold cyan]"
+        elif stat == "abandoned":
+            status_display = f"[dim red]{stat}[/dim red]"
 
-        table_data.append([sid, title, status_display, pri, updated, desc, fm_path])
+        row = [sid, title_str, status_display, pri, updated, desc, fm_path]
+        if archived:
+            row.append(archived_at)
+        table_data.append(row)
 
-    title = "Features"
-    if status:
-        title += f" [status={status}]"
+    headers = ["ID", "Title", "Status", "Priority", "Updated", "Description", "Path"]
+    ratios = [1, 1.2, 0.6, 0.3, 0.5, 2, 3]
+    if archived:
+        headers.append("Archived")
+        ratios.append(1)
 
     print_simple_table(
         data=table_data,
-        headers=["ID", "Title", "Status", "Priority", "Updated", "Description", "Path"],
+        headers=headers,
         title=title,
-        column_ratios=[1, 1.2, 0.6, 0.3, 0.5, 2, 3],
+        column_ratios=ratios,
     )
     console.print(f"\n[dim]{len(features)} feature(s)[/dim]")
 
@@ -218,8 +244,8 @@ def archive_cmd(
     """
     Archive a completed or abandoned feature.
 
-    Moves the feature directory to archived/<year>/<month>/<name>/
-    and appends to the archive index.
+    Moves the feature directory to archived/<year>/<month>/<name>/.
+    The archived directory tree itself is the index — use 'moss features list --archived' to query.
     """
     fd = _resolve_dir(features_dir)
     meta = get_feature(str(fd), feature_id)

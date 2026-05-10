@@ -7,6 +7,7 @@ from .executor import Executor
 from ._features import (
     parse_frontmatter,
     list_features,
+    list_archived_features,
     get_feature,
     create_feature,
     update_feature_status,
@@ -24,6 +25,7 @@ __all__ = [
     # Features
     'parse_frontmatter',
     'list_features',
+    'list_archived_features',
     'get_feature',
     'create_feature',
     'update_feature_status',

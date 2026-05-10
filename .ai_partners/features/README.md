@@ -34,10 +34,7 @@ Explicitly NOT in scope:
       discuss/           # Feature-specific discussion trails (optional)
       design/            # Design documents (optional)
   archived/
-    <year>/<month>/<name>/  # Completed/abandoned features
-      FEATURE.md
-  index/
-    features.csv         # Archive index (appended on `moss features archive`)
+    <year>/<month>/<name>/  # Completed/abandoned features — the tree IS the index
 ```
 
 ## FEATURE.md Minimal Frontmatter Schema
@@ -72,10 +69,10 @@ draft → in-progress → completed → archived
 | Command | Behavior | Side Effect |
 |---------|----------|-------------|
 | `moss features specification` | Render this README.md | None |
-| `moss features list [--status]` | Parse all active FEATURE.md frontmatter | None |
+| `moss features list [--status] [--archived]` | Parse all active (or archived) FEATURE.md frontmatter | None |
 | `moss features create <name>` | Copy TEMPLATE.md → active/\<name\>/FEATURE.md | Creates directory |
 | `moss features status [id]` | Parse and display specified or all frontmatter | None |
-| `moss features archive <id>` | Move directory to archived/\<year\>/\<month\>/ | Moves + appends index |
+| `moss features archive <id>` | Move directory to archived/\<year\>/\<month\>/ | Moves directory |
 | `moss features init` | Create `.ai_partners/features/` skeleton in project root | Creates directory structure |
 
 The CLI is a **thin convention enforcer**. Core logic lives in `ghoshell_moss.core.codex._features`.
@@ -85,9 +82,8 @@ The CLI adds default directory conventions (`.ai_partners/features/` for the MOS
 
 1. Read FEATURE.md frontmatter to confirm status is `completed` or `abandoned`
 2. Recursively move the entire feature directory to `archived/<year>/<month>/<name>/`
-3. Leave a `.archived.<name>` placeholder file in `active/` recording archive time
-4. Append one row to `features/index/features.csv`
-5. Year/month extracted from frontmatter `updated` field
+3. Year/month extracted from frontmatter `updated` field
+4. Query archived features via `moss features list --archived` — the directory tree IS the index
 
 ## Relationship to Existing Conventions
 
@@ -125,7 +121,7 @@ The following remain to be validated:
 ---
 
 *This convention is part of the MOSS project's AI-native collaboration infrastructure.
-It was designed through discussion between the human engineer and Claude Opus 4.6 on 2026-05-10.*
+It was designed through discussion between the human engineer and Deepseek v4 on 2026-05-10.*
 
 *Design constraints are explicitly limited to the "single human engineer + AI incarnations"
 validation scenario. Complex problems (distributed locking, multi-user concurrency, human UX)
