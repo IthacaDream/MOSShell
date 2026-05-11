@@ -122,7 +122,12 @@ class Compiler:
             elif is_typing(attr_value):
                 result[attr_name] = attr_value
             elif isinstance(attr_value, object):
-                result[attr_name] = deepcopy(attr_value)
+                try:
+                    result[attr_name] = deepcopy(attr_value)
+                except Exception:
+                    # deepcopy may fail on objects with locks, C extensions, etc.
+                    # In that case, share the reference — the compiled module is temporary.
+                    result[attr_name] = attr_value
             else:
                 result[attr_name] = attr_value
         return result
