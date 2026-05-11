@@ -204,6 +204,56 @@ def init_workspace(
         raise typer.Exit(code=1)
 
 
+@workspace_app.command(
+    name="override",
+    short_help="Override an existing workspace with the latest stub files.",
+)
+def override_workspace(
+        yes: bool = typer.Option(
+            False, "--yes", "-y",
+            help="Skip confirmation prompt (for non-interactive / AI use)."
+        ),
+) -> None:
+    """
+    Override the active workspace with the latest stub template files.
+
+    This is used when the MOSS source has been upgraded and you want to
+    sync stub changes into an existing workspace. Existing files that match
+    the stub will be overwritten; extra user files are left untouched.
+
+    Tip: if your workspace is a git repo, run 'git diff' after override to
+    review changes and selectively restore any files you want to keep.
+    """
+    try:
+        env = Environment.discover()
+        ws_path = env.workspace_path
+    except EnvironmentError as e:
+        print_error(f"Environment Discovery Failed: {e}")
+        raise typer.Exit(code=1)
+
+    if not ws_path.exists() or not (ws_path / META_CONFIG_FILENAME).exists():
+        print_error(f"No existing MOSS workspace found at '{ws_path}'.")
+        print_info("Use 'moss ws init' to create a new workspace.")
+        raise typer.Exit(code=1)
+
+    if not yes and not typer.confirm(
+        f"This will overwrite stub files in '{ws_path.name}' with the latest version.\n"
+        f"User-created files will be left untouched. Continue?",
+        default=False
+    ):
+        print_warning("Aborted.")
+        return
+
+    print_info(f"Overriding workspace at: {ws_path}")
+    try:
+        Environment.init_workspace(ws_path, force=True)
+        print_success("Override completed. Stub files updated to latest version.")
+        print_info("Tip: use 'git diff' to review changes if this workspace is a git repo.")
+    except Exception as e:
+        print_error(f"Failed to override: {e}")
+        raise typer.Exit(code=1)
+
+
 @workspace_app.command(name="copy-env")
 def copy_env(
         force: bool = typer.Option(
