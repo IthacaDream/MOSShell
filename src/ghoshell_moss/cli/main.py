@@ -1,6 +1,8 @@
-import typer
+import os
 import sys
+import typer
 import click as _click
+from pathlib import Path
 from typing import Optional, List
 from ghoshell_moss.cli.utils import (
     print_error, print_warning,
@@ -48,6 +50,18 @@ def main(
         ai: bool = typer.Option(
             False, "--ai", help="Plain text output for AI consumption (no rich formatting)",
         ),
+        mode: Optional[str] = typer.Option(
+            None, "--mode", "-m",
+            help="MOSS mode for environment-dependent commands (manifests, apps, modes)",
+        ),
+        session_scope: Optional[str] = typer.Option(
+            None, "--session-scope", "-s",
+            help="Session scope for environment-dependent commands",
+        ),
+        workspace: Optional[Path] = typer.Option(
+            None, "--workspace", "-w",
+            help="MOSS workspace path (overrides auto-discovery)",
+        ),
 ):
     """
     MOSS - command line tool
@@ -66,8 +80,43 @@ def main(
         )
         raise typer.Exit()
 
-    # 如果没有子命令，typer 会因为 no_args_is_help=True 自动处理
-    # 如果你想自定义处理逻辑，可以保留 ctx.invoked_subcommand 判断
+    # 将全局环境选项注入到 Environment 单例
+    # 只在用户显式提供参数时才触发，失败不影响不需要环境的命令（如 codex, concepts）
+    if mode is not None or session_scope is not None or workspace is not None:
+        _set_global_environment(mode, session_scope, workspace)
+
+
+# ---------------------------------------------------------------------------
+# 全局环境注入
+# ---------------------------------------------------------------------------
+
+def _set_global_environment(
+    mode: str | None, session_scope: str | None, workspace: Path | None
+) -> None:
+    """
+    将全局 CLI 参数注入到进程级 Environment 单例。
+
+    必须早于任何 Host() / Environment.discover() 调用。
+    用 try/except 包裹，因为 workspace 可能尚未创建，这不应阻断无环境需求的命令。
+    """
+    from ghoshell_moss.core.blueprint.environment import Environment
+
+    # workspace 通过环境变量注入 —— Environment.find_workspace_path() 第一优先级
+    if workspace is not None:
+        os.environ["MOSS_WORKSPACE"] = str(workspace.resolve())
+
+    try:
+        env = Environment.discover()
+    except Exception:
+        if workspace is not None:
+            print_warning(f"Workspace not found: {workspace}")
+            print_warning("Commands that require a workspace (manifests, apps, modes) will fail.")
+        return
+
+    if mode is not None:
+        env.set_mode(mode)
+    if session_scope is not None:
+        env.set_session_scope(session_scope)
 
 
 @app.command(
