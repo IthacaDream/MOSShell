@@ -37,6 +37,20 @@ Explicitly NOT in scope:
     <year>/<month>/<name>/  # Completed/abandoned features — the tree IS the index
 ```
 
+## Feature Methodology — Convention vs Autonomy
+
+The CLI enforces only the **container convention**: frontmatter schema, state machine, archive location.
+It does **not** prescribe how a feature should be explored, designed, or implemented.
+
+Each FEATURE.md owns its internal organization:
+- The `design/` and `discuss/` subdirectories shown above are **suggestions**, not requirements.
+- A feature may define its own document structure, methodology steps, or exploration process
+  directly in its FEATURE.md.
+- When an AI incarnation begins work on a feature, it reads the FEATURE.md to learn
+  the feature-specific approach — not a global convention.
+
+This separation ensures the CLI and spec can evolve independently of how individual features are executed.
+
 ## FEATURE.md Minimal Frontmatter Schema
 
 ```yaml
@@ -145,6 +159,16 @@ The feature system is itself the minimal viable unit of MOSS "let AI modify itse
 
 This three-step cycle is the basic unit of self-iteration. The feature system can describe
 its own improvement proposals (meta-feature), achieving second-order reflexivity.
+
+## Human-AI Collaboration Methodology
+
+The following is a minimal protocol for human + AI feature development. Each FEATURE.md may refine
+this further for its specific domain.
+
+1. **Align** — Confirm requirements and goals. Ensure shared understanding between human and AI before proceeding. If the feature depends on other features, verify those dependencies are understood.
+2. **Explore & Plan** — Read relevant code and context. Formulate a solution approach. Re-align with the human engineer; seek clarification when the path is ambiguous. Do not assume.
+3. **Implement** — Execute in small, verifiable steps. Update FEATURE.md alongside code changes.
+4. **Review** — After completion, do a brief retrospective. What worked? What surprised? Capture key decisions in FEATURE.md so future incarnations inherit the reasoning.
 
 ## Unverified Claims
 

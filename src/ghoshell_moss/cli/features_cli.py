@@ -59,6 +59,7 @@ def specification(
         print_info("Run 'moss features init' to create the features skeleton first.")
         raise typer.Exit(code=1)
     echo(readme.read_text(encoding="utf-8"))
+    echo(f"\nSpecification path: {readme.resolve()}")
 
 
 # ---------------------------------------------------------------------------
