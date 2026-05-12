@@ -230,6 +230,7 @@ def create_cmd(
     try:
         fm_path = create_feature(str(fd), name, template_path=template if template.is_file() else None)
         print_success(f"Feature '{name}' created: {fm_path}")
+        print_info("If you haven't read the features convention, run: moss features specification")
     except FileExistsError:
         print_error(f"Feature '{name}' already exists.")
         raise typer.Exit(code=1)
