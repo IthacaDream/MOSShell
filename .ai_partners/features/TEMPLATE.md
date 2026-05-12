@@ -16,7 +16,7 @@ description: >-
 
 ## Motivation
 
-Why does this feature need to exist? What gap does it fill?
+What problem does this workstream solve? Why now? (This is a development track, not a project capability catalog entry — describe what's being built and why.)
 
 ## Design Index
 
@@ -30,8 +30,3 @@ Why does this feature need to exist? What gap does it fill?
 ## Implementation Notes
 
 <!-- Gotchas, non-obvious behaviors, reasons for rejecting simpler alternatives. -->
-
-## Related
-
-- Depends on: (list feature names)
-- Related features: (list feature names)

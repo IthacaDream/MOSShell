@@ -1,12 +1,14 @@
-# MOSS AI-Native Feature Tracking Convention
+# MOSS AI-Native Development Tracking Convention
+
+> This is NOT a catalog of the project's capabilities. It tracks **what is being built right now** — active development workstreams, their decision history, and their completion state. See [What This Is Not](#what-this-is-not).
 
 ## Purpose
 
-This directory implements **file-system-based feature tracking** — a mechanism for AI incarnations
+This directory implements **file-system-based development tracking** — a mechanism for AI incarnations
 to record and restore decision trajectories across sessions, branches, tools, and models.
 
 The reader and producer are both **AI first**. A human engineer drives the process:
-which feature to work on, when to start, when to archive. AI reads FEATURE.md to restore context,
+which workstream to start, when to change status. AI reads FEATURE.md to restore context,
 and writes to FEATURE.md to record decisions made during implementation.
 
 The "true" information lives in the git history: code changes and FEATURE.md changes travel
@@ -163,12 +165,14 @@ The CLI is a **thin convention enforcer**. Core logic lives in `ghoshell_moss.co
 
 ## What This Is Not
 
-This is **not** a project management tool. It provides no checklist, no scope tracking,
-no burn-down chart, no progress metrics. It is a **decision trajectory recording mechanism** —
-the minimal viable unit of "let AI record what it did and why, so the next AI incarnation
-(or the same one, days later) can pick up the thread."
+- **Not a feature catalog.** It does not list what the project *can do* — for that, read the code,
+  run `moss concepts`, or read the architecture docs.
+- **Not a project management tool.** It provides no checklist, no scope tracking,
+  no burn-down chart, no progress metrics. It is a **decision trajectory recording mechanism** —
+  the minimal viable unit of "let AI record what it did and why, so the next AI incarnation
+  (or the same one, days later) can pick up the thread."
 
-Feature tracking is itself optional. A feature only exists when the human engineer decides
+Development tracking is itself optional. A workstream only exists when the human engineer decides
 that a task's complexity warrants it. Not every code change needs a FEATURE.md.
 
 ---
