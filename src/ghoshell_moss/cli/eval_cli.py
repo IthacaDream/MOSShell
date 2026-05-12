@@ -1,73 +1,42 @@
 """
 moss eval — execute arbitrary Python code in the live MOSS runtime.
 
-Uses Compiler + Executor from core.codex to run code in an isolated module,
-capturing stdout and return value as structured JSON.
+Spawns a child process to isolate code execution from the CLI layer.
+The child reads a JSON request from stdin, executes code via
+Compiler + Executor in a clean process, and writes JSON result to stdout.
+Errors are written to stderr and displayed as-is by the parent.
 """
 
 import typer
 import json
 import sys
-import traceback
+import subprocess
 from pathlib import Path
 from typing import Optional
 
-from ghoshell_moss.core.codex.compiler import Compiler
-from ghoshell_moss.core.codex.executor import Executor, ExecutionResult
 from .utils import console, print_error
-
-
-def _execute(
-    code: str,
-    module_path: Optional[str] = None,
-) -> ExecutionResult:
-    """Compile and execute code, optionally in a module's context."""
-    origin = None
-    if module_path:
-        import importlib
-        try:
-            origin = importlib.import_module(module_path)
-        except ModuleNotFoundError:
-            raise ValueError(f"Module not found: {module_path}")
-
-    if origin:
-        executor = Executor(origin=origin)
-    else:
-        import types
-        executor = Executor(origin=types.ModuleType("__moss_eval__"))
-
-    return executor.execute(code)
-
-
-def _serialize_result(result: ExecutionResult) -> dict:
-    """Serialize execution result for JSON output."""
-    returns = result.returns
-    try:
-        _ = json.dumps(returns)
-        serialized = returns
-    except (TypeError, ValueError):
-        serialized = repr(returns)
-
-    return {
-        "returns": serialized,
-        "std_output": result.std_output,
-    }
 
 
 def eval_code(
     code: str = typer.Argument(default="", help="Python code to execute"),
-    module: Optional[str] = typer.Option(None, "--module", "-m", help="Import path of module to use as execution context"),
-    file: Optional[Path] = typer.Option(None, "--file", "-f", help="Read code from file instead of argument"),
+    module: Optional[str] = typer.Option(
+        None, "--module", "-m",
+        help="Import path of module to use as execution context",
+    ),
+    file: Optional[Path] = typer.Option(
+        None, "--file", "-f",
+        help="Read code from file instead of argument",
+    ),
 ):
     """
     Execute Python code in the live MOSS runtime environment.
 
-    Code runs in an isolated module with full access to the host process.
+    Code runs in an isolated child process with full access to the host.
     stdout is captured automatically. Assign to __result__ to return a value.
 
     Examples:
-        moss eval "print(type(host))"
-        moss eval --module ghoshell_moss.host.runtime "print(host.mode.name)"
+        moss eval "__result__ = type(42)"
+        moss eval --module ghoshell_moss.host.runtime "print(dir())"
         moss eval --file debug_script.py
     """
     if file:
@@ -75,17 +44,25 @@ def eval_code(
             code = file.read_text()
         except FileNotFoundError:
             print_error(f"File not found: {file}")
-            raise SystemExit(1)
+            raise typer.Exit(code=1)
 
     if not code.strip():
         print_error("No code to execute. Provide code as argument or via --file.")
-        raise SystemExit(1)
+        raise typer.Exit(code=1)
 
-    try:
-        result = _execute(code, module_path=module)
-    except Exception:
-        print_error(f"Code execution failed:\n{traceback.format_exc()}")
-        raise SystemExit(1)
+    request = json.dumps({"code": code, "module": module})
 
-    output = _serialize_result(result)
-    console.print(json.dumps(output, ensure_ascii=False, indent=2))
+    child = subprocess.run(
+        [sys.executable, "-m", "ghoshell_moss.cli._eval_child"],
+        input=request,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    if child.returncode != 0:
+        print_error(f"Code execution failed:\n{child.stderr.rstrip()}")
+        raise typer.Exit(code=1)
+
+    # Child succeeded — output its JSON result
+    console.print(child.stdout.rstrip())
