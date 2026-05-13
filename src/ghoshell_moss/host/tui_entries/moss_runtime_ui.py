@@ -7,6 +7,7 @@ from ghoshell_moss.host.repl.inspector_matrix import MatrixREPL
 from ghoshell_moss.host.repl.inspector_manifests import ManifestsREPL
 from ghoshell_moss.host.repl.inspector_app_store import AppStoreREPL
 from ghoshell_moss.host.repl.inspector_moss_runtime import MOSSRuntimeInspector
+from ghoshell_moss.host.repl.fractal_serve_state import FractalServeState
 from ghoshell_moss.core.blueprint.session import OutputItem
 
 __all__ = ['MOSSRuntimeREPLState', 'MossRuntimeTUI']
@@ -58,6 +59,7 @@ class MossRuntimeTUI(MossHostTUI[MossRuntime]):
 
     def create_states(self) -> Iterable[TUIState]:
         yield MOSSRuntimeREPLState(self.host, self.runtime)
+        yield FractalServeState(self.host, self.runtime)
 
 
 if __name__ == "__main__":

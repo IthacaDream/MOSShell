@@ -28,9 +28,9 @@ class MatrixREPL:
     def info(self) -> dict:
         """返回 Matrix 运行环境的基本配置快照。"""
         return {
-            "mode": self._matrix.moss_mode,
+            "mode": self._matrix.mode.name,
             "is_running": self._matrix.is_running(),
-            "moss_running": self._matrix.is_moss_running()
+            "moss_running": self._matrix.is_host_running()
         }
 
     def contracts(self) -> list[dict]:

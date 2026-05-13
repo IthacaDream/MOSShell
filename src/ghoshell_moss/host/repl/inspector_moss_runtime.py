@@ -12,17 +12,13 @@ class MOSSRuntimeInspector:
         self._moss_runtime = moss_runtime
         self._output = output
 
-    def fractal_explain(self) -> str:
-        """获取当前 moss 分形监听的基本讯息"""
-        return self._moss_runtime.fractal.explain()
-
     def instructions(self) -> None:
         """获取当前 MOSS 的指令上下文 (Instruction)。"""
         self._output.syntax(self._moss_runtime.moss_instruction(), 'xml')
 
-    async def dynamic(self) -> None:
+    async def dynamic(self, refresh: bool = True) -> None:
         """获取当前 MOSS 的动态上下文讯息. """
-        messages = await self._moss_runtime.moss_dynamic_messages()
+        messages = await self._moss_runtime.moss_dynamic_messages(refresh=refresh)
         self._output.output(OutputItem.new("Shell", *messages, log="moss dynamic instructions"))
 
     def static(self) -> None:

@@ -186,7 +186,11 @@ class PrimeChannel(StatefulChannel, MutableChannel, ABC):
     """
     a stateful and mutable channel
     """
-    pass
+
+    @property
+    @abstractmethod
+    def build(self) -> ChannelStateBuilder:
+        pass
 
 
 def new_channel_from_state(state: ChannelState, id: str | None = None) -> StatefulChannel:

@@ -61,10 +61,13 @@ class CTMLShell(MOSShell[PrimeChannel]):
 
         self._container = Container(name=name, parent=parent_container)
         self._container.set(MOSShell, self)
+
+        self._primitives: list[str | Command] | None = primitives
         # register primitives
         self._main_channel = main_channel or create_ctml_main_chan(
             experimental=experimental,
             with_default_primitives=primitives is None,
+            description=description,
         )
         if primitives:
             for primitive_item in primitives:
