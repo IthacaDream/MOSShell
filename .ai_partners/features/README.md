@@ -56,7 +56,7 @@ This is the **binding constraint** that makes the system work:
 ### Rationale
 
 Feature tracking via files only has value if git history connects code and feature state.
-`git log -- .ai_partners/features/active/<year>/<month>/<id>/FEATURE.md` must produce a **reliable timeline**
+`git log -- .ai_partners/features/workstreams/<year>/<month>/<id>/FEATURE.md` must produce a **reliable timeline**
 of every commit that changed the feature. `git log -- <source-file>` must be able to trace back
 to the FEATURE.md state at that point.
 
@@ -110,7 +110,7 @@ description: >-            # One-line summary for listing
 ---
 ```
 
-The directory name under `active/` (kebab-case) is the feature's unique identifier.
+The directory name under `workstreams/` (kebab-case) is the feature's unique identifier.
 No separate `id` field — the filesystem is the namespace.
 
 ## State Machine
@@ -130,7 +130,7 @@ All status transitions are in-place frontmatter updates — no file moves.
 |---------|----------|-------------|
 | `moss features specification` | Render this README.md | None |
 | `moss features list [--status] [--all]` | Parse FEATURE.md frontmatter, default last 2 months | None |
-| `moss features create <name>` | Create active/\<year\>/\<month\>/\<name\>/FEATURE.md from template | Creates directory |
+| `moss features create <name>` | Create workstreams/\<year\>/\<month\>/\<name\>/FEATURE.md from template | Creates directory |
 | `moss features set-status <name> <status> [-m "note"]` | Update status and updated fields in YAML frontmatter (in place) | Writes to FEATURE.md |
 | `moss features status [name]` | Parse and display specified or all frontmatter | None |
 | `moss features init` | Create `.ai_partners/features/` skeleton in project root | Creates directory structure |
