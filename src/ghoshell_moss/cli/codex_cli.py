@@ -244,11 +244,70 @@ def _get_item_description(full_path: str, item_type: str) -> str:
     return ""
 
 
+def _is_package(import_path: str) -> bool:
+    """Check if an import path points to a package (has __path__), not a module."""
+    try:
+        obj = importlib.import_module(import_path)
+        return hasattr(obj, '__path__')
+    except ImportError:
+        return False
+
+
+def _list_module_members(module_path: str):
+    """List members (classes, functions, variables) of a module for list output."""
+    try:
+        module = importlib.import_module(module_path)
+    except ImportError as e:
+        print_error(f"Failed to import module '{module_path}': {e}")
+        return
+
+    members = inspect.getmembers(module)
+    classes = sorted(
+        (name, obj) for name, obj in members
+        if inspect.isclass(obj) and obj.__module__ == module.__name__
+    )
+    functions = sorted(
+        (name, obj) for name, obj in members
+        if inspect.isfunction(obj) and obj.__module__ == module.__name__
+    )
+    variables = sorted(
+        (name, obj) for name, obj in members
+        if not name.startswith("_")
+        and not inspect.isclass(obj)
+        and not inspect.isfunction(obj)
+        and not inspect.ismodule(obj)
+    )
+
+    table_data = []
+    for name, _ in classes:
+        table_data.append(["class", f"[bold cyan]{name}[/bold cyan]", f"[dim]{module_path}.{name}[/dim]", ""])
+    for name, _ in functions:
+        table_data.append(["function", f"[bold green]{name}[/bold green]", f"[dim]{module_path}.{name}[/dim]", ""])
+    for name, _ in variables:
+        table_data.append(["variable", f"[bold yellow]{name}[/bold yellow]", f"[dim]{module_path}.{name}[/dim]", ""])
+
+    print_simple_table(
+        data=table_data,
+        headers=["Type", "Name", "Full Path", ""],
+        title=f"Members of {module_path}",
+        column_styles=["dim", "", "dim", ""],
+        title_style="bold bright_cyan",
+        column_ratios=[1, 1, 3, 0],
+    )
+
+    console.print(
+        f"\n[dim]Total: {len(table_data)} members "
+        f"({len(classes)} classes, {len(functions)} functions, {len(variables)} variables)[/dim]"
+    )
+    console.print(f"[dim]To see module details, run [bold]moss codex info {module_path}[/bold][/dim]")
+    console.print(f"[dim]To see member interfaces, run [bold]moss codex get-interface {module_path}:<member>[/bold][/dim]")
+
+
 @codex_app.command("list")
 def list_modules(
         package_path: str = typer.Argument(
             "ghoshell_moss",
-            help="Python package path to list modules and packages from, e.g.: ghoshell_moss.core.concepts"
+            help="Python package or module path, e.g.: ghoshell_moss.core.concepts"
         ),
         recursive: bool = typer.Option(
             False,
@@ -257,8 +316,13 @@ def list_modules(
         ),
 ):
     """
-    List all modules and packages in a Python package with their descriptions.
+    List modules and packages in a Python package, or members of a module.
     """
+    # 如果是 module 而非 package，列出模块成员
+    if not _is_package(package_path):
+        _list_module_members(package_path)
+        return
+
     # 获取模块和包列表
     items = _get_package_modules(package_path, recursive, include_packages=True)
 
