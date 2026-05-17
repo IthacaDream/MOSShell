@@ -4,7 +4,7 @@ status: in_progress
 priority: P0
 created: 2026-05-14
 updated: 2026-05-17
-step: 10d_partial
+step: 10e_done
 depends: []
 milestone:
 description: >-
@@ -74,7 +74,7 @@ first-ghost-prototype/
 | 10b | GhostRuntime ABC 定义 | ABC 5 成员 + 架构选型 (方案4) | done |
 | 10c | GhostRuntimeImpl skeleton | wiring: providers → moss → ghost → mindflow | done |
 | 10d | action observe 回路闭合 | 流式 feed → interpreter → action.outcome() + 异常分级 | done |
-| 10e | session signal 路由 | matrix 信息输出 + session signal → mindflow | pending |
+| 10e | session signal 路由 | session → mindflow bridge + matrix logger 输出 | done |
 
 ## 实现阶段关键决策（2026-05-16）— GhostRuntime 架构选型
 

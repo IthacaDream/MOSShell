@@ -114,6 +114,15 @@ class GhostRuntimeImpl(GhostRuntime):
         self._mindflow = mindflow
         await self._async_exit_stack.enter_async_context(mindflow)
 
+        # session signal → mindflow 路由.
+        # zenoh 存活周期比 ghost/mindflow 长, 关闭期间 session 仍可能收到信号,
+        # 所以闭包内检查 mindflow.is_running() 做兜底丢弃.
+        def _route_signal(signal):
+            if mindflow.is_running():
+                mindflow.add_signal(signal)
+
+        matrix.session.on_signal(_route_signal)
+
         # 三循环托管给 matrix
         matrix.create_task(self._main_loop())
         matrix.create_task(self._articulate_loop())
@@ -163,10 +172,6 @@ class GhostRuntimeImpl(GhostRuntime):
              task_result().observe 决定是否触发观察. 不中断整体解释.
           3. 静默失败 — 非关键组件异常. 应 log 到 matrix 但不呈现给模型.
           4. 致命异常 — shell/matrix 崩溃. 向外传播, 由 matrix task 管理器处理.
-
-        TODO matrix 信息输出点:
-          - logos 流式解析过程: 首 token / feed 异常 / commit 时输出状态
-          - interpreter 结算: close() 后输出 interpretation 摘要
         """
         mindflow = self._mindflow
         try:
@@ -189,17 +194,23 @@ class GhostRuntimeImpl(GhostRuntime):
         shell = self._moss_runtime.shell
         interpreter = await shell.interpreter(kind='clear', clear_after_exit=False)
         interpretation = interpreter.interpretation()
+        logger = self._moss_runtime.matrix.logger
 
         async with interpreter:
             try:
                 # ── 阶段 1: feed — 流式送入 ──
                 # throw=True (默认): 若 interpreter 已被停止 (异常 / clear)
                 # 则立刻抛出 InterpretError, 打断 logos 消费循环.
+                first_delta = True
                 async for delta in action.received_logos():
+                    if first_delta:
+                        logger.debug("action loop received first logos delta")
+                        first_delta = False
                     interpreter.feed(delta)
 
                 # ── 阶段 2: compile — 标记结束, 等待解析完成 ──
                 interpreter.commit()
+                logger.debug("logos stream committed, waiting compile")
                 await interpreter.wait_compiled()
 
                 # ── 阶段 3: execute — 等待全部 task 执行完毕 ──
@@ -210,9 +221,18 @@ class GhostRuntimeImpl(GhostRuntime):
                 #   interpretation.observe = True
                 #   interpretation.exception = str(error)
                 #   取消所有 pending tasks (已完成的保留结果)
-                pass
+                logger.warning(
+                    "interpret error during stream execute: %s",
+                    interpretation.exception,
+                )
 
         # __aexit__ 已调 close(), interpretation.done = True
-        # as_messages() = status (compiled/done/failed) + executed (task outputs)
-        # TODO: matrix logger 输出 interpretation 结算摘要
+        logger.info(
+            "interpreter settled: compiled=%d done=%d failed=%d cancelled=%d observe=%s",
+            len(interpretation.compiled_tasks),
+            len(interpretation.success_tasks),
+            len(interpretation.failed_tasks),
+            len(interpretation.cancelled_tasks),
+            interpretation.observe,
+        )
         return interpretation.as_messages(), interpretation.observe
