@@ -165,6 +165,8 @@ AI 在发现可用命令时，用以下流程替代多轮 `--help` 探索：
   - **模板分发模型**: 权威模板在 `src/ghoshell_moss/core/codex/_features_templates/` (随包发布)。
     `moss features init` 做单向同步到 `.ai_partners/features/`，覆盖模板文件但不动已有 workstream。
   - 常用命令: `list`, `create <name>`, `status [name]`, `set-status <name> <status>`, `init`
+- `moss docs` — 架构参考文档的目录树入口。**不是最小开发知识**，日常参与开发不需要读它。它服务于需要系统性理解 MOSS 架构自身论述的场景。
+  参与开发时如需编辑文档，源码在 `src/ghoshell_moss/cli/docs/ai/`。
 
 # MOSS 应用架构拓扑
 
