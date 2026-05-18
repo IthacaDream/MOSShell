@@ -289,11 +289,11 @@ class HostAppStore(AppStore):
 
     async def stop_app(self, app_fullname: str) -> str:
         app = self.get_app_info(app_fullname)
-        if not app or app.address not in self._managed_apps_with_fullname:
+        if not app or app.fullname not in self._managed_apps_with_fullname:
             return f"App {app_fullname} is not under management."
         try:
             await self._call_circus({"command": "rm", "name": app.address})
-            self._managed_apps_with_fullname.remove(app.address)
+            self._managed_apps_with_fullname.remove(app.fullname)
             self._set_app_state(app_fullname, AppState.STOPPED)
             return f"Stopped and removed {app_fullname}."
         except Exception as e:
