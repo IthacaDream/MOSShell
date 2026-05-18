@@ -120,7 +120,7 @@ class TestMockGhost:
         assert ghost.memories() == []
         assert ghost.channel() is None
         assert ghost.mindflow() is None
-        assert ghost._articulate_responses == []
+        assert ghost._articulate_responses == ["hello world"]
 
     def test_setters_swap_at_runtime(self):
         ghost = _mock_ghost()
@@ -242,6 +242,7 @@ class TestMockGhostArticulate:
 
     def test_empty_responses_yields_nothing(self):
         ghost = _mock_ghost()
+        ghost._articulate_responses = []
         art = _mock_articulator()
 
         async def collect():

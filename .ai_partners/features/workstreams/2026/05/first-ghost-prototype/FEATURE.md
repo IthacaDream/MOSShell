@@ -3,8 +3,8 @@ title: First Ghost Prototype
 status: in_progress
 priority: P0
 created: 2026-05-14
-updated: 2026-05-18
-step: 10g_done
+updated: 2026-05-19
+step: 10h_done
 depends: []
 milestone:
 description: >-
@@ -77,7 +77,7 @@ first-ghost-prototype/
 | 10e | session signal 路由 | session → mindflow bridge + matrix logger 输出 | done |
 | 10f | task output 协议 | `on_task_done` → session.output, 结算只发 status | done |
 | 10g | output role 体系 + logos 缓冲 | 六 role 分离，command/error/system 已落地，logos 暂用缓冲过渡 | done |
-| 10h | session stream logos | logos 走 session stream 流式输出，替代当前缓冲检查点 | pending |
+| 10h | session stream logos | logos 走 session stream 流式输出，替代当前缓冲检查点 | done |
 | 10i | ghost runtime 可感知 API + 调试体系 | 运行时自省和运行前调试 | pending |
 
 ## 实现阶段关键决策（2026-05-16）— GhostRuntime 架构选型
@@ -250,7 +250,7 @@ Mindflow (调度中枢) → Attention (单次运行态)
 | role | 内容 | 消费者 | 状态 |
 |------|------|--------|------|
 | `moment` | ghost 本轮感知到的 percepts 概要 | 人/调试 | done |
-| `logos` | 模型 articulate 的文本产出 | 人 | **过渡：缓冲检查点，将替换为 session stream（10h）** |
+| `logos` | 模型 articulate 的文本产出 | 人 | done |
 | `command-output` | `CommandTaskResult.output` | 人 | done |
 | `command-result` | `CommandTaskResult.as_messages()` | 模型 | done |
 | `error` | 异常信息（articulate/action 均覆盖） | 调试 | done |
@@ -258,26 +258,26 @@ Mindflow (调度中枢) → Attention (单次运行态)
 
 原 `'task'` role 拆为 `command-output` + `command-result`——两个消费方向不同，混在一起 consumer 无法区分。
 
-### logos 缓冲（过渡方案）
+### logos 流式输出（10h 完成）
 
-logos 正确的实现路径是 session stream（10h），当前用缓冲 + task 检查点过渡：
+logos 通过 session stream 实时广播：
 
 ```
 _articulate_loop:
   articulator 入队
     → output('moment', log="...")
-    → output('logos', log='articulating')  # 信号
-    → buffer deltas, send_nowait 给 mindflow
+    → async for delta in ghost.articulate(articulator):
+        articulator.send_nowait(delta)   # 给 mindflow
+        session.pub_logos(delta)        # 实时流, 外部通过 get_logos() 消费
 
 _action_loop → _stream_execute:
   每个 task done:
-    → output('logos', *drain_buffer())              # 过渡：缓冲发射
     → output('command-output', *result.output)       # 给人看
     → output('command-result', *result.as_messages()) # 给模型看
   InterpretError:
     → output('error', log=str(err))
   结算:
-    → final drain + output('system', *status)
+    → output('system', *status)
 ```
 
 两个 loop 均有异常覆盖：action loop 已有，articulate loop 补上。

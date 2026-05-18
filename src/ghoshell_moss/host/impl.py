@@ -1,8 +1,9 @@
 from typing_extensions import Self
 
 from ghoshell_moss.core.blueprint.host import (
-    MossHost, Mode, MossRuntime,
+    MossHost, Mode, MossRuntime, GhostRuntime,
 )
+from ghoshell_moss.core.blueprint.ghost import GhostMeta
 from ghoshell_moss.core.blueprint.manifests import Manifests
 from ghoshell_moss.core.blueprint.matrix import Matrix
 from ghoshell_moss.contracts.workspace import LocalWorkspace, Workspace
@@ -11,8 +12,10 @@ from ghoshell_moss.core.blueprint.environment import Environment
 from ghoshell_moss.host.manifests import PackageManifests, MergedManifests
 from ghoshell_moss.host.app_store import HostAppStore
 from ghoshell_moss.host.modes import list_modes_from_root_package, new_mode
+from ghoshell_moss.host.ghosts import list_ghosts_from_root_package
 from ghoshell_moss.host.matrix import MatrixImpl
 from ghoshell_moss.host.moss_runtime import MossRuntimeImpl
+from ghoshell_moss.host.ghost_runtime import GhostRuntimeImpl
 import logging
 
 __all__ = ['Host']
@@ -43,13 +46,14 @@ class Host(MossHost):
         self._env_manifest = PackageManifests.from_environment(self.env)
         self._logger: LoggerItf | None = logger
 
-        self._env_modes = {mode.name: mode for mode in list_modes_from_root_package()}
+        self._env_modes: dict[str, Mode] | None = None
+        self._ghosts: dict[str, GhostMeta] | None = None
         moss_mode = mode
         if moss_mode is None:
             moss_mode = self.env.moss_mode_name
         if isinstance(moss_mode, str):
             moss_mode_name = moss_mode
-            moss_mode = self._env_modes.get(moss_mode_name)
+            moss_mode = self.all_modes().get(moss_mode_name)
             if moss_mode is None:
                 raise RuntimeError(f"Unknown mode: {moss_mode}")
         self._moss_mode: Mode = moss_mode
@@ -106,16 +110,28 @@ class Host(MossHost):
         return self._moss_mode
 
     def all_modes(self) -> dict[str, Mode]:
-        """
-        map all the modes in the environment.
-        """
+        if self._env_modes is None:
+            try:
+                self._env_modes = {
+                    mode.name: mode for mode in list_modes_from_root_package()
+                }
+            except Exception:
+                self._env_modes = {}
         return self._env_modes
+
+    def all_ghosts(self) -> dict[str, GhostMeta]:
+        if self._ghosts is None:
+            try:
+                self._ghosts = list_ghosts_from_root_package()
+            except Exception:
+                self._ghosts = {}
+        return self._ghosts
 
     def new_mode(self, name: str, apps: list[str], bringup_apps: list[str], description: str = "") -> None:
         """
         create new mode follow convertion
         """
-        if name in self._env_modes:
+        if name in self.all_modes():
             raise NameError(f"Mode {name} already exists")
         new_mode(name=name, apps=apps, bring_up_apps=bringup_apps, description=description)
 
@@ -140,4 +156,30 @@ class Host(MossHost):
             matrix=self._matrix,
             run_shell_on_start=run_shell,
             with_primitives=with_primitives,
+        )
+
+    def run_ghost(
+        self,
+        ghost: str | GhostMeta,
+        *,
+        run_shell: bool = True,
+    ) -> GhostRuntime:
+        """创建 GhostRuntime — 编排 MossRuntime + Ghost 生命周期.
+
+        Args:
+            ghost: ghost 名称 (从 all_ghosts() 查找) 或 GhostMeta 实例.
+                   传入实例时环境无关，可用于测试.
+            run_shell: 传递给 MossRuntime.
+        """
+        if isinstance(ghost, str):
+            ghost_meta = self.all_ghosts().get(ghost)
+            if ghost_meta is None:
+                raise KeyError(f"Ghost '{ghost}' not found in workspace")
+        else:
+            ghost_meta = ghost
+
+        moss_runtime = self.run(run_shell=run_shell)
+        return GhostRuntimeImpl(
+            moss_runtime=moss_runtime,
+            ghost_meta=ghost_meta,
         )

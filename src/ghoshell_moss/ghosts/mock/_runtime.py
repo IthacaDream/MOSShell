@@ -19,7 +19,7 @@ class MockGhost(Ghost):
 
     def __init__(self, *, meta: GhostMeta):
         self._meta = meta
-        self._articulate_responses: list[str] = []
+        self._articulate_responses: list[str] = ["hello world"]
         self._system_prompt: str = ""
         self._memories: list[Message] = []
         self._channel: Channel | None = None
