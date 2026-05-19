@@ -13,7 +13,7 @@ All reads go through MarkdownKnowledgeBase (the ResourceStorage).
 import asyncio
 import typer
 from pathlib import Path
-from .utils import console, print_error, print_info, print_simple_table, show_status
+from .utils import console, print_error, print_info, print_simple_table
 
 HOW_TO_ROOT = Path(__file__).resolve().parent / "how_tos"
 
@@ -81,39 +81,6 @@ def list_docs(
         headers=["Path", "Title", "Description"],
         title=f"MOSS How-To ({len(metas)} docs)",
     )
-
-
-@howto_app.command(name="recall")
-def recall(
-        query: str = typer.Argument(help="recall how-tos by agent with pydantic ai and anthropic api"),
-):
-    """Ask a question via the recall agent (requires ANTHROPIC_SMALL_FAST_MODEL)."""
-    from ghoshell_moss.core.resources.markdown_kb import recall_available
-
-    if not recall_available():
-        print_error("ANTHROPIC_SMALL_FAST_MODEL not set.")
-        print_info("Set ANTHROPIC_BASE_URL, ANTHROPIC_API_KEY, and ANTHROPIC_SMALL_FAST_MODEL to enable.")
-        raise typer.Exit(code=1)
-
-    with show_status("recalling how-to documents..."):
-        result = asyncio.run(kb.recall((query, None)))
-
-    console.print(f"[bold]Q:[/bold] {query}\n")
-
-    if result.done:
-        if result.locators:
-            console.print(f"[bold green]Matched {len(result.locators)} document(s):[/bold green]")
-            for loc in result.locators:
-                console.print(f"  {loc}")
-            console.print(f"\n[dim]Reasoning: {result.reasoning}[/dim]")
-        else:
-            console.print("[yellow]No matching documents found.[/yellow]")
-    else:
-        console.print(f"[bold yellow]Need clarification:[/bold yellow] {result.prompt}")
-        if result.choices:
-            console.print()
-            for c in result.choices:
-                console.print(f"  - {c}")
 
 
 @howto_app.command(name="read")
