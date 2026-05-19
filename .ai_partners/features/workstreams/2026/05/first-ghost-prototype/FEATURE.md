@@ -4,7 +4,7 @@ status: in_progress
 priority: P0
 created: 2026-05-14
 updated: 2026-05-19
-step: 10h_done
+step: 10i_done
 depends: []
 milestone:
 description: >-
@@ -78,7 +78,11 @@ first-ghost-prototype/
 | 10f | task output 协议 | `on_task_done` → session.output, 结算只发 status | done |
 | 10g | output role 体系 + logos 缓冲 | 六 role 分离，command/error/system 已落地，logos 暂用缓冲过渡 | done |
 | 10h | session stream logos | logos 走 session stream 流式输出，替代当前缓冲检查点 | done |
-| 10i | ghost runtime 可感知 API + 调试体系 | 运行时自省和运行前调试 | pending |
+| 10i | ghost 可观测性体系 | Ghost on_articulate_exit + inspect_state, GhostRuntime inspect_loop_health + LoopHealth TypedDict | done |
+| 11 | Mindflow 默认 input signal | 默认支持 input signal，退化传统输入/打断模式，GhostRuntime 暴露 mindflow | pending |
+| 11a | Mindflow inspect + 自解释 | mindflow 探知接口、自解释接口 | pending |
+| 11b | signal 记录 + on_impulse | signal 历史记录，on_impulse 回调注册做旁路观察（仅观察） | pending |
+| 12 | 测试与 TUI | mock ghost + input signal 脚本测试 → TUI 全链路验证 | pending |
 
 ## 实现阶段关键决策（2026-05-16）— GhostRuntime 架构选型
 
@@ -283,6 +287,61 @@ _action_loop → _stream_execute:
 两个 loop 均有异常覆盖：action loop 已有，articulate loop 补上。
 
 涉及文件：`host/ghost_runtime.py` — `_articulate_loop` + `_stream_execute._on_task_done`
+
+---
+
+## 实现阶段关键决策（2026-05-19）— Ghost 可观测性体系
+
+### 方法论
+
+两个使用者，两个导向：
+
+1. **Ghost 开发者**（写 Atom/Mock 的人）— override Ghost 上的 hook，暴露这个原型的内部细节
+2. **Runtime 使用者**（REPL 人类 / 脚本 AI）— 通过 GhostRuntime 的诊断 API 观察系统，不穿透到 ghost
+
+Ghost 的 hook 是**数据源**，GhostRuntime 的诊断 API 是**消费面**。使用者永远只面对 GhostRuntime。
+
+### 两个前缀约定
+
+| 前缀 | 语义 | 位置 | 例子 |
+|------|------|------|------|
+| `on_*` | event callback，事件发生时 GhostRuntime 调用。默认 no-op | Ghost | `on_articulate_exit` |
+| `inspect_*` | state query，拉取当前状态快照，无副作用 | Ghost + GhostRuntime | `inspect_state()` `inspect_loop_health()` |
+
+`on_` = push（事件推给你），`inspect_` = pull（你拉状态）。
+
+不是 lifecycle hook（lifecycle 将管理 ghost 状态转换 born/wake/sleep/die）。可观测性 hook 纯粹诊断用途——删除不影响行为。
+
+### 第一版最小集
+
+- `Ghost.on_articulate_exit(articulator, logos, error)` — articulate 结束后，捕获完整 logos 用于复现
+- `Ghost.inspect_state() -> dict` — ghost 内部快照，无固定 schema，每个原型自决
+- `GhostRuntime.inspect_loop_health() -> LoopHealth` — 三循环状态，TypedDict 保证 key 全量
+
+### 类型约束
+
+```python
+LoopStatus = Literal["running", "stopped", "not_started"]
+
+class LoopHealth(TypedDict):
+    main: LoopStatus
+    articulate: LoopStatus
+    action: LoopStatus
+```
+
+抽象设计不写魔法值——读签名即知全貌。
+
+### 涉及文件
+
+- `core/blueprint/ghost.py` — Ghost 新增 on_articulate_exit + inspect_state
+- `core/blueprint/host.py` — GhostRuntime 新增 inspect_loop_health, LoopHealth/LoopStatus 类型
+- `host/ghost_runtime.py` — GhostRuntimeImpl 实现 + wire hooks + loop status 追踪
+- `ghosts/mock/_runtime.py` — MockGhost 覆盖 hook 作为 ghost 开发者参考范式
+- `scripts/ghost/test_debug_hooks.py` — 验证脚本
+
+### 下一阶段
+
+Mindflow 默认 input signal 体系：感知侧的可观测性（signal 记录、on_impulse 旁路观察），补齐三循环全链路。之后 mock ghost + input signal → 脚本测试 → TUI 全链路验证。
 
 ---
 

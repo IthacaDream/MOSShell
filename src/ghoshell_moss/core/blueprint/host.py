@@ -1,5 +1,5 @@
 import contextlib
-from typing import Protocol, Callable, Any, ClassVar
+from typing import Protocol, Callable, Any, ClassVar, Literal, TypedDict
 
 from ghoshell_container import IoCContainer
 from typing_extensions import Self
@@ -17,7 +17,7 @@ from .app import AppStore
 
 __all__ = [
     'MossRuntime', 'MossHost', 'Mode', 'FractalHub', 'FractalCellProvider',
-    'MossSystemPrompter', 'GhostRuntime',
+    'MossSystemPrompter', 'GhostRuntime', 'LoopHealth', 'LoopStatus',
 ]
 
 
@@ -252,6 +252,18 @@ class MossRuntime(ABC):
         pass
 
 
+LoopStatus = Literal["running", "stopped", "not_started"]
+"""Status values for individual loop health checks."""
+
+
+class LoopHealth(TypedDict):
+    """Three-loop health snapshot. All keys guaranteed present."""
+
+    main: LoopStatus
+    articulate: LoopStatus
+    action: LoopStatus
+
+
 class GhostRuntime(ABC):
     """编排 MossRuntime + Ghost 的生命周期.
 
@@ -308,6 +320,18 @@ class GhostRuntime(ABC):
     def close(self) -> None:
         """发送关闭信号. 委托给 MossRuntime."""
         self.moss.close()
+
+    def inspect_loop_health(self) -> LoopHealth:
+        """Return three-loop running status for debugging.
+
+        Called by REPL / debug scripts. No side effects.
+        All three keys always present.
+        """
+        return {
+            "main": "not_started",
+            "articulate": "not_started",
+            "action": "not_started",
+        }
 
 
 class FractalHub(ABC):

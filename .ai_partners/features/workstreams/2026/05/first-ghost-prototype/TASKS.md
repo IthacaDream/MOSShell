@@ -28,4 +28,12 @@
 - [x] 10f — task output 协议: `on_task_done` → session.output, 结算只发 status
 - [x] 10g — output role 体系: 六 role 分离, command/error/system 已落地, logos 缓冲过渡
 - [x] 10h — session stream logos: logos 走 session stream 流式输出, 替代缓冲检查点
-- [ ] 10i — ghost runtime 可感知 API + 运行前调试体系
+- [x] 10i — ghost 可观测性体系: on_articulate_exit + inspect_state (Ghost), inspect_loop_health (GhostRuntime)
+
+### Phase 3: 感知侧补齐 + 全链路测试
+
+- [ ] 11a — Mindflow 默认 input signal: 退化传统输入/打断模式, GhostRuntime 暴露 mindflow
+- [ ] 11b — Mindflow inspect + 自解释接口
+- [ ] 11c — signal 记录 + on_impulse 旁路观察回调（仅观察）
+- [ ] 12a — mock ghost + input signal 脚本测试
+- [ ] 12b — TUI 全链路验证

@@ -4,7 +4,7 @@ import asyncio
 import janus
 from typing_extensions import Self
 
-from ghoshell_moss.core.blueprint.host import GhostRuntime, MossRuntime
+from ghoshell_moss.core.blueprint.host import GhostRuntime, MossRuntime, LoopHealth
 from ghoshell_moss.core.blueprint.ghost import Ghost, GhostMeta
 from ghoshell_moss.core.blueprint.mindflow import Mindflow, Articulator, Action
 from ghoshell_moss.message import Message
@@ -35,6 +35,11 @@ class GhostRuntimeImpl(GhostRuntime):
         self._mindflow: Mindflow | None = None
         self._async_exit_stack = contextlib.AsyncExitStack()
         self._started = False
+        self._loop_status: dict[str, str] = {
+            "main": "not_started",
+            "articulate": "not_started",
+            "action": "not_started",
+        }
 
         # 三循环队列: main loop → (articulate, action)
         self._articulate_queue: janus.Queue[Articulator] = janus.Queue()
@@ -91,6 +96,13 @@ class GhostRuntimeImpl(GhostRuntime):
     def close(self) -> None:
         self._moss_runtime.close()
 
+    def inspect_loop_health(self) -> LoopHealth:
+        return {
+            "main": self._loop_status["main"],
+            "articulate": self._loop_status["articulate"],
+            "action": self._loop_status["action"],
+        }
+
     # ── Mindflow wiring ───────────────────────────
 
     async def _wire_mindflow(self) -> None:
@@ -135,6 +147,7 @@ class GhostRuntimeImpl(GhostRuntime):
     async def _main_loop(self) -> None:
         """mindflow.loop() → Attention → (Articulator, Action) → queues."""
         await self._mindflow.wait_started()
+        self._loop_status["main"] = "running"
         try:
             async for attention in self._mindflow.loop():
                 async with attention:
@@ -142,6 +155,7 @@ class GhostRuntimeImpl(GhostRuntime):
                         self._articulate_queue.sync_q.put_nowait(articulate)
                         self._action_queue.sync_q.put_nowait(action)
         finally:
+            self._loop_status["main"] = "stopped"
             self._articulate_queue.shutdown(immediate=True)
             self._action_queue.shutdown(immediate=True)
 
@@ -151,10 +165,12 @@ class GhostRuntimeImpl(GhostRuntime):
         output 时序:
           - articulator 入队 → output('moment', log=...)  ghost 感知到了什么
           - delta 产出       → pub_logos(delta)           实时流, 外部通过 get_logos() 消费
+          - 结束 (成功/失败) → ghost.on_articulate_exit()  调试附着点
         """
         ghost = self._ghost_instance
         mindflow = self._mindflow
         session = self._moss_runtime.session
+        self._loop_status["articulate"] = "running"
         try:
             while mindflow.is_running():
                 articulator = await self._articulate_queue.async_q.get()
@@ -164,14 +180,27 @@ class GhostRuntimeImpl(GhostRuntime):
                         'moment',
                         log=f"moment {moment.id}: {len(moment.percepts)} percepts",
                     )
+                    logos_parts: list[str] = []
+                    error: Exception | None = None
                     try:
                         async for delta in ghost.articulate(articulator):
                             articulator.send_nowait(delta)
                             session.pub_logos(delta)
+                            logos_parts.append(delta)
                     except Exception as e:
+                        error = e
                         session.output('error', log=f"articulate error: {e}")
+                    finally:
+                        ghost.on_articulate_exit(
+                            articulator,
+                            "".join(logos_parts),
+                            error,
+                        )
+                        session.pub_logos("\n\n")
         except janus.AsyncQueueShutDown:
             pass
+        finally:
+            self._loop_status["articulate"] = "stopped"
 
     async def _action_loop(self) -> None:
         """queue → action.received_logos() → interpreter → action.outcome().
@@ -191,6 +220,7 @@ class GhostRuntimeImpl(GhostRuntime):
           4. 致命异常 — shell/matrix 崩溃. 向外传播, 由 matrix task 管理器处理.
         """
         mindflow = self._mindflow
+        self._loop_status["action"] = "running"
         try:
             while mindflow.is_running():
                 action = await self._action_queue.async_q.get()
@@ -199,6 +229,8 @@ class GhostRuntimeImpl(GhostRuntime):
                     action.outcome(*messages, observe=observe)
         except janus.AsyncQueueShutDown:
             pass
+        finally:
+            self._loop_status["action"] = "stopped"
 
     async def _stream_execute(self, action) -> tuple[list, bool]:
         """流式执行: action.received_logos() → interpreter.feed(delta) → 结算.

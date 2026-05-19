@@ -164,6 +164,46 @@ class Ghost(ABC):
         """结束自身生命周期."""
         pass
 
+    # ── observability hooks ────────────────────────────────
+    #
+    # Two prefix conventions, one purpose: let debuggers see what the ghost sees.
+    #
+    #   on_*      — event callback. Pushed by GhostRuntime when something happens.
+    #               Default no-op. Ghost authors override to record internal state.
+    #   inspect_* — state query. Pulled by REPL / scripts / GhostRuntime itself.
+    #               Returns a snapshot dict. Ghost authors override to expose internals.
+    #
+    # These are NOT lifecycle hooks. Lifecycle hooks (born / wake / sleep / die)
+    # will carry semantic weight for ghost state transitions. Observability hooks
+    # are purely diagnostic — removing them changes no behavior.
+    #
+    # Naming is deliberately constrained to these two prefixes. Before adding a
+    # new hook, ask: is it an event (on_*) or a query (inspect_*)? If neither,
+    # it does not belong here.
+
+    def on_articulate_exit(
+        self,
+        articulator: Articulator,
+        logos: str,
+        error: Exception | None,
+    ) -> None:
+        """Called after articulate() completes, success or failure.
+
+        logos is the full concatenated model output from one articulate cycle.
+        error is non-None if articulation raised. Together with the articulator's
+        moment, this is enough to replay the cycle for deterministic reproduction.
+        """
+
+    def inspect_state(self) -> dict:
+        """Return a snapshot of ghost internal state.
+
+        No fixed schema — each ghost prototype decides what to expose.
+        Called by GhostRuntime.inspect_loop_health() and directly by debuggers.
+        """
+        return {}
+
+    # ── end observability hooks ────────────────────────────
+
 
 # ── 三层抽象 ──────────────────────────────────────────────
 #

@@ -53,6 +53,19 @@ class MockGhost(Ghost):
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         pass
 
+    # ── observability hooks ──────────────────────────
+
+    def on_articulate_exit(self, articulator, logos, error):
+        self._last_logos = logos
+        self._last_error = error
+
+    def inspect_state(self) -> dict:
+        return {
+            "articulate_responses_remaining": len(self._articulate_responses),
+            "last_logos": getattr(self, "_last_logos", None),
+            "last_error": str(getattr(self, "_last_error", None)),
+        }
+
     # ── helpers ─────────────────────────────────────
 
     def set_articulate_responses(self, responses: list[str]) -> None:
