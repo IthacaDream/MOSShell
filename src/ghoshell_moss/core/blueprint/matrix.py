@@ -10,16 +10,18 @@ from ghoshell_container import IoCContainer
 from ghoshell_moss.core.blueprint.manifests import Manifests
 from pydantic import BaseModel, Field
 from pathlib import Path
+from enum import StrEnum
 import asyncio
 import frontmatter
 
 __all__ = ['Matrix', 'Cell', 'SystemPrompter', 'ScopesKey', 'MatrixLifecycleObject', 'Mode']
 
-CellTypes = Literal[
-    'host',  # 表示为启动网络的主进程节点.
-    'app',  # 表示在相同的 workspace 下的 App 节点. 由 main 节点管理生命周期.
-    'fractal',  # Matrix 的分形通讯机制下, 其它 Matrix 连接到当前 Matrix, 所形成的 cell 节点.
-]
+
+class CellType(StrEnum):
+    host = 'host',  # 表示为启动网络的主进程节点.
+    app = 'app',  # 表示在相同的 workspace 下的 App 节点. 由 main 节点管理生命周期.
+    fractal = 'fractal',  # Matrix 的分形通讯机制下, 其它 Matrix 连接到当前 Matrix, 所形成的 cell 节点.
+    script = 'script',  # 在 workspace 里独立运行的 script, 同样可以获取 matrix 节点身份.
 
 
 class Cell(ABC):
@@ -32,7 +34,7 @@ class Cell(ABC):
     """
     name: str  # 节点的名称.
     description: str  # 节点的描述.
-    type: CellTypes | str
+    type: CellType | str
     where: str  # 这个节点自身的工作目录.
 
     @property
@@ -42,8 +44,9 @@ class Cell(ABC):
         return self.make_address(self.type, self.name)
 
     @classmethod
-    def make_address(cls, type: str, fullname: str) -> str:
-        return '/'.join([type, fullname])
+    def make_address(cls, cell_type: str | CellType, fullname: str) -> str:
+        cell_type = str(cell_type).lower()
+        return '/'.join([cell_type, fullname])
 
     @property
     def log_name(self) -> str:

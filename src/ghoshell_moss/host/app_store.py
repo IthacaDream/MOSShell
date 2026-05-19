@@ -258,6 +258,7 @@ class HostAppStore(AppStore):
                 "filename": str(app_stderr_log.resolve().absolute()),
                 **rotation_config,
             }
+            r1 = None
             if app_fullname not in self._managed_apps_with_fullname:
                 existing = await self._call_circus({"command": "list"})
                 existing_watchers = existing.get("watchers", [])
@@ -277,7 +278,7 @@ class HostAppStore(AppStore):
                     "%s failed to start app %s on error: %s",
                     self._log_prefix, app_fullname, r2,
                 )
-                raise CommandErrorCode.VALUE_ERROR.error(f"failed to start {app_fullname}")
+                raise CommandErrorCode.VALUE_ERROR.error(f"failed to start {app_fullname} cause system error")
             self._logger.info("%s start app %s: %s, %s", self._log_prefix, app_fullname, r1, r2)
 
             self._set_app_state(app_fullname, AppState.STARTING)
@@ -416,8 +417,8 @@ class HostAppStore(AppStore):
 
         self._lock.release()
 
-    async def get_apps_context(self) -> str:
-        apps = self.list_apps()
+    async def get_apps_context(self, refresh: bool = False) -> str:
+        apps = self.list_apps(refresh=refresh)
         if not apps: return "No apps discovered."
         lines = ["## Managed Apps Context"]
         for app in apps:

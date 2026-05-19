@@ -165,7 +165,7 @@ class ChannelRuntimeNode:
                 self.logger.info("%r refreshed cancelled", self)
                 raise
             except Exception as e:
-                self.logger.error("%r refreshed exception: %s", self, e)
+                self.logger.error("%r refreshed exception: %r", self, e, exc_info=True)
 
                 # 更新失败, 不允许使用.
                 self.failure = "refresh failed: %s" % e

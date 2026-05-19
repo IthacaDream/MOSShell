@@ -274,7 +274,7 @@ class CommandMeta(BaseModel):
 
     name: str = Field(description="the name of the command")
     description: str = Field(default="", description="the description of the command")
-    chan: str = Field(default="", description="the channel name that the command belongs to")
+    chan: str = Field(default="", description="the origin channel name/path that the command belongs to")
     dynamic: bool = Field(default=False, description="whether this command is dynamic or not")
     available: bool = Field(
         default=True,

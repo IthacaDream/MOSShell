@@ -74,7 +74,7 @@ class AppStoreChannelState(ChannelState):
             获取当前环境所有可发现 App 的详细清单及运行状态。
             AI 在尝试启动任何 App 前，应先通过此命令确认其 address 和当前状态。
             """
-            return await self._app_store.get_apps_context()
+            return await self._app_store.get_apps_context(refresh=True)
 
         async def start(fullname: str, argument: str = "", timeout: float = -1) -> str:
             """
@@ -99,7 +99,7 @@ class AppStoreChannelState(ChannelState):
             await self_runtime.refresh_metas()
 
             # 从 tree 中查找已 bootstrap 的 child runtime
-            proxy_name = fullname.replace('/', '_')
+            proxy_name = self.make_app_proxy_name(fullname)
             child_runtime = self_runtime.fetch_sub_runtime(proxy_name)
             if child_runtime is None:
                 return f"{result}\n[WARN] App proxy '{proxy_name}' not found in channel tree"
@@ -127,6 +127,11 @@ class AppStoreChannelState(ChannelState):
             'stop': PyCommand(stop),
         }
 
+    @staticmethod
+    def make_app_proxy_name(fullname: str) -> str:
+        proxy_name = fullname.replace('/', '_')
+        return proxy_name
+
     def name(self) -> str:
         return self._name
 
@@ -147,20 +152,24 @@ class AppStoreChannelState(ChannelState):
 
     def get_virtual_children(self) -> dict[ChannelName, Channel]:
         channels = {}
+        result = {}
         for app in self._app_store.list_apps():
+            proxy_name = self.make_app_proxy_name(app.fullname)
             if app.fullname in self._app_channels:
-                channels[app.fullname] = self._app_channels[app.fullname]
+                exists = self._app_channels[app.fullname]
+                channels[app.fullname] = exists
+                result[proxy_name] = exists
                 continue
-            proxy_name = app.fullname.replace('/', '_')
             channel_proxy = self._matrix.channel_proxy(
                 address=app.address,
                 name=proxy_name,
                 description=app.description,
             )
             channels[app.fullname] = channel_proxy
+            result[proxy_name] = channel_proxy
         with self._app_channels_lock:
             self._app_channels = channels
-        return {chan.name(): chan for chan in self._app_channels.copy().values()}
+        return result
 
     def own_commands(self) -> dict[str, Command]:
         return self._own_commands.copy()

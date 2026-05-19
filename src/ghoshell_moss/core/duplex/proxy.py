@@ -586,7 +586,12 @@ class DuplexChannelContext:
             self.logger.exception("%s failed to send delta args %s", self._log_prefix, exc)
             raise
 
-    async def send_command_task(self, task: CommandTask, chan: str = '') -> CommandCallEvent:
+    async def send_command_task(self, task: CommandTask, provider_side_chan_path: str = '') -> CommandCallEvent:
+        """
+        发送一个 command task 给远端 provider.
+        :param task: 原始的 task
+        :param provider_side_chan_path: 远端的 channel name.
+        """
         try:
             cid = task.cid
             # 清空已经存在的 cid 错误?
@@ -608,8 +613,8 @@ class DuplexChannelContext:
             event = CommandCallEvent(
                 connection_id=self.connection_id,
                 name=task.meta.name,
-                # channel 名称使用 provider 侧的名称, 用来对 channel 寻址.
-                chan=chan or task.chan,
+                # channel 路径务必使用 provider 侧的路径, 用来对 channel 寻址.
+                chan=provider_side_chan_path,
                 command_id=task.cid,
                 args=list(task.args),
                 kwargs=dict(task.kwargs),
@@ -738,7 +743,10 @@ class DuplexChannelRuntime(AbsChannelRuntime):
 
     async def _consume_task_with_paths(self, paths: ChannelPaths, task: CommandTask) -> None:
         try:
-            event = await self._ctx.send_command_task(task, chan=Channel.join_channel_path('', *paths))
+            event = await self._ctx.send_command_task(
+                task,
+                provider_side_chan_path=Channel.join_channel_path('', *paths),
+            )
         except Exception as e:
             task.fail(e)
             raise
@@ -797,10 +805,10 @@ class DuplexChannelRuntime(AbsChannelRuntime):
         if not self.is_running():
             return None
         path, name = Command.split_unique_name(name)
-        meta = self._ctx.get_meta(path)
-        if meta is None:
+        channel_meta = self._ctx.get_meta(path)
+        if channel_meta is None:
             return None
-        for command_meta in meta.commands:
+        for command_meta in channel_meta.commands:
             if command_meta.name == name:
                 func = self._get_provider_command_func(path, command_meta)
                 command = CommandWrapper(meta=command_meta, func=func)
@@ -844,7 +852,10 @@ class DuplexChannelRuntime(AbsChannelRuntime):
                     cid=cid,
                 )
 
-            event = await self._ctx.send_command_task(task)
+            event = await self._ctx.send_command_task(
+                task,
+                provider_side_chan_path=chan,
+            )
             await self._ctx.expect_task_done(event, task)
             return task.result()
 

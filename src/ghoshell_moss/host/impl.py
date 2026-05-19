@@ -63,7 +63,7 @@ class Host(MossHost):
         self._app_store = HostAppStore(
             env=self.env,
             workspace=self._workspace,
-            namespace="MOSS/app_store/toolset",
+            namespace="MOSS/app_store",
             runnable=False,
             bringup=self._moss_mode.bringup_apps,
             include=self._moss_mode.apps,

@@ -3,7 +3,7 @@ title: App System CLI
 status: in-progress
 priority: P1
 created: 2026-05-18
-updated: 2026-05-19
+updated: 2026-05-19T12:10
 depends: []
 milestone:
 description: >-
@@ -80,6 +80,45 @@ start/stop 不走 CLI — 运行时由 AI 通过 AppStoreChannel 的 `start`/`st
 - `.moss_ws/apps/ai_tools/ping_test/` — 最简连通性测试 App (ping/echo 命令)
 - 单元测试中用 `ZenohChannelProvider` + `ZenohProxyChannel` 原语验证通过
 - MCP 实测时 App 进程正常启动但 channel 未连通（上述 config 问题）
+
+## Zenoh 连通性根因修复 (2026-05-19)
+
+人类工程师定位并修复了 proxy 永远连不上的两个根因：
+
+1. **`AppInfo.make_address` 魔法值**: 硬编码 `f"apps/{fullname}"` → 改为 `Cell.make_address("app", fullname)`，统一地址生成入口。`Cell.make_address` 同时增加了 `str(cell_type).lower()` 归一化，`CellTypes` Literal 改为 `CellType(StrEnum)` 并新增 `script` 类型。
+2. **`send_command_task` chan fallback**: `chan: str = ''` + `chan or task.chan` 导致当 chan 为空字符串时 fallback 到 consumer 侧路径 `task.chan`，provider 侧寻址失败。改为移除默认值，重命名为 `provider_side_chan_path`，所有调用方显式传入正确的 provider 侧路径。
+
+## list_apps refresh 缺失修复 (2026-05-19)
+
+`AppStoreChannelState` 的 `list_apps` 命令调用 `get_apps_context()` 未传 `refresh=True`，导致新创建的 App 目录在当前会话中不可见。
+
+- `AppStore.get_apps_context` 新增 `refresh: bool = False` 参数
+- `HostAppStore.get_apps_context` 透传至 `list_apps(refresh=refresh)`
+- `AppStoreChannelState.list_apps` 命令传 `refresh=True`
+
+## MCP 全链路验证通过 (2026-05-19)
+
+从零开始创建 `ai_tools/calc`，完整走通 AI 自迭代闭环：
+
+```
+moss apps init ai_tools/calc → 脚手架创建
+写 main.py (add/multiply/div + context_messages)
+<apps:list_apps /> → [STOPPED] 可见 (refresh 生效)
+<apps:start fullname="ai_tools/calc" timeout="3.0"/> → [OK] connected and ready
+<apps.ai_tools_calc:add a=3 b=7 /> → 10.0
+<apps.ai_tools_calc:multiply a=6 b=8 /> → 48.0
+<apps.ai_tools_calc:div a=10 b=3 /> → 3.333...
+<apps.ai_tools_calc:div a=1 b=0 /> → Error: division by zero
+```
+
+这是 MOSS 架构下第一个端到端走通的运行时自迭代链路。AI 不再是固定的工具调用者，而能在运行时通过 init → 写码 → start → call 扩展自己的能力边界。
+
+## 当前状态
+
+核心链路已通。feature 保持 in-progress，主任务回到文档体系完善。下阶段：
+- 文档: `model-oriented-application-system.md` 补充自迭代验证记录
+- 讨论: App 级 CLAUDE.md 约定
+- 清理: 删除测试用 ping_test/greeter/calc ws 目录
 
 ## 文档 (2026-05-18)
 
