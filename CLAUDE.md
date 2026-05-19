@@ -290,7 +290,7 @@ Channel 使用的高阶知识:
 
 1. 提交标题遵循行业惯例（如 Conventional Commits），不再参考此前的随意风格。
 
-2. 由 AI 独立设计并实现的提交，标题末尾标注 `by <模型名>`，例如：
+2. 由 AI 独立设计并实现的提交，**标题末尾** (不是 body) 标注 `by <模型名>`，例如：
    - `feat: add resource storage discovery by deepseek-v4`
    - `docs: rewrite CLI guide by gemini-3`
 
