@@ -559,10 +559,13 @@ class AbsAttention(Attention):
         impulse = await self.wait_first_impulse()
         if impulse is None:
             return
-        # 完成第一轮输入的赋值. 其中 mindflow context 应该是通过 context func 更新的.
+        # Moment 已在 __init__ 中通过 Reaction.new_moment() 创建并填入 percepts / reaction_instruction / reflex_logos.
+        # 但 wait_first_impulse 期间 impulse 可能被 incomplete→complete 吸收更新,
+        # 所以此处用最终的 impulse 重新对齐 Moment 的三个关键字段, 确保数据为最新.
         observation = self._ctx.moment
         observation.percepts = impulse.messages
         observation.reaction_instruction = impulse.reaction_instruction
+        observation.reflex_logos = impulse.reflex_logos
         while not self.is_aborted():
             # 每次刷新时会更新权重.
             self._escalation_on_active()

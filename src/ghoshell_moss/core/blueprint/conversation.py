@@ -204,8 +204,7 @@ class Moment(BaseModel, WithAdditional):
         yield from self.previous_reaction_messages()
         if with_perspectives:
             yield from self.perspective_messages(compact=False)
-        if with_reaction_instruction:
-            yield from self.inputs_messages(with_reaction_instruction=with_reaction_instruction)
+        yield from self.inputs_messages(with_reaction_instruction=with_reaction_instruction)
 
 
 class ConversationMeta(BaseModel, WithAdditional):

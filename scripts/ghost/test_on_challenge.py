@@ -1,6 +1,6 @@
-"""Verifies Mindflow.on_challenge callback: register observer → send signal → verify verdict.
+"""Verifies Mindflow hook system: register hook → send signal → verify challenge verdict.
 
-Tests the challenge observer contract without going through articulate/action loops.
+Tests the MindflowHook contract through with_hook/remove_hook.
 Uses MockSpeech to avoid real TTS.
 """
 import asyncio
@@ -45,7 +45,6 @@ async def main():
         mf = gr.mindflow
         assert isinstance(mf, Mindflow)
         assert mf.is_running()
-        assert hasattr(Mindflow, "on_challenge")
         print(f"mindflow: {type(mf).__name__}, is_running={mf.is_running()}")
 
         # ── 2. faculties include InputSignalNucleus ──
@@ -83,7 +82,7 @@ async def main():
 
         gr.close()
 
-    print("OK — on_challenge observer verified")
+    print("OK — MindflowHook challenge observer verified")
 
 
 asyncio.run(main())
