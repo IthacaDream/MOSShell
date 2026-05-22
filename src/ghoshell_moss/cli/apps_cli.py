@@ -139,7 +139,9 @@ def create_app(
     # Extract path from result message for the hint
     if " at " in result:
         target_path = result.split(" at ")[-1]
-        console.print(f"\n[dim]Next: cd {target_path} && moss apps test {fullname}[/dim]")
+        console.print(f"\n[dim]Next: cd {target_path}  # edit main.py[/dim]")
+        console.print(f"[dim]  MCP (runtime): <apps:start fullname=\"{fullname}\"/>[/dim]")
+        console.print(f"[dim]  Debug (standalone): moss apps test {fullname}[/dim]")
 
 
 def _display_app_table(apps: List[AppInfo], is_filtered: bool):
