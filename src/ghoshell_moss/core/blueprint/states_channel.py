@@ -1,4 +1,6 @@
 from abc import ABC, abstractmethod
+
+from typing import Protocol, runtime_checkable
 from typing_extensions import Self
 
 from ghoshell_container import IoCContainer
@@ -12,11 +14,42 @@ __all__ = [
     'ChannelState', 'ChannelStateBuilder', 'StatefulChannel',
     'new_state_builder', 'new_channel_from_state', 'new_stateful_channel',
     'PrimeChannel', 'new_prime_channel',
+    'ChannelModule',
 ]
 
 """
 how to build a stateful channel
 """
+
+
+@runtime_checkable
+class ChannelModule(Protocol):
+    """
+    生命周期感知的模块化能力单元。
+
+    通过 BaseStateChannel.with_module() 注册为 channel 的永久能力模块。
+    所有 module 同时激活、累积叠加 — 与 with_state() 的排他切换正交。
+    PyChannelBuilder 和任意 ChannelState 实现自动满足此 Protocol。
+
+    Protocol 意味着结构子类型 — 只要实现了 name() + own_commands() 的类型就是 ChannelModule，
+    不需要显式继承。on_startup/on_close/get_instruction/get_context_messages 是可选的生命周期钩子。
+    """
+
+    def name(self) -> str: ...
+
+    def own_commands(self) -> dict[str, Command]: ...
+
+    async def on_startup(self) -> None:
+        pass
+
+    async def on_close(self) -> None:
+        pass
+
+    async def get_instruction(self) -> str:
+        return ""
+
+    async def get_context_messages(self) -> list[Message]:
+        return []
 
 
 class ChannelState(ABC):
@@ -176,6 +209,13 @@ class StatefulChannel(Channel, ABC):
         return the switchable states, without main states.
         """
         pass
+
+    def modules(self) -> dict[str, ChannelModule]:
+        """
+        return the permanent capability modules.
+        默认返回空 dict，不是每个 StatefulChannel 都需要 module。
+        """
+        return {}
 
     @abstractmethod
     def with_state(self, state: ChannelState, alias: str | None = None) -> Self:

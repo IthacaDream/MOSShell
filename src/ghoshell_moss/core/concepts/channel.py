@@ -75,6 +75,7 @@ class ChannelMeta(BaseModel):
     commands: list[CommandMeta] = Field(default_factory=list, description="The list of commands.")
     states: dict[str, str] = Field(default_factory=dict, description="The states of the channel.")
     current_state: str = Field(default="", description="The current state of the channel.")
+    modules: list[str] = Field(default_factory=list, description="Permanent capability module names (for debug).")
     proxy: list[str] = Field(default_factory=list, description="the proxy children names")
 
     # about instructions / context messages

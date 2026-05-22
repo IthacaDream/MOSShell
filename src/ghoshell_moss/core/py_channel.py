@@ -30,6 +30,7 @@ from ghoshell_moss.core.blueprint.channel_builder import (
     LifecycleFunction,
     StringType,
 )
+from ghoshell_moss.core.blueprint.states_channel import ChannelModule
 import re
 
 __all__ = ["PyChannel", "StateChannelRuntime", "PyChannelBuilder", "BaseStateChannel"]
@@ -310,6 +311,7 @@ class BaseStateChannel(StatefulChannel):
         self._uid = uid or uuid()
         self._main: ChannelState = main
         self._states: dict[str, ChannelState] = {}
+        self._modules: dict[str, ChannelModule] = {}
 
     def main_state(self) -> ChannelState:
         return self._main
@@ -323,9 +325,19 @@ class BaseStateChannel(StatefulChannel):
         return self._states
 
     def with_state(self, state: ChannelState, alias: str | None = None) -> Self:
+        """注册为可切换的模式。同一时刻只有一个 state 激活，通过 switch_state() 切换。"""
         name = alias or state.name()
         self._states[name] = state
         return self
+
+    def with_module(self, module: ChannelModule) -> Self:
+        """注册为永久能力模块。所有 module 同时激活、累积叠加 — 与 with_state() 的排他切换正交。"""
+        self._modules[module.name()] = module
+        return self
+
+    def modules(self) -> dict[str, ChannelModule]:
+        """返回所有已注册的永久能力模块。"""
+        return self._modules
 
     def children(self) -> dict[_ChannelName, Channel]:
         return self._main.get_children()
@@ -402,6 +414,7 @@ class StateChannelRuntime(AbsChannelTreeRuntime[StatefulChannel]):
 
         self._main_state = channel.main_state()
         self._dynamic_states = channel.states()
+        self._modules: dict[str, ChannelModule] = channel.modules()
         self._static_meta_cache: Optional[ChannelMeta] = None
         self._current_state: ChannelState | None = None
         self._current_state_name: str | None = None
@@ -533,6 +546,7 @@ class StateChannelRuntime(AbsChannelTreeRuntime[StatefulChannel]):
                 description=description,
                 states=states_data,
                 current_state=self._current_state_name or '',
+                modules=list(self._modules.keys()),
                 context=new_context_messages,
                 instruction=self._on_startup_instruction,
             )
@@ -554,6 +568,11 @@ class StateChannelRuntime(AbsChannelTreeRuntime[StatefulChannel]):
 
     async def _get_context_messages(self) -> list[Message]:
         funcs = [self._main_state.get_context_messages()]
+        if len(self._modules) > 0:
+            for module in self._modules.values():
+                funcs.append(module.get_context_messages())
+        # TODO: 考虑用 XML tag 包裹每个 module 的 context messages，
+        # 避免自由合并产生的割裂感（模型不知道哪些内容来自哪个模块）。
         if current_state := self._get_current_state():
             funcs.append(current_state.get_context_messages())
         result = []
@@ -612,6 +631,13 @@ class StateChannelRuntime(AbsChannelTreeRuntime[StatefulChannel]):
         if len(self._dynamic_states) > 0:
             commands[self._switch_state_command.name()] = self._switch_state_command
 
+        # modules — 永久能力模块，累积叠加。main_state 的命令优先。
+        if len(self._modules) > 0:
+            for module in self._modules.values():
+                for name, command in module.own_commands().items():
+                    if name not in commands:
+                        commands[name] = command
+
         if self._current_state is not None:
             for name, command in self._current_state.own_commands().items():
                 if name not in commands:
@@ -653,6 +679,11 @@ class StateChannelRuntime(AbsChannelTreeRuntime[StatefulChannel]):
         command = self._main_state.get_own_command(name)
         if command is not None:
             return command
+        if len(self._modules) > 0:
+            for module in self._modules.values():
+                cmd = module.own_commands().get(name)
+                if cmd is not None:
+                    return cmd
         if self._current_state is None:
             return None
         return self._current_state.get_own_command(name)
@@ -687,10 +718,19 @@ class StateChannelRuntime(AbsChannelTreeRuntime[StatefulChannel]):
         main_state = self._main_state
         await main_state.on_startup()
         self._on_startup_instruction = await main_state.get_instruction()
+
+        # 启动所有永久能力模块。
+        for module in self._modules.values():
+            await module.on_startup()
+
         if '' in self._dynamic_states:
             await self.switch_state('')
 
     async def on_close(self) -> None:
+        # 先关闭 current_state，再关闭 module，最后关闭 main。
+        await self.stop_current_state()
+        for module in self._modules.values():
+            await module.on_close()
         await self._main_state.on_close()
 
     def prepare_container(self, container: IoCContainer) -> IoCContainer:

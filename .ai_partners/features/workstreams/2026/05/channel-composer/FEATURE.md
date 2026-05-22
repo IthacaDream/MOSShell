@@ -1,13 +1,14 @@
 ---
-title: Channel Composer — 生命周期感知的模块化 Channel 集成机制
+title: Channel Module — 生命周期感知的模块化 Channel 集成机制
 status: in-progress
 priority: P1
 created: 2026-05-22
-updated: 2026-05-22
+updated: 2026-05-23
 depends: []
 milestone:
 description: >-
-  Channel 树体系缺失的第 4 层：将独立模块以可探测的方式累积叠加到 channel，正交于 bind（无状态）和 state（排他）。
+  Channel 树体系缺失的能力层：通过 ChannelModule Protocol + BaseStateChannel.with_module()
+  实现累积叠加，与 with_state（排他）共享 ChannelState 基础设施但语义正交。
 ---
 
 # Channel Composer
@@ -61,17 +62,17 @@ Channel 五层管理体系中**第 4 层（Composer）的缺失**：
 
 ## Key Decisions
 
-### K1: Composer 与 State 正交，不趋同
+### K1: ChannelState 就是 ChannelModule 的基础实现
 
-**决策**: Composer 是独立 primitive，不与 ChannelState 合并。
+**决策**: 不新建 ABC。用 `ChannelModule` Protocol 定义能力模块的接口契约，`ChannelState`（和 `PyChannelBuilder`）自动满足。
 
-**理由**: 基数差异是根本语义差异，不是实现细节：
-- State = 排他选择（同一时刻只有一个 current_state），需要 switch、task 取消、状态转换
-- Composer = 累积叠加（多个 composer 同时生效），不需要排他语义
+**理由**: 人类工程师指出 ChannelState 设计之初就已中立化，自身就是可横切的能力单元。
+- `ChannelModule` 是 Protocol — 结构子类型，零继承负担
+- `PyChannelBuilder` 不需改一行代码就已满足协议
+- 类型系统参与认知分离：`with_state(state: ChannelState)` vs `with_module(module: ChannelModule)` 签名本身就表达语义差异
 
-强行合并会让 State 的复杂度污染 compose 场景。实现层可共享基础设施 — `_own_commands()` 遍历 main + composers + current_state 的模式是自然的。
-
-**被拒绝**: 将 Composer 实现为 ChannelState 的 "non-exclusive 模式"。State 的 children、virtual children、独立 running task 对 composer 都是不必要的负担。
+**被拒绝**: 新建 `ChannelComposer` ABC。多余的抽象，ChannelState 已经拥有了 Composer 需要的全部要素。
+实现时发现 `compose(builder)` 方法本质上在重做 Builder 已有的注册逻辑 — 纯声明式 Protocol 更干净。
 
 ### K2: Composer 不是 Builder 语法糖
 
@@ -103,81 +104,57 @@ Channel 五层管理体系中**第 4 层（Composer）的缺失**：
 
 ## Implementation Notes
 
-### API 草图
+### 三个单词，三个目的（认知模型约束）
+
+Channel 的组合方式归约为三个问题：
+
+| 方法 | 回答的问题 | 语义 | 基数 |
+|------|-----------|------|------|
+| `import_channels` | 我是**什么结构**？ | 树节点 mount | N — 纵向层级 |
+| `with_state` | 我**处于什么模式**？ | 排他切换 | 1 — 横向身份 |
+| `with_module` | 我**拥有什么能力**？ | 累积叠加 | N — 横向能力 |
+
+Virtual channels 归入 tree 层 — 它们是动态 tree 管理，不是独立维度。
+
+### API
 
 ```python
-class ChannelComposer(ABC):
-    """生命周期感知的模块化 Channel 补丁"""
-
-    @abstractmethod
+# channel_builder.py — Protocol，不是 ABC
+@runtime_checkable
+class ChannelModule(Protocol):
     def name(self) -> str: ...
-
-    @abstractmethod
-    def description(self) -> str: ...
-
-    @abstractmethod
-    def compose(self, builder: Builder) -> None:
-        """注册 commands、lifecycle hooks、instruction 等到 builder"""
-        pass
-
-    # 响应式生命周期钩子 — 由宿主 channel 的对应生命周期触发
+    def own_commands(self) -> dict[str, Command]: ...
+    # 以下全可选
     async def on_startup(self) -> None: ...
     async def on_close(self) -> None: ...
-
-    # 可选的可探测性接口
     async def get_instruction(self) -> str: ...
     async def get_context_messages(self) -> list[Message]: ...
+
+# BaseStateChannel / PyChannel — 两个新方法
+class BaseStateChannel(StatefulChannel):
+    def with_module(self, module: ChannelModule) -> Self:
+        """注册为永久能力模块。所有 module 同时激活，累积叠加。"""
+    def modules(self) -> dict[str, ChannelModule]: ...
 ```
 
-Builder 入口：
-
-```python
-class Builder(ABC):
-    def compose(self, composer: ChannelComposer) -> Self: ...
-    def decompose(self, name: str) -> None: ...
-    def composers(self) -> dict[str, ChannelComposer]: ...
-```
+PyChannelBuilder 自动满足 ChannelModule Protocol — 不需改一行代码。
 
 ### StateChannelRuntime 集成锚点
 
-`StateChannelRuntime` 需要在以下位置集成 composers 列表遍历：
+五处集成（`_modules` 遍历与 `_states` 遍历模式一致）：
 
-- `_own_commands()` — main → **composers** → current_state 优先级叠加
-- `_get_own_command()` — 查询优先级: main → composer → current_state
-- `on_startup()` — main.on_startup 后、current_state 前，依次调所有 composer.on_startup
-- `on_close()` — 当前只调 main_state.on_close()，需加 composer.on_close() 遍历（以及 current_state.on_close() — 现实现疑似遗漏）
-- `_get_context_messages()` / `_generate_own_metas()` — 合并 composer 的 context 和 instruction
-- `on_idle()` / `on_running()` — composer 如需钩子可加，但 K3 建议保持轻量
+- `_own_commands()` — main → **modules** → current_state 优先级叠加（空 modules 时 `if len()` 快速路径）
+- `on_startup()` — main.on_startup → **modules*.on_startup** → auto-switch
+- `on_close()` — **modules*.on_close** → current_state.on_close → main.on_close
+- `_get_context_messages()` — main + modules* + current 合并
+- `_generate_own_metas()` — meta.composers 记录 module name 列表（for debug only）
 
-### Speech 场景的应用
-
-从：
+### ChannelMeta 扩展
 
 ```python
-# 现在: shell 硬编码 TTS 感知
-if isinstance(self._speech, TTSSpeech):
-    for command in self._speech.commands():
-        self.main_channel.build.add_command(command, override=False)
+composers: list[str] = Field(default_factory=list)
+# 仅 name 列表，for debug。不做语义化（那是 state 的事）。
 ```
-
-变为：
-
-```python
-# 目标: composer 模块化集成
-self.main_channel.build.compose(BaselineSpeechComposer(self._speech))
-if isinstance(self._speech, TTSSpeech):
-    self.main_channel.build.compose(TTSCommandsComposer(self._speech))
-```
-
-进一步方向：让 `Speech` 接口提供 `create_composers() -> list[ChannelComposer]`，shell 遍历 compose，消除 isinstance。但可后置。
-
-### 旁注：MockSpeech 内存泄漏
-
-`MockSpeech._outputs` 永不清理。需要 `NullSpeech`：`new_stream()` 返回 `/dev/null` stream，`feed()` 直接丢弃。以及 `BroadcastSpeech` 锚点（topic/session.stream 广播），暂不实现，在 contracts 留抽象即可。
-
-### 旁注：states_channel 测试债务
-
-`StateChannelRuntime` 的核心逻辑（`on_close` 对 current_state 的处理、`switch_state` 边界条件）未充分测试。Composer 实现前应对现有 state 机制做固熵。独立 workstream。
 
 ## Exploration Path
 

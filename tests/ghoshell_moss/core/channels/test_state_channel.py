@@ -652,12 +652,7 @@ async def test_auto_switch_empty_string_state_on_startup():
 
 @pytest.mark.asyncio
 async def test_current_state_on_close_called_on_channel_shutdown():
-    """channel 关闭时, current_state.on_close 是否被调用.
-
-    FIXME: 当前实现 StateChannelRuntime.on_close() 只调用了 main_state.on_close(),
-    没有调用 current_state.on_close(). 这个测试标记了该行为.
-    如果未来修复, 此测试的断言需要更新.
-    """
+    """channel 关闭时, current_state.on_close 被调用."""
     chan = PyChannel(name="main")
     work_st = chan.new_state("work", "working")
     current_closed = []
@@ -670,8 +665,8 @@ async def test_current_state_on_close_called_on_channel_shutdown():
         await runtime.switch_state("work")
         # current_state 处于激活状态
 
-    # channel 关闭后, current_state.on_close 未被调用 — 这是已知 bug
-    assert len(current_closed) == 0  # FIXME: 应为 1, 当前实现未调 current_state.on_close()
+    # channel 关闭后, current_state.on_close 被调用
+    assert len(current_closed) == 1
 
 
 # ============================================================
@@ -719,3 +714,308 @@ async def test_state_bootstrap_called_for_main_state():
         foo = runtime.container.get(Foo)
         assert foo is not None
         assert foo.val == "bar"
+
+
+# ============================================================
+# ChannelModule Protocol & with_module 测试
+# ============================================================
+
+
+def test_py_channel_builder_satisfies_module_protocol():
+    """PyChannelBuilder 自动满足 ChannelModule Protocol."""
+    from ghoshell_moss.core.blueprint.states_channel import ChannelModule
+    builder = PyChannelBuilder(name="test")
+    assert isinstance(builder, ChannelModule)
+
+
+@pytest.mark.asyncio
+async def test_with_module_registration():
+    """with_module 注册 module 到 channel."""
+    chan = PyChannel(name="main")
+    module = PyChannelBuilder(name="speech")
+
+    @module.command()
+    async def speak(text: str) -> str:
+        return f"said: {text}"
+
+    chan.with_module(module)
+    assert "speech" in chan.modules()
+    assert chan.modules()["speech"] is module
+
+
+@pytest.mark.asyncio
+async def test_module_commands_appear_on_runtime():
+    """module 的命令通过 runtime 可见可执行."""
+    chan = PyChannel(name="main")
+    mod = PyChannelBuilder(name="tts")
+
+    @mod.command()
+    async def say(text: str) -> str:
+        return f"said: {text}"
+
+    chan.with_module(mod)
+    async with chan.bootstrap() as runtime:
+        cmd = runtime.get_command("say")
+        assert cmd is not None
+        result = await cmd("hello")
+        assert result == "said: hello"
+
+
+@pytest.mark.asyncio
+async def test_module_commands_coexist_with_main():
+    """module 命令和 main_state 命令同时存在."""
+    chan = PyChannel(name="main")
+
+    @chan.build.command()
+    async def main_cmd() -> str:
+        return "main"
+
+    mod = PyChannelBuilder(name="tts")
+
+    @mod.command()
+    async def tts_cmd() -> str:
+        return "tts"
+
+    chan.with_module(mod)
+    async with chan.bootstrap() as runtime:
+        assert await runtime.get_command("main_cmd")() == "main"
+        assert await runtime.get_command("tts_cmd")() == "tts"
+
+
+@pytest.mark.asyncio
+async def test_multiple_modules_cumulative():
+    """多个 module 同时激活，所有命令都可用."""
+    chan = PyChannel(name="main")
+    mod_a = PyChannelBuilder(name="mod_a")
+
+    @mod_a.command()
+    async def cmd_a() -> str:
+        return "a"
+
+    mod_b = PyChannelBuilder(name="mod_b")
+
+    @mod_b.command()
+    async def cmd_b() -> str:
+        return "b"
+
+    chan.with_module(mod_a).with_module(mod_b)
+    async with chan.bootstrap() as runtime:
+        assert await runtime.get_command("cmd_a")() == "a"
+        assert await runtime.get_command("cmd_b")() == "b"
+
+
+@pytest.mark.asyncio
+async def test_module_command_priority_main_wins():
+    """module 和 main_state 同名，main_state 优先。"""
+    chan = PyChannel(name="main")
+
+    @chan.build.command()
+    async def foo() -> str:
+        return "main"
+
+    mod = PyChannelBuilder(name="mod")
+
+    @mod.command()
+    async def foo() -> str:
+        return "module"
+
+    chan.with_module(mod)
+    async with chan.bootstrap() as runtime:
+        assert await runtime.get_command("foo")() == "main"
+
+
+@pytest.mark.asyncio
+async def test_module_command_priority_over_current_state():
+    """module 命令优先于 current_state 同名命令。"""
+    chan = PyChannel(name="main")
+
+    mod = PyChannelBuilder(name="base_tts")
+
+    @mod.command()
+    async def say() -> str:
+        return "module"
+
+    work_st = chan.new_state("work", "working")
+
+    @work_st.command()
+    async def say() -> str:
+        return "state"
+
+    chan.with_module(mod)
+    async with chan.bootstrap() as runtime:
+        await runtime.switch_state("work")
+        assert await runtime.get_command("say")() == "module"
+
+
+@pytest.mark.asyncio
+async def test_module_lifecycle_on_startup():
+    """module.on_startup() 在 channel bootstrap 时被调用。"""
+    chan = PyChannel(name="main")
+    mod = PyChannelBuilder(name="speech")
+    started = []
+
+    @mod.startup
+    async def on_start() -> None:
+        started.append(1)
+
+    chan.with_module(mod)
+    assert len(started) == 0
+    async with chan.bootstrap() as runtime:
+        # on_startup 已在 bootstrap 时激活
+        pass
+    assert len(started) == 1
+
+
+@pytest.mark.asyncio
+async def test_module_lifecycle_on_close():
+    """module.on_close() 在 channel 关闭时被调用。"""
+    chan = PyChannel(name="main")
+    mod = PyChannelBuilder(name="speech")
+    closed = []
+
+    @mod.close
+    async def on_close_fn() -> None:
+        closed.append(1)
+
+    chan.with_module(mod)
+    assert len(closed) == 0
+    async with chan.bootstrap() as runtime:
+        pass
+    assert len(closed) == 1
+
+
+@pytest.mark.asyncio
+async def test_module_context_messages_merged():
+    """module 的 context messages 被合并到 meta 中。"""
+    chan = PyChannel(name="main")
+    mod = PyChannelBuilder(name="sensor")
+
+    @chan.build.context_messages
+    async def main_ctx() -> list[Message]:
+        return [Message.new().with_content("main")]
+
+    @mod.context_messages
+    async def mod_ctx() -> list[Message]:
+        return [Message.new().with_content("sensor-data")]
+
+    chan.with_module(mod)
+    async with chan.bootstrap() as runtime:
+        await runtime.refresh_metas()
+        meta = runtime.self_meta()
+        assert len(meta.context) >= 2
+        texts = []
+        for msg in meta.context:
+            for c in msg.contents:
+                from ghoshell_moss.message import Text
+                texts.append(Text.from_content(c).text)
+        assert "main" in texts
+        assert "sensor-data" in texts
+
+
+@pytest.mark.asyncio
+async def test_channel_meta_includes_modules():
+    """ChannelMeta.modules 记录 module name 列表（for debug）。"""
+    chan = PyChannel(name="main")
+    chan.with_module(PyChannelBuilder(name="mod_a"))
+    chan.with_module(PyChannelBuilder(name="mod_b"))
+
+    async with chan.bootstrap() as runtime:
+        await runtime.refresh_metas()
+        meta = runtime.self_meta()
+        assert "mod_a" in meta.modules
+        assert "mod_b" in meta.modules
+
+
+@pytest.mark.asyncio
+async def test_module_on_base_state_channel():
+    """BaseStateChannel 也支持 with_module。"""
+    main_st = PyChannelBuilder(name="root")
+    chan = BaseStateChannel(main_st)
+    mod = PyChannelBuilder(name="extra")
+
+    @mod.command()
+    async def extra_cmd() -> str:
+        return "extra"
+
+    chan.with_module(mod)
+    async with chan.bootstrap() as runtime:
+        assert await runtime.get_command("extra_cmd")() == "extra"
+
+
+@pytest.mark.asyncio
+async def test_module_state_independent():
+    """module 不受 state 切换影响（module 始终激活）。"""
+    chan = PyChannel(name="main")
+    mod = PyChannelBuilder(name="core")
+
+    @mod.command()
+    async def core_cmd() -> str:
+        return "core"
+
+    chan.with_module(mod)
+    work_st = chan.new_state("work", "working")
+
+    @work_st.command()
+    async def work_cmd() -> str:
+        return "work"
+
+    async with chan.bootstrap() as runtime:
+        # module 命令在无 state 时可用
+        assert await runtime.get_command("core_cmd")() == "core"
+
+        # 切换到 state 后 module 命令仍然可用
+        await runtime.switch_state("work")
+        assert await runtime.get_command("core_cmd")() == "core"
+        assert await runtime.get_command("work_cmd")() == "work"
+
+        # 停止 state 后 module 命令仍然可用
+        await runtime.stop_current_state()
+        assert await runtime.get_command("core_cmd")() == "core"
+        assert runtime.get_command("work_cmd") is None
+
+
+@pytest.mark.asyncio
+async def test_protocol_duck_typing():
+    """任意满足接口的对象都是 ChannelModule，不需要继承。"""
+    from ghoshell_moss.core.concepts.command import PyCommand, Command
+
+    class CustomModule:
+        def __init__(self):
+            self._started = False
+
+        def name(self) -> str:
+            return "custom"
+
+        def own_commands(self) -> dict[str, Command]:
+            async def foo() -> str:
+                return "custom-foo"
+            return {"foo": PyCommand(func=foo)}
+
+        async def on_startup(self) -> None:
+            self._started = True
+
+    mod = CustomModule()
+    # 验证协议方法存在
+    assert hasattr(mod, 'name')
+    assert hasattr(mod, 'own_commands')
+    assert hasattr(mod, 'on_startup')
+
+    chan = PyChannel(name="main")
+    chan.with_module(mod)
+    async with chan.bootstrap() as runtime:
+        cmd = runtime.get_command("foo")
+        assert cmd is not None
+        assert await cmd() == "custom-foo"
+    assert mod._started
+
+
+@pytest.mark.asyncio
+async def test_module_no_commands():
+    """module 没有命令时也是有效的。"""
+    chan = PyChannel(name="main")
+    mod = PyChannelBuilder(name="empty")
+    chan.with_module(mod)
+
+    async with chan.bootstrap() as runtime:
+        meta = runtime.self_meta()
+        assert "empty" in meta.modules
