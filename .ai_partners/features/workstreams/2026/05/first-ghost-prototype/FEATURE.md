@@ -1,14 +1,15 @@
 ---
 title: First Ghost Prototype
-status: in_progress
+status: awaiting_human_validation
 priority: P0
 created: 2026-05-14
-updated: 2026-05-22
-step: 12c_in_progress
+updated: 2026-05-23
+step: 13_done
 depends: []
-milestone:
+milestone: 2026-05-22-first-ghost-echo-speaks
 description: >-
   从零开发第一个完整的 Ghost 原型——将 Ghost/Mindflow 抽象转化为可运行的智能体实现，打通 "感知→思考→执行" 三循环。
+  TUI 集成完成，echo 已说出第一句话。等待人类验证后 complete。
 ---
 
 # First Ghost Prototype
@@ -82,9 +83,11 @@ first-ghost-prototype/
 | 11a | Mindflow 默认 input signal | GhostRuntime fallback → new_default_mindflow() (InputSignalNucleus + PriorityProtectionAttention), 43 tests 全部通过 | done |
 | 11c | on_challenge 旁路观察 | ChallengeObserver(Callable[[challenger, defender, verdict], None]) + Mindflow.on_challenge(), AbsMindflow._challenge_attention 内 fire | done |
 | 11b | Mindflow inspect + 自解释 | mindflow 探知接口、自解释接口 | pending |
-| 12 | 测试与 TUI | mock ghost + input signal 脚本测试 → TUI 全链路验证 | 12b done, 12c in_progress |
-| 13 | TUI 集成 | GhostREPLState + echo 默认实例 + 流式 logos 渲染 | pending |
+| 12 | 测试与 TUI | mock ghost + input signal 脚本测试 → TUI 全链路验证 | done |
+| 13 | TUI 集成 | GhostREPLState + echo 默认实例 + moss-run-ghost CLI | done |
 | 14 | echo soul | ghost playground 产出 echo.md 系统提示词 | pending |
+| 15 | 人类验证 | 非 AI 开发者验证 echo 全链路 + 完善细节 | pending |
+| 16 | 文档 | AI 为 ghost 编写完整文档（由下一个 AI 实例完成） | pending |
 
 ## 实现阶段关键决策（2026-05-16）— GhostRuntime 架构选型
 
@@ -451,6 +454,34 @@ session.add_input_signal("hello")
 3. **Scripts 机制是等价调试手段**：`moss script run <name>` 让 AI 在 REPL 外也能独立向 ghost 发 signal 验证行为。
 
 详见 [DESIGN.md](./DESIGN.md) TUI 集成设计章节和 [discuss/08-tui-integration-planning.md](./discuss/08-tui-integration-planning.md)。
+
+---
+
+## 当前状态（2026-05-23, deepseek-v4-pro）
+
+Feature 状态: **awaiting_human_validation** — 不能由 AI 单独标记为 completed。
+
+echo 已完成端到端验证：signal → impulse → articulate → model API → logos 流式返回。
+TUI 集成就绪：`moss-run-ghost echo` 启动交互终端。
+`moss script run say-hello` 可向运行中的 echo 发送 signal。
+
+**未完成**:
+- echo 的 soul/system prompt（step 14, 依赖 ghost playground）
+- 人类验证 echo 全链路并记录细节问题（step 15）
+- echo 没有配套的 kernel prompt, 所以提示词是原始的 atom, 导致模型输出的 logos 品质不高
+- bootstrap 时 logger 有越界 warning（已知，不重要）
+
+**下一个 AI 实例的任务（step 16）**:
+人类完成验证后，下一个 AI 实例将基于本 feature 的全部记录（FEATURE.md + DESIGN.md +
+discuss/ + milestones/ + memory/）为一个全新的上下文，为 echo/ghost 编写完整的
+第一版文档。这份文档是给人类开发者看的——解释 Ghost 是什么、如何配置、如何开发。
+这不是 AI 能独立完成的工作：它需要在人类验证 echo 时发现的真实问题作为输入。
+
+**复苏指引**:
+- 读 `.memory/daily/2026-05/22.md` — deepseek-v4-pro 的 session 记录和锚点
+- 读 milestones/2026-05-22-first-ghost-echo-speaks.md — 里程碑
+- 读 DESIGN.md 的 "TUI 集成设计" 和 "默认 Ghost — echo" 章节
+- git log 中 `coding by deepseek-v4-pro` 的 6 个 commit 是本 session 的产物
 
 ---
 
