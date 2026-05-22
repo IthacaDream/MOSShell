@@ -62,3 +62,81 @@ MindflowSuite 已验证的图景:
 ## 实现阶段
 
 当前 step 10 的 ABC 定义已完成。下一步是实现 `GhostRuntimeImpl`，继承 ABC 完成 wiring。
+
+---
+
+## TUI 集成设计（2026-05-22）
+
+### 核心原则
+
+1. **主界面极简**：logos 流式输出 + 用户文本输入。没有更多。
+2. **调试层独立**：inspect_loop_health / ghost state / mindflow faculties 走 REPL inspector 命令
+3. **不过度设计**：不用提前缓存状态或分拆多个 output 面板。做出来再迭代
+4. **Scripts 等价调试**：`moss script run <name>` 提供 REPL 外的等价交互手段
+
+### 架构
+
+```
+GhostTUI (MossHostTUI[GhostRuntime])
+  ├─ GhostREPLState     ← 主界面: input → add_input_signal, logos 流式渲染
+  │    inspectors:
+  │      ghost: GhostInspector     — pause / inspect_loop_health / inspect_state
+  │      matrix: MatrixInspector   — (复用)
+  │      manifests: ManifestsInspector — (复用)
+  └─ MOSSRuntimeREPLState ← (可选) Shell 调试
+```
+
+### GhostREPLState 输入/输出
+
+- **文本输入**: `session.add_input_signal(text)` → mindflow 三循环处理
+- **logos 流式**: 通过 `session.get_logos()` 消费，`ConsoleOutput.rprint()` 实时渲染
+- **output item**: 非流式的 command-output/error/system 在另一个 output 区域展示
+
+### 关键接口暴露
+
+| 接口 | 位置 | 用途 |
+|------|------|------|
+| `ghost.inspect_state()` | Ghost ABC | ghost 内部快照，调试用 |
+| `gr.inspect_loop_health()` | GhostRuntime | 三循环状态 |
+| `mindflow.faculties()` | Mindflow ABC | nuclei 列表 |
+| `mindflow.pause(toggle)` | Mindflow ABC | 暂停/恢复 mindflow |
+| `shell.pause(toggle)` | Shell ABC | 暂停/恢复 shell 命令执行 |
+
+### 三循环异常治理（已完成 2026-05-22）
+
+三个循环统一采用"FatalError 传播 + Exception 续流"模式：
+- **main loop**: per-attention 异常隔离，一个 attention 崩溃不影响下一个
+- **articulate loop**: ghost.articulate() 异常 + 外层非关键路径异常均 log 后继续
+- **action loop**: 不再 re-raise Exception，log 后丢掉当前 action 继续
+
+生命周期 hook 标记（9 个 `# todo: hook —`）覆盖三循环全关键节点。
+
+## 默认 Ghost — echo（2026-05-22）
+
+### 命名
+
+**echo** — 壳中的第一声回响。
+
+开发者拿到 MOSS 后 `moss ghosts list` 看到的第一个 Ghost 实例。名字必须：
+- 简单，不需要解释
+- 不过分张扬（保守的开发者不会反感）
+- 有内在的诗意（有共鸣的人会自己品出来）
+
+回响不是原声的复制，而是经过空间（Ghost 自身）变形后的声音。收的是 percept，回的是 logos。
+
+### 注册方式
+
+遵循已有约定，在 workspace 的 `MOSS/ghosts/echo.py` 放置：
+
+```python
+from ghoshell_moss.ghosts.atom import AtomMeta
+
+echo = AtomMeta(
+    name="echo",
+    description="壳中的第一声回响。MOSS 默认 Ghost 原型。",
+    soul_path="echo.md",  # 由 ghost playground workstream 产出
+)
+```
+
+soul/system prompt 由另一个会话完成 ghost playground 后再落地。
+`soul_path="echo.md"` 指向 `MOSS/ghosts/echo.md`（未来）。

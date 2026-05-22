@@ -2,13 +2,14 @@ import contextlib
 import janus
 from typing_extensions import Self
 
-from ghoshell_moss.core.blueprint.host import GhostRuntime, MossRuntime, LoopHealth
+from ghoshell_moss.core.blueprint.host import GhostRuntime, MossRuntime, LoopHealth, GhostPlayground
 from ghoshell_moss.core.blueprint.ghost import Ghost, GhostMeta
 from ghoshell_moss.core.blueprint.mindflow import Mindflow, Articulator, Action, Signal
 from ghoshell_moss.core.concepts.errors import FatalError
 from ghoshell_moss.core.concepts.errors import InterpretError
 from ghoshell_moss.core.concepts.command import CommandTask
 from ghoshell_moss.message import Message
+from .ghost_playground import GhostPlaygroundProvider
 
 __all__ = ["GhostRuntimeImpl"]
 
@@ -78,19 +79,26 @@ class GhostRuntimeImpl(GhostRuntime):
             raise RuntimeError("GhostRuntime already started")
 
         container = self._moss_runtime.container
-        logger = self._moss_runtime.matrix.logger
 
         # 1. 预注入 ghost providers → container
-        logger.debug("%s step 1/5: registering ghost providers", self._log_prefix)
+        steps = [("%s step 1/5: registering ghost providers", self._log_prefix)]
         for provider in self._ghost_meta.providers():
             container.register(provider)
+        # GhostPlayground: manifests 可预先声明, 未声明则补充默认实现.
+        # 注册必须在 Matrix 启动前 (step 2), 否则依赖方 fetch 时可能尚未绑定.
+        if not container.bound(GhostPlayground):
+            steps.append(("%s step 1/5: registering default GhostPlayground provider", self._log_prefix))
+            container.register(GhostPlaygroundProvider(ghost_name=self._ghost_meta.name()))
         # 校验 IoC 容器中注册依赖是否能满足 Ghost 的需要.
         self._ghost_meta.contracts().validate(container)
 
         # 2. MossRuntime.__aenter__
-        logger.debug("%s step 2/5: entering MossRuntime", self._log_prefix)
+        steps.append(("%s step 2/5: entering MossRuntime", self._log_prefix))
         await self._async_exit_stack.__aenter__()
         await self._async_exit_stack.enter_async_context(self._moss_runtime)
+        logger = self._moss_runtime.matrix.logger
+        for step in steps:
+            logger.debug(*step)
 
         # 3. GhostMeta.factory(container) → ghost
         logger.debug("%s step 3/5: building ghost instance", self._log_prefix)

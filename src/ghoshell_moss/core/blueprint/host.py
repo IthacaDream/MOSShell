@@ -12,13 +12,13 @@ from ghoshell_moss.core.blueprint.matrix import Matrix, Cell, Mode
 from ghoshell_moss.core.blueprint.session import Session
 from ghoshell_moss.core.blueprint.mindflow import Mindflow
 from ghoshell_moss.message import Message
-from ghoshell_moss.contracts import SystemPrompter, LoggerItf
+from ghoshell_moss.contracts import SystemPrompter, LoggerItf, Storage
 from .ghost import Ghost, GhostMeta
 from .app import AppStore
 
 __all__ = [
     'MossRuntime', 'MossHost', 'Mode', 'FractalHub', 'FractalCellProvider',
-    'MossSystemPrompter', 'GhostRuntime', 'LoopHealth', 'LoopStatus',
+    'MossSystemPrompter', 'GhostRuntime', 'GhostPlayground', 'LoopHealth', 'LoopStatus',
 ]
 
 
@@ -667,3 +667,50 @@ class MossHost(ABC):
                     as_cell_name=as_cell_name or '',
                     on_channel_event=on_proxy_event,
                 )
+
+
+class GhostPlayground(ABC):
+    """Ghost 的文件空间集合 — 多级隔离 Storage 的统一入口.
+
+    类似 MossSystemPrompter 的 tree model: 系统约定的 scope slots,
+    命名访问器是对 scope 的薄封装. 不提供反向注册 API —
+    子类 override scopes() 即可追加自定义 scope.
+
+    子功能 (memory, personality, scratchpad) 通过 playground 选择 scope,
+    不再各自 container.fetch(Workspace) 然后拼路径.
+    """
+
+    HOME_SCOPE = "home"
+    SESSION_SCOPE = "session"
+    WORKSPACE_SCOPE = "workspace"
+
+    @abstractmethod
+    def home(self) -> Storage:
+        """ghost 自身持久空间. 按 ghost name 约定路径, 跨 session 存在."""
+        ...
+
+    @abstractmethod
+    def session(self) -> Storage:
+        """session 级存储. session 结束即清理."""
+        ...
+
+    @abstractmethod
+    def workspace(self) -> Storage:
+        """workspace 根. 最大权限."""
+        ...
+
+    def scopes(self) -> dict[str, Storage]:
+        """自解释: 列出所有可用 scope. 子类 override 可追加自定义 scope.
+
+        对位 MossSystemPrompter.flatten() — 使树可自解释.
+        常量 (HOME_SCOPE 等) 标记系统保证存在的 scope.
+        """
+        return {
+            self.HOME_SCOPE: self.home(),
+            self.SESSION_SCOPE: self.session(),
+            self.WORKSPACE_SCOPE: self.workspace(),
+        }
+
+    def default_scope(self) -> Storage:
+        """推荐默认: home 作为主要工作空间. 对位 default_instruction()."""
+        return self.home()
