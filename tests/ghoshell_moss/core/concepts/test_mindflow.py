@@ -32,7 +32,7 @@ def test_signal_to_impulse_conversion():
 
 
 # 2. 测试 Observation 与 Outcome 的缝合 (核心认知流)
-def test_observation_outcome_stitching():
+def test_moment_outcome_stitching():
     # 模拟第一轮 Observation
     obs = Moment()
     obs.percepts = [Message.new().with_content("Input 1")]

@@ -100,16 +100,16 @@ class AttentionContext:
             last.stop_reason = self._stop_reason
         return last
 
-    def to_new_observation(self) -> Moment:
+    def new_moment(self) -> Moment:
         last = self.stop_at_outcome()
         return last.new_moment()
 
     def next_frame(self) -> Self:
         """继承创建下一个 Ctx. """
-        observation = self.to_new_observation()
+        moment = self.new_moment()
         return AttentionContext(
             attention_id=self.attention_id,
-            moment=observation,
+            moment=moment,
             aborted_event=self._aborted_event,
             flags=self._flags,
             logger=self.logger,
@@ -173,10 +173,8 @@ class BaseArticulator(Articulator):
             *,
             ctx: AttentionContext,
             exited_event: ThreadSafeEvent,
-            on_start_logos: str,
     ):
         self._ctx = ctx
-        self._on_start_logos = on_start_logos
         self._task_group = BaseTaskGroup()
         self._exited_event = exited_event
         self._event_loop: asyncio.AbstractEventLoop | None = None
@@ -205,9 +203,6 @@ class BaseArticulator(Articulator):
         self._event_loop = asyncio.get_running_loop()
         # 启动一个检查, 确保 Attention 退出时可以影响到这里.
         self._task_group.add_task(self._event_loop.create_task(self._wait_aborted_and_cancel()))
-        # 实际上底层是空的.
-        if not self._ctx.is_aborted() and self._on_start_logos:
-            self._ctx.logos_queue.sync_q.put_nowait(self._on_start_logos)
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
@@ -446,7 +441,11 @@ class AbsAttention(Attention):
         # ctx 会持续存在.
         self._ctx = AttentionContext(
             attention_id=self._init_impulse.id,
-            moment=self._previous_reaction.new_moment(),
+            moment=self._previous_reaction.new_moment(
+                reflex_logos=impulse.reflex_logos,
+                percepts=impulse.messages,
+                reaction_instruction=impulse.reaction_instruction,
+            ),
             aborted_event=self._aborted_event,
             logger=self._logger,
             flags=self._flags,
@@ -563,8 +562,7 @@ class AbsAttention(Attention):
         # 完成第一轮输入的赋值. 其中 mindflow context 应该是通过 context func 更新的.
         observation = self._ctx.moment
         observation.percepts = impulse.messages
-        observation.prompt = impulse.prompt
-        on_start_logos = impulse.on_logos_start
+        observation.reaction_instruction = impulse.reaction_instruction
         while not self.is_aborted():
             # 每次刷新时会更新权重.
             self._escalation_on_active()
@@ -584,9 +582,7 @@ class AbsAttention(Attention):
             articulate = BaseArticulator(
                 ctx=self._ctx,
                 exited_event=self._articulate_stop_event,
-                on_start_logos=on_start_logos,
             )
-            on_start_logos = ''
             action = BaseAction(ctx=self._ctx, exited_event=self._action_stop_event)
 
             # 4. 交给外部执行线程/任务

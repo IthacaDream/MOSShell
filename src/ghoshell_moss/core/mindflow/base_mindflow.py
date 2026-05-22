@@ -7,7 +7,7 @@ import janus
 
 from ghoshell_moss.core.blueprint.mindflow import (
     Mindflow, Attention, Impulse, Nucleus, Signal, Priority, BufferImpulse,
-    Reaction, ChallengeObserver, ChallengeVerdict,
+    Reaction, ChallengeVerdict, MindflowHook,
 )
 from ghoshell_moss.contracts import LoggerItf, get_moss_logger
 from ghoshell_moss.core.helpers import ThreadSafeEvent
@@ -15,9 +15,65 @@ from ghoshell_moss.message import Message
 from .base_attention import BaseAttention
 import asyncio
 import contextlib
+import threading
 
 _SignalName = str
 _NucleusName = str
+
+
+class MindflowHookGroup(MindflowHook):
+
+    def __init__(self, logger: LoggerItf | None = None):
+        self._hooks: dict[str, MindflowHook] = {}
+        self._has_any: bool = False
+        self._logger = logger or get_moss_logger()
+        self._hook_lock = threading.Lock()
+
+    def name(self) -> str:
+        return 'MindflowHookGroup'
+
+    def add_hook(self, hook: MindflowHook):
+        with self._hook_lock:
+            self._hooks[hook.name()] = hook
+        self._has_any = True
+
+    def remove_hook(self, hook: str):
+        with self._hook_lock:
+            if hook in self._hooks:
+                del self._hooks[hook]
+
+    def description(self) -> str:
+        return 'group of mindflow hooks'
+
+    def on_impulse_challenged(
+            self,
+            challenger: Impulse,  # challenger — 发起挑战的 Impulse
+            defender: Impulse | None,  # defender   — 当前占据注意力的 Impulse，None 表示无当前 attention
+            verdict: ChallengeVerdict,  # verdict    — 仲裁结果
+    ) -> None:
+        if not self._has_any:
+            return
+        # todo: 考虑用 functools.wrap 方式包装子 hook.
+        for name, hook in self._hooks.items():
+            try:
+                hook.on_impulse_challenged(challenger, defender, verdict)
+            except Exception as e:
+                self._logger.error(
+                    "MindflowHook %s failed on on_impulse_challenged with exception %r",
+                    name, e
+                )
+
+    def on_error(self, error: Exception) -> None:
+        if not self._has_any:
+            return
+        for name, hook in self._hooks.items():
+            try:
+                hook.on_error(error)
+            except Exception as e:
+                self._logger.error(
+                    "MindflowHook %s failed on on_impulse_challenged with exception %r",
+                    name, e
+                )
 
 
 class AbsMindflow(Mindflow):
@@ -54,7 +110,6 @@ class AbsMindflow(Mindflow):
         self._signal_count: int = 0
         self._has_impulse_event = ThreadSafeEvent()
         self._set_impulse_lock = asyncio.Lock()
-        self._challenge_observer: ChallengeObserver | None = None
 
         # 内部循环检测是否有新的 impulse.
         self._consuming_signal_task: asyncio.Task | None = None
@@ -65,6 +120,7 @@ class AbsMindflow(Mindflow):
             self.with_nucleus(nucleus)
         self._async_exit_stack = contextlib.AsyncExitStack()
         self._event_loop: asyncio.AbstractEventLoop | None = None
+        self._hooks_group: MindflowHookGroup = MindflowHookGroup(self._logger)
 
     @staticmethod
     def _new_signal_queue() -> janus.PriorityQueue[tuple[int, int, Signal]]:
@@ -75,6 +131,15 @@ class AbsMindflow(Mindflow):
 
     def faculties(self) -> dict[str, Nucleus]:
         return self._faculties
+
+    def with_hook(self, hook: MindflowHook) -> Self:
+        self._hooks_group.add_hook(hook)
+        return self
+
+    def remove_hook(self, hook: str | MindflowHook) -> None:
+        if isinstance(hook, MindflowHook):
+            hook = hook.name
+        self._hooks_group.remove_hook(hook)
 
     async def wait_started(self) -> None:
         await self._started_event.wait()
@@ -300,14 +365,7 @@ class AbsMindflow(Mindflow):
             defender: Impulse | None,
             verdict: ChallengeVerdict,
     ) -> None:
-        if self._challenge_observer is not None:
-            try:
-                self._challenge_observer(challenger, defender, verdict)
-            except Exception:
-                self._logger.exception(
-                    "%s challenge observer raised: %r",
-                    self._log_prefix, challenger,
-                )
+        self._hooks_group.on_impulse_challenged(challenger, defender, verdict)
 
     def attention(self) -> Attention | None:
         if self._current_attention is None:
@@ -384,6 +442,7 @@ class AbsMindflow(Mindflow):
                 # maxsize 为 1 的队列.
                 attention = self._pop_new_attention_queue.sync_q.get_nowait()
             self._pop_new_attention_queue.sync_q.put_nowait(self._current_attention)
+
         except janus.AsyncQueueShutDown:
             return None
         # 新 attention 入队.
@@ -424,9 +483,6 @@ class AbsMindflow(Mindflow):
                 # 在这里通知完 suppress.
                 nucleus.suppress(best_impulse)
         return best_impulse
-
-    def on_challenge(self, observer: ChallengeObserver | None) -> None:
-        self._challenge_observer = observer
 
     def pause(self, toggle: bool) -> None:
         if not self.is_running():
@@ -551,6 +607,11 @@ class AbsMindflow(Mindflow):
                     raise
                 except asyncio.TimeoutError:
                     continue
+                except Exception as e:
+                    self._logger.error(
+                        "%s loop attention failed on exception: %r", self._log_prefix, e
+                    )
+                    self._hooks_group.on_error(e)
         finally:
             self._looping_attention = False
 
@@ -679,8 +740,8 @@ class BaseMindflow(AbsMindflow):
 
     def _build_attention(self, impulse: Impulse, inherit_outcome: Reaction) -> Attention:
         return BaseAttention(
-            impulse=impulse,
             previous=inherit_outcome,
+            impulse=impulse,
             logger=self._logger,
             system_floor_strength=0.0,
             source_escalation=1.1,

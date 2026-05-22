@@ -157,9 +157,9 @@ class TestMockArticulator:
         assert art.aborted is None
 
     def test_preset_moment(self):
-        m = Moment(prompt="test prompt")
+        m = Moment(reaction_instruction="test prompt")
         art = _mock_articulator(moment=m)
-        assert art.moment.prompt == "test prompt"
+        assert art.moment.reaction_instruction == "test prompt"
 
     def test_send_nowait_collects(self):
         art = _mock_articulator()
@@ -217,9 +217,9 @@ class TestMockArticulator:
 
     def test_set_moment(self):
         art = _mock_articulator()
-        new_m = Moment(prompt="updated")
+        new_m = Moment(reaction_instruction="updated")
         art.set_moment(new_m)
-        assert art.moment.prompt == "updated"
+        assert art.moment.reaction_instruction == "updated"
 
 
 # ── articulate ──────────────────────────────────────

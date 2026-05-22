@@ -6,7 +6,7 @@ collects all challenge verdicts, output items, and logos stream deltas.
 import asyncio
 from ghoshell_moss.host import Host
 from ghoshell_moss.ghosts.mock import MockGhostMeta, MockGhost
-from ghoshell_moss.core.blueprint.mindflow import Impulse
+from ghoshell_moss.core.blueprint.mindflow import Impulse, MindflowHook
 from ghoshell_moss.core.speech.mock import MockSpeech
 from ghoshell_moss.contracts.speech import Speech
 from ghoshell_moss.core.helpers import ThreadSafeEvent
@@ -28,13 +28,14 @@ shell_has_any_task = ThreadSafeEvent()
 def on_output(item):
     output_items.append(item)
 
+class Hook(MindflowHook):
 
-def on_challenge(challenger: Impulse, defender: Impulse | None, verdict: str):
-    challenge_calls.append({
-        "challenger_source": challenger.to_json(),
-        "defender_id": defender.to_json() if defender else None,
-        "verdict": verdict,
-    })
+    def on_impulse_challenged(self, challenger: Impulse, defender: Impulse | None, verdict: str):
+        challenge_calls.append({
+            "challenger_source": challenger.to_json(),
+            "defender_id": defender.to_json() if defender else None,
+            "verdict": verdict,
+        })
 
 
 def _on_any_task_done(task):
@@ -72,7 +73,7 @@ async def main():
 
         # ── wire observers ──
         session.on_output(on_output)
-        mindflow.on_challenge(on_challenge)
+        mindflow.with_hook(Hook())
         logos_task = asyncio.create_task(collect_logos(session))
 
         # ── send signal ──

@@ -41,12 +41,21 @@ class Reaction(BaseModel, WithAdditional):
         description="如果这是一个未完成的 Moment, 它可以被记录状态",
     )
 
-    def new_moment(self) -> "Moment":
+    def new_moment(
+            self,
+            *,
+            reaction_instruction: str = '',
+            percepts: list[Message] | None  = None,
+            reflex_logos: str = '',
+    ) -> "Moment":
         """
         基于 Outcome 产生下一轮的观察.
         """
         return Moment(
             previous=self,
+            reaction_instruction=reaction_instruction,
+            percepts=percepts or [],
+            reflex_logos=reflex_logos,
         )
 
 
@@ -71,13 +80,21 @@ class Moment(BaseModel, WithAdditional):
         default_factory=dict,
         description="当前 Moment 生成的瞬间, 将不同类型的 context 合并进来, 提供一个动态上下文快照",
     )
+    compact_perspectives: list[Message] | None = Field(
+        default=None,
+        description='对 perspectives 的压缩结果. 如果有的话. '
+    )
     percepts: list[Message] = Field(
         default_factory=list,
         description="本轮的外部输入: 已经过解析/结构化/多模态对齐, 但尚未经过高层解读."
     )
-    prompt: str = Field(
+    reaction_instruction: str = Field(
         default='',
         description="与本轮思考决策相关的提示讯息. 只在当前轮次生效",
+    )
+    reflex_logos: str = Field(
+        default='',
+        description="从整个链路输入的条件发射行为. 会立刻发送给 action 回路"
     )
 
     def to_dict(self) -> dict[str, Any]:
@@ -123,54 +140,72 @@ class Moment(BaseModel, WithAdditional):
             return None
         return self.previous.moment_id
 
-    def perspective_messages(self) -> Iterable[Message]:
+    # --- 基于 code as prompt 的思路介绍各种字段的组合意义 --- #
+
+    def perspective_messages(self, *, compact: bool = False) -> Iterable[Message]:
         if len(self.perspectives) == 0:
             yield from []
             return
+        if compact:
+            # 优先用压缩后的记录.
+            if self.compact_perspectives is not None:
+                yield from self.compact_perspectives
+                return
+            # 使用
+            perspective_messages = []
+            for messages in self.perspectives.values():
+                perspective_messages.extend(messages)
+            if len(perspective_messages) > 0:
+                count = len(perspective_messages)
+                yield Message.new().with_content(
+                    f"<perspectives compacted>{count} messages hidden</perspectives>"
+                )
+                return
+            else:
+                yield from []
+                return
+        # 返回全量的数据.
         for messages in self.perspectives.values():
             yield from messages
+
+    def previous_reaction_messages(self) -> Iterable[Message]:
+        if self.previous is None:
+            yield from []
+            return
+        reaction = self.previous
+        if len(reaction.outcomes) > 0:
+            yield Message.new().with_content('<outcomes>')
+            yield from reaction.outcomes
+            yield Message.new().with_content('</outcomes>')
+        if reaction.stop_reason:
+            yield Message.new(tag='stop_reason').with_content(reaction.stop_reason)
+
+    def is_empty(self) -> bool:
+        return self.previous is None and len(self.percepts) == 0
+
+    def is_empty_request(self) -> bool:
+        return len(self.percepts) == 0
+
+    def inputs_messages(self, *, with_reaction_instruction: bool = True) -> Iterable[Message]:
+        yield from self.percepts
+        if with_reaction_instruction and self.reaction_instruction:
+            yield Message.new(tag='prompt').with_content(self.reaction_instruction)
 
     def as_request_messages(
             self,
             *,
             with_perspectives: bool = True,
-            with_prompt: bool = True,
+            with_reaction_instruction: bool = True,
     ) -> Iterable[Message]:
         """
         所有这些消息, 理论上都会合并为一轮输入消息的 contents.
         本处是一个使用约定 (code as prompt), 不是硬性约束.
         """
-        if self.previous is not None:
-            reaction = self.previous
-            if len(reaction.outcomes) > 0:
-                yield Message.new().with_content('<outcomes>')
-                yield from reaction.outcomes
-                yield Message.new().with_content('</outcomes>')
-            if reaction.stop_reason:
-                yield Message.new(tag='stop_reason').with_content(reaction.stop_reason)
-
-        perspectives_messages = list(self.perspective_messages())
-        if len(perspectives_messages) > 0:
-            if with_perspectives:
-                yield Message.new().with_content("<perspectives>\n")
-                yield from perspectives_messages
-                yield Message.new().with_content("\n</perspectives>")
-            else:
-                count = len(perspectives_messages)
-                yield Message.new().with_content(
-                    f"<perspectives compacted>{count} messages compacted </perspectives>"
-                )
-        yield from self.percepts
-        if with_prompt and self.prompt:
-            yield Message.new(tag='prompt').with_content(self.prompt)
-
-    def as_request_contents(self, *, with_context: bool = True) -> Iterable[Content]:
-        """
-        用这种方式, 可以拿到和 Anthropic 基本兼容的 Contents.
-        可以包裹到 UserMessageParams 或 ToolMessageParams 里.
-        """
-        for msg in self.as_request_messages(with_perspectives=with_context):
-            yield from msg.as_contents(with_meta=True)
+        yield from self.previous_reaction_messages()
+        if with_perspectives:
+            yield from self.perspective_messages(compact=False)
+        if with_reaction_instruction:
+            yield from self.inputs_messages(with_reaction_instruction=with_reaction_instruction)
 
 
 class ConversationMeta(BaseModel, WithAdditional):
@@ -295,12 +330,12 @@ class ModelContext(BaseModel, WithAdditional):
 
                 # 否则只是堆叠需要发送的消息.
                 buffered_request_messages.extend(
-                    moment.as_request_messages(with_perspectives=with_perspective, with_prompt=False)
+                    moment.as_request_messages(with_perspectives=with_perspective, with_reaction_instruction=False)
                 )
                 idx += 1
         if logos := self.current.previous_logos():
             yield buffered_request_messages, logos
-        yield list(self.current.as_request_messages(with_perspectives=True, with_prompt=True)), None
+        yield list(self.current.as_request_messages(with_perspectives=True, with_reaction_instruction=True)), None
 
 
 class Conversation(ABC):

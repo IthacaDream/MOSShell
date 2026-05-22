@@ -46,22 +46,16 @@ __all__ = [
     'Flag',
     'Logos', 'Moment', 'Reaction',
     'Action', 'Articulator',
-    'Nucleus', 'NucleusMeta', 'Mindflow', 'Attention',
+    'Nucleus', 'NucleusMeta',
+    'Mindflow', 'MindflowHook',
+    'Attention',
     # 几个关键的通讯信号, 用来快速终止一些循环.
     'AttentionAbortedError', 'ObserveError', 'ActionAbortedError', 'ArticulateAbortedError',
     'PreemptedElseSuppress', 'BufferImpulse',
-    'ChallengeVerdict', 'ChallengeObserver',
+    'ChallengeVerdict',
 ]
 
 SignalName = str
-
-ChallengeVerdict = Literal['preempted', 'suppressed', 'absorbed', 'initial']
-"""Impulse challenge 的仲裁结果。
-- preempted: 抢占成功，创建新 Attention
-- suppressed: 被压制，原 nucleus 收到 suppress()
-- absorbed: 同 ID 更新 complete，不抢占
-- initial: 当前无 attention（首个 impulse）
-"""
 
 
 class Priority(enum.IntEnum):
@@ -312,9 +306,9 @@ class Impulse(BaseModel):
         ge=0,
         le=300,
     )
-    on_logos_start: str = Field(
+    reflex_logos: str = Field(
         default='',
-        description="the start logos insert into the stream. 可以理解为条件反射, 在思考启动前就会执行. ",
+        description="条件反射的 logos, 在思考启动前就会执行. ",
     )
     complete: bool = Field(
         default=True,
@@ -328,9 +322,9 @@ class Impulse(BaseModel):
         default_factory=list,
         description="the messages of the impulse. if empty, no need to think",
     )
-    prompt: str = Field(
+    reaction_instruction: str = Field(
         default='',
-        description="the prompt to handle the impulse",
+        description="the instruction to react this impulse",
     )
 
     stale_timeout: float = Field(
@@ -369,7 +363,7 @@ class Impulse(BaseModel):
             strength=signal.strength,
             messages=signal.messages.copy(),
             description=signal.description,
-            prompt=signal.prompt,
+            reaction_instruction=signal.prompt,
             complete=signal.complete,
             stale_timeout=stale_timeout,
         )
@@ -391,15 +385,6 @@ class Impulse(BaseModel):
 
     def __repr__(self):
         return f"<Impulse id={self.id} trace={self.trace_id} source={self.source}>"
-
-
-ChallengeObserver = Callable[
-    [Impulse,  # challenger — 发起挑战的 Impulse
-     Impulse | None,  # defender   — 当前占据注意力的 Impulse，None 表示无当前 attention
-     ChallengeVerdict],  # verdict    — 仲裁结果
-    None,
-]
-"""Impulse challenge 的旁路观察回调。仅观察，无副作用。"""
 
 
 class Nucleus(ABC):
@@ -928,7 +913,47 @@ class Attention(ABC):
         """整个生命周期结束"""
         pass
 
+
 _NucleusName = str
+
+ChallengeVerdict = Literal['preempted', 'suppressed', 'absorbed', 'initial']
+"""Impulse challenge 的仲裁结果。
+- preempted: 抢占成功，创建新 Attention
+- suppressed: 被压制，原 nucleus 收到 suppress()
+- absorbed: 同 ID 更新 complete，不抢占
+- initial: 当前无 attention（首个 impulse）
+"""
+
+
+class MindflowHook:
+
+    def name(self) -> str:
+        return ''
+
+    def description(self) -> str:
+        return ''
+
+    def on_impulse_challenged(
+            self,
+            challenger: Impulse,  # challenger — 发起挑战的 Impulse
+            defender: Impulse | None,  # defender   — 当前占据注意力的 Impulse，None 表示无当前 attention
+            verdict: ChallengeVerdict,  # verdict    — 仲裁结果
+    ) -> None:
+        """注册 challenge 旁路观察回调。
+        每次 impulse challenge attention 后触发:
+          observer(challenger, defender, verdict)
+
+        challenger — 发起挑战的 Impulse
+        defender   — 当前占据注意力的 Impulse，None 表示无当前 attention
+        verdict    — 仲裁结果: 'preempted' | 'suppressed' | 'absorbed' | 'initial'
+
+        传 None 清除回调。同时只保留一个。仅观察，无副作用。
+        """
+        pass
+
+    def on_error(self, error: Exception) -> None:
+        pass
+
 
 class Mindflow(ABC):
     """
@@ -945,6 +970,16 @@ class Mindflow(ABC):
     1. nucleus: 感知单元, 接受原始信号量, 通过加工后返回有优先级效果的 Impulse. 解决并行感知后聚合/行为仲裁的问题.
     2. attention: 单一执行状态管理, 能同时接受多方的讯号, 维持一个可被抢占的运行时状态. 交换数据, 管理所有生命周期.
     """
+
+    @abstractmethod
+    def with_hook(self, hook: MindflowHook) -> Self:
+        """注册 hook"""
+        pass
+
+    @abstractmethod
+    def remove_hook(self, hook: str | MindflowHook) -> None:
+        """移除注册的 hook"""
+        pass
 
     @abstractmethod
     def faculties(self) -> dict[_NucleusName, Nucleus]:
@@ -1035,21 +1070,6 @@ class Mindflow(ABC):
     def set_impulse(self, impulse: Impulse) -> None:
         """
         直接添加一个 Impulse 到池中.
-        """
-        pass
-
-    @abstractmethod
-    def on_challenge(self, observer: ChallengeObserver | None) -> None:
-        """注册 challenge 旁路观察回调。
-
-        每次 impulse challenge attention 后触发:
-          observer(challenger, defender, verdict)
-
-        challenger — 发起挑战的 Impulse
-        defender   — 当前占据注意力的 Impulse，None 表示无当前 attention
-        verdict    — 仲裁结果: 'preempted' | 'suppressed' | 'absorbed' | 'initial'
-
-        传 None 清除回调。同时只保留一个。仅观察，无副作用。
         """
         pass
 

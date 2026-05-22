@@ -1,7 +1,8 @@
 from typing import Callable, Coroutine
 from ghoshell_moss.core.mindflow.buffer_nucleus import BufferNucleus
 from ghoshell_moss.core.mindflow.base_mindflow import BaseMindflow
-from ghoshell_moss.core.blueprint.mindflow import Mindflow, Signal, Priority, Articulator, Action, Nucleus, Moment
+from ghoshell_moss.core.blueprint.mindflow import Mindflow, Signal, Priority, Articulator, Action, Nucleus, Moment, \
+    MindflowHook
 import janus
 import uvloop
 import threading
@@ -551,6 +552,10 @@ def test_suite_consuming_endless_observe():
     got = []
     done_event = threading.Event()
 
+    class _Hook(MindflowHook):
+        def on_error(self, error: Exception) -> None:
+            done_event.set()
+
     async def _articulate_func(articulator: Articulator) -> None:
         for char in content:
             articulator.send_nowait(char)
@@ -567,8 +572,10 @@ def test_suite_consuming_endless_observe():
 
     with suite:
         # 测试连续处理十个.
+        suite.mindflow.with_hook(_Hook())
         suite.run_in_thread(_articulate_func, _action_func)
         # 只发送一个信号.
+        suite.mindflow.wait_started_sync()
         suite.mindflow.add_signal(Signal.new('test'))
         done_event.wait()
         assert len(got) == 10

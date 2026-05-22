@@ -8,7 +8,7 @@ from ghoshell_moss.host import Host
 from ghoshell_moss.ghosts.mock import MockGhostMeta
 from ghoshell_moss.core.speech.mock import MockSpeech
 from ghoshell_moss.core.blueprint.mindflow import (
-    Mindflow, ChallengeObserver, ChallengeVerdict, InputSignal, Impulse,
+    Mindflow, MindflowHook, ChallengeVerdict, InputSignal, Impulse,
 )
 from ghoshell_moss.contracts.speech import Speech
 
@@ -23,17 +23,20 @@ gr.container.set(Speech, MockSpeech())
 calls: list[dict] = []
 
 
-def challenge_observer(
-        challenger: Impulse,
-        defender: Impulse | None,
-        verdict: ChallengeVerdict,
-) -> None:
-    calls.append({
-        "challenger_id": challenger.id,
-        "challenger_source": challenger.source,
-        "defender_id": defender.id if defender else None,
-        "verdict": verdict,
-    })
+class TestHook(MindflowHook):
+
+    def on_impulse_challenged(
+            self,
+            challenger: Impulse,
+            defender: Impulse | None,
+            verdict: ChallengeVerdict,
+    ) -> None:
+        calls.append({
+            "challenger_id": challenger.id,
+            "challenger_source": challenger.source,
+            "defender_id": defender.id if defender else None,
+            "verdict": verdict,
+        })
 
 
 async def main():
@@ -50,8 +53,9 @@ async def main():
         assert "input" in names, f"expected input nucleus, got {names}"
         print(f"faculties: {names}")
 
-        # ── 3. register observer ──
-        mf.on_challenge(challenge_observer)
+        # ── 3. register hook ──
+        hook = TestHook()
+        mf.with_hook(hook)
 
         # ── 4. send signal → wait for challenge ──
         signal = InputSignal().to_signal(
@@ -75,7 +79,7 @@ async def main():
         print(f"challenge: verdict={call['verdict']}, source={call['challenger_source']}")
 
         # ── 6. clear observer (null-op) ──
-        mf.on_challenge(None)
+        mf.remove_hook(hook)
 
         gr.close()
 

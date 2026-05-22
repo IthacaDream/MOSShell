@@ -162,7 +162,7 @@ class InputSignalNucleus(Nucleus):
             strength=max_strength,
             messages=all_msgs,
             description=latest.description,
-            prompt=latest.prompt or self._default_prompt,
+            reaction_instruction=latest.prompt or self._default_prompt,
             complete=all(s.complete for s in valid),
             stale_timeout=latest.stale_timeout,
         )

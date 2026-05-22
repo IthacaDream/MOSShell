@@ -82,6 +82,8 @@ class GhostRuntimeImpl(GhostRuntime):
         # 1. 预注入 ghost providers → container
         for provider in self._ghost_meta.providers():
             container.register(provider)
+        # 校验 IoC 容器中注册依赖是否能满足 Ghost 的需要.
+        self._ghost_meta.contracts().validate(container)
 
         # 2. MossRuntime.__aenter__
         await self._async_exit_stack.__aenter__()
@@ -104,7 +106,10 @@ class GhostRuntimeImpl(GhostRuntime):
         await self._async_exit_stack.__aexit__(exc_type, exc_val, exc_tb)
 
     def close(self) -> None:
+        # 关闭 moss runtime 内部循环.
         self._moss_runtime.close()
+        # 关闭 mindflow 内部循环.
+        self._mindflow.close()
 
     def inspect_loop_health(self) -> LoopHealth:
         return self._loop_status.copy()
@@ -172,34 +177,32 @@ class GhostRuntimeImpl(GhostRuntime):
 
     # ── 三循环 ────────────────────────────────────
 
+    def _moss_dynamic_messages(self) -> list[Message]:
+        shell = self._moss_runtime.shell
+        # 闭包在 shell running 时才取，shell 未启动时返回空列表.
+        if shell.is_running():
+            return shell.dynamic_messages()
+        return []
+
     async def _main_loop(self) -> None:
         """mindflow.loop() → Attention → (Articulator, Action) → queues."""
         self._loop_status["main"] = "running"
-        shell = self._moss_runtime.shell
-
-        def _moss_dynamic_messages() -> list[Message]:
-            # 闭包在 shell running 时才取，shell 未启动时返回空列表.
-            if shell.is_running():
-                return shell.dynamic_messages()
-            return []
-
         try:
             async for attention in self._mindflow.loop():
                 # per-attention 注册: ghost runtime 决定绑什么上下文.
                 # mindflow 级注册留作将来更高层治理 (如多 ghost 共享 mindflow) 时设计.
-                attention.with_context_func('moss_dynamic', _moss_dynamic_messages)
-                async with attention:
-                    async for articulate, action in attention.loop():
-                        self._articulate_queue.sync_q.put_nowait(articulate)
-                        self._action_queue.sync_q.put_nowait(action)
-        except FatalError as e:
-            self.moss.logger.exception("%s main loop fatal exception: %s", self._log_prefix, e)
-            raise e
-        except Exception as e:
-            self.moss.logger.exception("%s main loop exception: %s", self._log_prefix, e)
-            #  长时间运行要做异常感知, 而不能轻易破坏生命周期.
-            # todo: 要拿掉 raise. 现阶段先 raise debug.
-            raise e
+                try:
+                    attention.with_context_func('moss_dynamic', self._moss_dynamic_messages)
+                    async with attention:
+                        async for articulate, action in attention.loop():
+                            self._articulate_queue.sync_q.put_nowait(articulate)
+                            self._action_queue.sync_q.put_nowait(action)
+                except FatalError as e:
+                    self.moss.logger.exception("%s main loop fatal exception: %s", self._log_prefix, e)
+                    raise e
+                except Exception as e:
+                    self.moss.logger.exception("%s main loop exception: %s", self._log_prefix, e)
+                    #  长时间运行要做异常感知, 而不能轻易破坏生命周期.
         finally:
             self._loop_status["main"] = "stopped"
             self._articulate_queue.shutdown(immediate=True)
@@ -215,6 +218,8 @@ class GhostRuntimeImpl(GhostRuntime):
         """
         ghost = self._ghost_instance
         mindflow = self._mindflow
+        # 确认启动.
+        await mindflow.wait_started()
         session = self._moss_runtime.session
         self._loop_status["articulate"] = "running"
         while mindflow.is_running():
@@ -224,11 +229,11 @@ class GhostRuntimeImpl(GhostRuntime):
                     moment = articulator.moment
                     session.output(
                         'moment',
-                        *moment.as_request_messages(with_prompt=False),
+                        *moment.as_request_messages(with_reaction_instruction=False),
                         log=f"moment {moment.id}: {len(moment.percepts)} percepts",
                     )
-                    if moment.prompt is not None:
-                        session.output('prompt', moment.prompt, log=f"moment {moment.id}")
+                    if moment.reaction_instruction is not None:
+                        session.output('prompt', moment.reaction_instruction, log=f"moment {moment.id}")
                     logos_parts: list[str] = []
                     error: Exception | None = None
                     try:
