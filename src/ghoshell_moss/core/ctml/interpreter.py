@@ -258,14 +258,14 @@ class CTMLInterpreter(Interpreter):
         if self._stopped_event.is_set():
             # 生命周期已经移交了.
             return
-        # 发现任何任务出错超出预期.
-        if self._interpretation.observe:
-            if self._clear_after_exit:
-                # 中断所有的运行.
-                tasks = self._managing_tasks.values()
-                for task in tasks:
-                    if not task.done():
-                        task.cancel("interpreter stopped for observe")
+        # 仅对 critical 错误（errcode >= 400）中断解释流程并取消所有并行任务。
+        # 非 critical 的 Observe 只通过 on_done_task() 累积到 interpretation.messages，
+        # 让模型在下个关键帧统一观察，不中断当前并行执行。
+        if CommandErrorCode.is_critical(command_task.errcode):
+            tasks = self._managing_tasks.values()
+            for task in tasks:
+                if not task.done():
+                    task.cancel("interpreter stopped for critical error")
             self._stopped_event.set()
 
         if len(self._on_task_done_callbacks) > 0:

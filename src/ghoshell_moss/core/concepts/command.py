@@ -1380,7 +1380,12 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
     def fail(self, error: Exception | str) -> None:
         if not self.__done_event.is_set():
             if isinstance(error, ObserveError):
-                self.resolve(error.as_observe())
+                self.__task_result = CommandTaskResult(
+                    caller=self.caller_name(),
+                    messages=error.as_messages(),
+                    observe=True,
+                )
+                self._set_result(None, "failed", CommandErrorCode.OBSERVE, error.message)
                 return
 
             elif isinstance(error, str):

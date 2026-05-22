@@ -570,7 +570,8 @@ class StateChannelRuntime(AbsChannelTreeRuntime[StatefulChannel]):
         funcs = [self._main_state.get_context_messages()]
         if len(self._modules) > 0:
             for module in self._modules.values():
-                funcs.append(module.get_context_messages())
+                if hasattr(module, 'get_context_messages'):
+                    funcs.append(module.get_context_messages())
         # TODO: 考虑用 XML tag 包裹每个 module 的 context messages，
         # 避免自由合并产生的割裂感（模型不知道哪些内容来自哪个模块）。
         if current_state := self._get_current_state():
@@ -721,7 +722,8 @@ class StateChannelRuntime(AbsChannelTreeRuntime[StatefulChannel]):
 
         # 启动所有永久能力模块。
         for module in self._modules.values():
-            await module.on_startup()
+            if hasattr(module, 'on_startup'):
+                await module.on_startup()
 
         if '' in self._dynamic_states:
             await self.switch_state('')
@@ -730,7 +732,8 @@ class StateChannelRuntime(AbsChannelTreeRuntime[StatefulChannel]):
         # 先关闭 current_state，再关闭 module，最后关闭 main。
         await self.stop_current_state()
         for module in self._modules.values():
-            await module.on_close()
+            if hasattr(module, 'on_close'):
+                await module.on_close()
         await self._main_state.on_close()
 
     def prepare_container(self, container: IoCContainer) -> IoCContainer:

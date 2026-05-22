@@ -647,14 +647,14 @@ async def test_ctml_command_cid_and_result():
 
 @pytest.mark.asyncio
 async def test_ctml_observe_interrupt():
-    """测试 Observe 返回值中断所有运行中命令"""
-    from ghoshell_moss import Observe
+    """测试 ObserveError 中断所有运行中命令（Observe 返回则不中断）"""
+    from ghoshell_moss.core.concepts.command import ObserveError
     loop_chan = new_channel(name='loop')
     inter_chan = new_channel(name="interrupt")
 
     @inter_chan.build.command()
-    async def trigger_observe() -> Observe:
-        return Observe()
+    async def trigger_observe_error() -> None:
+        raise ObserveError("emergency stop")
 
     @loop_chan.build.command()
     async def infinite_loop() -> None:
@@ -669,12 +669,11 @@ async def test_ctml_observe_interrupt():
         ctml="""
         <_>
             <loop:infinite_loop/>
-            <interrupt:trigger_observe/>
+            <interrupt:trigger_observe_error/>
         </_>
         """
     )
-    # 由于 Observe 触发，整个作用域应被中断，所有任务取消
-    # 每个任务都会抛出 CancelledError
+    # ObserveError 触发紧急中断，infinite_loop 被取消
     has_loop = False
     for t in tasks:
         if t.meta.name == "infinite_loop":

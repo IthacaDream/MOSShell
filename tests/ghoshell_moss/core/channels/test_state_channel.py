@@ -989,6 +989,7 @@ async def test_protocol_duck_typing():
         def own_commands(self) -> dict[str, Command]:
             async def foo() -> str:
                 return "custom-foo"
+
             return {"foo": PyCommand(func=foo)}
 
         async def on_startup(self) -> None:
@@ -1014,8 +1015,19 @@ async def test_module_no_commands():
     """module 没有命令时也是有效的。"""
     chan = PyChannel(name="main")
     mod = PyChannelBuilder(name="empty")
+
+    @mod.context_messages
+    def sync_context_message_case():
+        return "hello"
+
+    @chan.build.context_messages
+    async def context_messages():
+        return "world"
+
     chan.with_module(mod)
 
     async with chan.bootstrap() as runtime:
+        await runtime.refresh_metas()
         meta = runtime.self_meta()
         assert "empty" in meta.modules
+        assert len(meta.context) == 2
