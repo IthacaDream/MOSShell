@@ -4,7 +4,7 @@ status: in_progress
 priority: P0
 created: 2026-05-14
 updated: 2026-05-22
-step: 12b_verified
+step: 12c_in_progress
 depends: []
 milestone:
 description: >-
@@ -82,7 +82,9 @@ first-ghost-prototype/
 | 11a | Mindflow 默认 input signal | GhostRuntime fallback → new_default_mindflow() (InputSignalNucleus + PriorityProtectionAttention), 43 tests 全部通过 | done |
 | 11c | on_challenge 旁路观察 | ChallengeObserver(Callable[[challenger, defender, verdict], None]) + Mindflow.on_challenge(), AbsMindflow._challenge_attention 内 fire | done |
 | 11b | Mindflow inspect + 自解释 | mindflow 探知接口、自解释接口 | pending |
-| 12 | 测试与 TUI | mock ghost + input signal 脚本测试 → TUI 全链路验证 | 12b done, 12c pending |
+| 12 | 测试与 TUI | mock ghost + input signal 脚本测试 → TUI 全链路验证 | 12b done, 12c in_progress |
+| 13 | TUI 集成 | GhostREPLState + echo 默认实例 + 流式 logos 渲染 | pending |
+| 14 | echo soul | ghost playground 产出 echo.md 系统提示词 | pending |
 
 ## 实现阶段关键决策（2026-05-16）— GhostRuntime 架构选型
 
@@ -394,7 +396,61 @@ session.add_input_signal("hello")
 
 ### 下一阶段
 
-Mindflow 默认 input signal 体系：感知侧的可观测性（signal 记录、on_impulse 旁路观察），补齐三循环全链路。之后 mock ghost + input signal → 脚本测试 → TUI 全链路验证。
+~~Mindflow 默认 input signal 体系~~ 已完成 (11a, 11c)。当前进入 TUI 全链路验证 (12c) 和 Ghost TUI 集成 (step 13)。
+
+---
+
+## 实现阶段关键决策（2026-05-22）— Moment/Attention 参数传递链路加固
+
+此轮通过单测驱动发现并修复了 staged 重构中的两个 bug，新增 22 个模型层单测。
+
+核心决策：
+
+1. **`as_request_messages()` 解绑 percepts 和 instruction**：`with_reaction_instruction` gate 不应跳过 `inputs_messages()` 整段调用 — percepts 和 instruction 是独立概念。修复后始终调用 `inputs_messages()`，由内部参数单独控制 instruction 显隐。
+
+2. **`_loop()` 中的 impulse 对齐是必要的**：不是冗余赋值。`wait_first_impulse()` 期间 impulse 可能被 incomplete→complete 吸收更新，所以 `_loop()` 中需要用最终 impulse 重新对齐 Moment 的三个关键字段（percepts / reaction_instruction / reflex_logos）。修正了遗漏的 `reflex_logos` 对齐。
+
+3. **脚本 vs 单测的断言哲学**：本次也清理了集成脚本中脆弱的 `hasattr` 检查和对内部实现名称的硬断言。脚本用 print 给人看，单测用 assert 给 CI 跑。
+
+涉及文件：
+- `conversation.py` — as_request_messages 解绑
+- `base_attention.py` — _loop() 补充 reflex_logos 对齐 + 设计注释
+- `test_mindflow.py` — 22 个新增单测
+- `test_on_challenge.py` — 去 hasattr + 断言改打印
+
+## 实现阶段关键决策（2026-05-22）— GhostRuntime 生命周期异常治理
+
+在三循环中统一了异常处理纪律，并标记了 hook 插入点。
+
+核心决策：
+
+1. **FatalError 传播 / Exception 续流**：三个循环统一采用此模式。FatalError 穿透所有层级终止循环，普通异常 log 后继续 — 全双工长运行系统的基础纪律。
+
+2. **`_loop_status` 语义修正**：articulate 和 action 循环的 status 之前在每个迭代的 finally 中设为 "stopped"，但 while 循环还在继续 — 状态永久显示 "stopped"。修正为只在循环真正退出时（外层 finally）设置。
+
+3. **`_action_loop` 不再 re-raise**：之前对普通 Exception 直接 `raise e` 会杀死整个 action 循环。改为 log 后 continue，与 main/articulate 一致。action 是消耗品，丢掉当前 action 继续。
+
+4. **`close()` 防御**：加了 `_mindflow is not None` 检查 — startup 失败时 mindflow 未初始化，二次调用 `.close()` 会 AttributeError。
+
+5. **启动步骤日志**：`__aenter__` 5 步每步加 debug 日志。出问题时一眼看到卡在哪一步。
+
+6. **Hook 标记**：9 个 `# todo: hook —` 注释覆盖三循环全部生命周期关键节点。不实装，但为后续 hook 体系保留插入点。
+
+涉及文件：`host/ghost_runtime.py`
+
+## 实现阶段关键决策（2026-05-22）— TUI 集成规划 + echo 默认 Ghost
+
+完成 TUI 架构调研后确定了 Ghost TUI 集成的核心原则和默认 Ghost 实例。
+
+核心决策：
+
+1. **主界面极简**：logos 流式输出 + 用户文本输入。调试能力走 inspector。
+
+2. **echo 作为默认 Ghost**：开发者拿到 MOSS 后看到的第一个实例。Atom 原型的具体化。名字的含义是"壳中的第一声回响" — 简单、通用、不张扬。soul/system prompt 由后续 ghost playground workstream 产出。
+
+3. **Scripts 机制是等价调试手段**：`moss script run <name>` 让 AI 在 REPL 外也能独立向 ghost 发 signal 验证行为。
+
+详见 [DESIGN.md](./DESIGN.md) TUI 集成设计章节和 [discuss/08-tui-integration-planning.md](./discuss/08-tui-integration-planning.md)。
 
 ---
 
