@@ -210,6 +210,10 @@ class Environment:
         self._session_id = session_id
         os.environ[ENV_SESSION_ID_KEY] = session_id
 
+    @property
+    def ghost_name(self) -> str:
+        return self._ghost_name
+
     def set_ghost_name(self, ghost_name: str) -> None:
         self._ghost_name = ghost_name
         os.environ[ENV_GHOST_NAME_KEY] = ghost_name

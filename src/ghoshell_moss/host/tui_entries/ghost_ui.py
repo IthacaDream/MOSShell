@@ -4,6 +4,7 @@ import asyncio
 from typing import Iterable
 
 from ghoshell_moss.core.blueprint.host import MossHost, GhostRuntime, MossRuntime
+from ghoshell_moss.core.blueprint.environment import Environment
 from ghoshell_moss.core.blueprint.session import OutputItem
 from ghoshell_moss.host.tui import TUIState, MossHostTUI
 from ghoshell_moss.host.repl.repl_state import REPLState
@@ -93,33 +94,34 @@ class GhostREPLState(REPLState):
 class GhostTUI(MossHostTUI[GhostRuntime]):
     """Ghost TUI — 组合 echo ghost state 和 Moss shell state。
 
-    用法: GhostTUI(ghost_name="echo").run()
+    用法: GhostTUI().run()
+    启动前通过 host.env.set_ghost_name("echo") 指定 ghost。
     """
 
-    _ghost_name: str = "echo"
-
-    def __init__(self, host: MossHost | None = None, ghost_name: str = "echo"):
-        GhostTUI._ghost_name = ghost_name
+    def __init__(self, host: MossHost | None = None):
         super().__init__(host=host or MossHost.discover())
 
     @classmethod
     def _get_runtime(cls, host: MossHost) -> GhostRuntime:
-        return host.run_ghost(cls._ghost_name)
+        return host.run_ghost(host.env.ghost_name)
 
     def _get_custom_intro(self) -> str | None:
         from rich.text import Text
         return Text(
-            f"\nGhost: {self._ghost_name}\n"
+            f"\nGhost: {self.host.env.ghost_name}\n"
             f"Type anything to talk to the ghost. Ctrl+N/P to switch states.",
             style="dim italic",
         )
 
     def create_states(self) -> Iterable[TUIState]:
-        yield GhostREPLState(self.runtime, name=self._ghost_name)
+        yield GhostREPLState(self.runtime, name=self.host.env.ghost_name)
         from ghoshell_moss.host.tui_entries.moss_runtime_ui import MOSSRuntimeREPLState
         yield MOSSRuntimeREPLState(self.host, self.runtime.moss, name="shell")
 
 
 if __name__ == "__main__":
-    tui = GhostTUI(ghost_name="echo")
+    from ghoshell_moss.host import Host
+    env = Environment.discover()
+    env.set_ghost_name("echo")
+    tui = GhostTUI(host=Host(env=env))
     tui.run()

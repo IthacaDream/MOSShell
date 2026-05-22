@@ -46,8 +46,9 @@ def ghost_run_main(ghost: str | None, mode: str, scope: str):
         click.echo(f"Ghost '{ghost}' not found. Available: {', '.join(available.keys())}")
         return
 
+    env.set_ghost_name(ghost)
     click.echo(f"Starting Ghost TUI for [{ghost}] in [{mode}] mode, scope: [{scope}]")
-    tui = GhostTUI(host=host, ghost_name=ghost)
+    tui = GhostTUI(host=host)
     tui.run()
 
 

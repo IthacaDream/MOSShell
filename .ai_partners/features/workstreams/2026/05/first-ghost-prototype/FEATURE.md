@@ -457,13 +457,23 @@ session.add_input_signal("hello")
 
 ---
 
-## 当前状态（2026-05-23, deepseek-v4-pro）
+## 当前状态（2026-05-23, claude-code）
 
 Feature 状态: **awaiting_human_validation** — 不能由 AI 单独标记为 completed。
 
 echo 已完成端到端验证：signal → impulse → articulate → model API → logos 流式返回。
 TUI 集成就绪：`moss-run-ghost echo` 启动交互终端。
 `moss script run say-hello` 可向运行中的 echo 发送 signal。
+
+### 2026-05-23（续）— GhostTUI 环境路径修正
+
+消除 `GhostTUI._ghost_name` 的 class attribute workaround，回归 Environment 作为 ghost 信息源：
+
+1. **`Environment.ghost_name` property**：`_ghost_name` 原为 private，补充 public accessor
+2. **`ghost_run.py` 启动时 `env.set_ghost_name(ghost)`**：正确的启动模式——脚本通过 `environment.set_ghost_name` 将 ghost name 写入环境
+3. **`GhostTUI._get_runtime` 从 `host.env.ghost_name` 读取**：`_get_runtime` 是 classmethod 接收 `host: MossHost`，从 `host.env` 拿 ghost name 是显式路径，不再需要 class attribute 隐式传递
+
+信息流：`ghost_run.py → env.set_ghost_name(ghost) → host.env.ghost_name → _get_runtime(host)`
 
 **未完成**:
 - echo 的 soul/system prompt（step 14, 依赖 ghost playground）
@@ -478,10 +488,10 @@ discuss/ + milestones/ + memory/）为一个全新的上下文，为 echo/ghost 
 这不是 AI 能独立完成的工作：它需要在人类验证 echo 时发现的真实问题作为输入。
 
 **复苏指引**:
+- 读 `FEATURE.md` 本文件的完整内容
 - 读 `.memory/daily/2026-05/22.md` — deepseek-v4-pro 的 session 记录和锚点
 - 读 milestones/2026-05-22-first-ghost-echo-speaks.md — 里程碑
 - 读 DESIGN.md 的 "TUI 集成设计" 和 "默认 Ghost — echo" 章节
-- git log 中 `coding by deepseek-v4-pro` 的 6 个 commit 是本 session 的产物
 
 ---
 
