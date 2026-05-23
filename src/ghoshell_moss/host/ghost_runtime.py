@@ -264,7 +264,7 @@ class GhostRuntimeImpl(GhostRuntime):
                             *moment.as_request_messages(with_reaction_instruction=False),
                             log=f"moment {moment.id}: {len(moment.percepts)} percepts",
                         )
-                        if moment.reaction_instruction is not None:
+                        if moment.reaction_instruction:
                             session.output('prompt', moment.reaction_instruction, log=f"moment {moment.id}")
                         logos_parts: list[str] = []
                         error: Exception | None = None
