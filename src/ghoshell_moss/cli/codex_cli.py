@@ -1,5 +1,5 @@
 """
-Codex command group - runtime introspection and code evaluation tools.
+Codex command group — runtime introspection tools for AI and human developers.
 """
 
 import typer
@@ -13,11 +13,10 @@ import sys
 import subprocess
 from pathlib import Path
 from typing import Optional, List, Tuple
-from rich.syntax import Syntax
 
 codex_app = typer.Typer(
-    short_help="Runtime introspection, code evaluation and analysis tools.",
-    help="Runtime introspection, code evaluation and analysis tools.",
+    short_help="Reflect, locate, and explore Python modules at runtime.",
+    help="Reflect, locate, and explore Python modules at runtime.",
     no_args_is_help=True,
 )
 
@@ -27,36 +26,68 @@ from ghoshell_moss.cli.utils import (
 )
 
 
+def _resolve_import_path(import_path: str):
+    """Import from path, trying colon then dot-as-separator fallback."""
+    from ghoshell_common.helpers import import_from_path
+    try:
+        return import_from_path(import_path)
+    except ImportError:
+        if '.' in import_path:
+            parts = import_path.rsplit('.', 1)
+            return import_from_path(f"{parts[0]}:{parts[1]}")
+        raise
+
+
 @codex_app.command("get-interface")
 def get_interface(
-        import_path: str = typer.Argument(..., help="Python import path e.g.: [module.path][:attribute]")
+        import_path: str = typer.Argument(
+            ...,
+            help="Python import path, e.g.: module.path or module.path:attr (dot also accepted as fallback)",
+        )
 ):
     """
-    Reflect a Python module and read its interface with detail body of class or functions.
+    Reflect a Python module or attribute and display its interface.
+
+    For modules, recursively includes interfaces of dependency types so you
+    get the full picture in one shot.  Prefer whole-module reflection — use
+    :attr only when you need a single class/function to keep output small.
     """
     from ghoshell_moss.core.codex import reflect_any_by_import_path
-    result = reflect_any_by_import_path(import_path)
-    console.print(Syntax(
-        result,
-        'python'
-    ))
+    from ghoshell_common.helpers import generate_import_path
+
+    try:
+        value = _resolve_import_path(import_path)
+    except ImportError as e:
+        print_error(f"Failed to import '{import_path}': {e}")
+        raise typer.Exit(code=1)
+
+    canonical = generate_import_path(value)
+    try:
+        source_file = inspect.getfile(value)
+    except TypeError:
+        source_file = "<unknown>"
+
+    print_info(f"Resolved: {canonical}")
+    print_info(f"Source: {source_file}")
+
+    result = reflect_any_by_import_path(canonical)
+    print_code(result, language="python")
 
 
 @codex_app.command("get-source")
 def get_source(
-        module_path: str = typer.Argument(..., help="Python import path, e.g.: [module.path][:attribute]"),
+        module_path: str = typer.Argument(
+            ...,
+            help="Python import path, e.g.: module.path or module.path:attr (dot also accepted as fallback)",
+        ),
         language: str = typer.Option("python", "--language", "-l", help="Code language for syntax highlighting"),
         output: Optional[Path] = typer.Option(None, "--output", "-o", help="Output to file instead of console",
                                               writable=True)
 ):
-    """
-    Reflect a Python module or attribute and read its source code.
-    Supports module:attr syntax (e.g. ghoshell_moss.core.concepts.channel:ChannelCtx).
-    """
-    from ghoshell_common.helpers import import_from_path
+    """Read the source code of a Python module or attribute."""
     try:
         print_info(f"Importing: {module_path}")
-        obj = import_from_path(module_path)
+        obj = _resolve_import_path(module_path)
 
         print_info(f"Getting source code...")
         source_code = inspect.getsource(obj)
@@ -91,43 +122,30 @@ def get_source(
         raise typer.Exit(code=1)
 
 
-@codex_app.command("info")
-def module_info(
-        module_path: str = typer.Argument(..., help="Module path to analyze")
+@codex_app.command("where")
+def where_cmd(
+        import_path: str = typer.Argument(
+            ...,
+            help="Python import path, e.g.: module.path:attr (dot also accepted as fallback)",
+        )
 ):
-    """
-    Show detailed information about a module (File path, Docstring, Classes, etc.)
-    """
+    """Show the canonical definition path of a module or attribute."""
+    from ghoshell_common.helpers import generate_import_path
+
     try:
-        print_info(f"Analyzing module: {module_path}")
-        module = importlib.import_module(module_path)
-
-        # 构建信息文本
-        info_lines = [
-            f"Module: {module_path}",
-            f"File: {inspect.getfile(module)}"
-        ]
-
-        if module.__doc__:
-            info_lines.append(f"\nDocstring:\n{module.__doc__.strip()}")
-
-        members = inspect.getmembers(module)
-        classes = sorted([name for name, obj in members if inspect.isclass(obj)])
-        functions = sorted([name for name, obj in members if inspect.isfunction(obj)])
-        variables = sorted([
-            name for name, obj in members
-            if not name.startswith("_") and not inspect.isclass(obj) and not inspect.isfunction(obj)
-        ])
-
-        info_lines.append(f"\nClasses ({len(classes)}): {', '.join(classes) if classes else 'None'}")
-        info_lines.append(f"\nFunctions ({len(functions)}): {', '.join(functions) if functions else 'None'}")
-        info_lines.append(f"\nVariables ({len(variables)}): {', '.join(variables) if variables else 'None'}")
-
-        print_simple_panel("\n".join(info_lines), title="Module Information")
-
+        value = _resolve_import_path(import_path)
     except ImportError as e:
-        print_error(f"Failed to import module '{module_path}': {e}")
+        print_error(f"Failed to import '{import_path}': {e}")
         raise typer.Exit(code=1)
+
+    canonical = generate_import_path(value)
+    try:
+        source_file = inspect.getfile(value)
+    except TypeError:
+        source_file = "<unknown>"
+
+    print_success(f"Canonical: {canonical}")
+    print_info(f"Source: {source_file}")
 
 
 def _get_package_modules(package_path: str, recursive: bool = False, include_packages: bool = True) -> List[
@@ -300,7 +318,7 @@ def _list_module_members(module_path: str):
         f"\n[dim]Total: {len(table_data)} members "
         f"({len(classes)} classes, {len(functions)} functions, {len(variables)} variables)[/dim]"
     )
-    console.print(f"[dim]To see module details, run [bold]moss codex info {module_path}[/bold][/dim]")
+    console.print(f"[dim]To see the source of a member, run [bold]moss codex get-source {module_path}:<member>[/bold][/dim]")
     console.print(f"[dim]To see member interfaces, run [bold]moss codex get-interface {module_path}:<member>[/bold][/dim]")
 
 
@@ -389,7 +407,8 @@ def list_modules(
 
     if module_count > 0:
         # 如果有模块，提示可以查看模块详情
-        tips.append(f"To see module details, run [bold]moss codex info {package_path}.<module_name>[/bold]")
+        tips.append(f"To see module members, run [bold]moss codex list {package_path}.<module_name>[/bold]")
+        tips.append(f"To see module interface, run [bold]moss codex get-interface {package_path}.<module_name>[/bold]")
 
     # 显示提示信息
     for i, tip in enumerate(tips):
@@ -413,7 +432,7 @@ def eval_code(
     Execute arbitrary Python code in the live MOSS runtime for introspection.
 
     Use this when you need to inspect runtime state that static reflection
-    (get-interface, get-source, info, list) cannot reach — live object graphs,
+    (get-interface, get-source, list) cannot reach — live object graphs,
     async coroutine state, multi-process topology, or dynamic attributes.
 
     Output is JSON with two fields:
