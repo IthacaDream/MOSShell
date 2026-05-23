@@ -53,6 +53,30 @@ Matrix.__aenter__           → container.get(LoggerItf) → WorkspaceLoggerProv
 | `host/ghost_runtime.py` | 删除 `steps` 列表 workaround，统一所有 logger 访问为 `self.moss.logger` |
 | `host/providers/logger_provider.py` | 修复 YAML 配置加载判断：忽略 `NullHandler` 实例 |
 
+## TUI 面板折叠/展开（2026-05-23, fixed）
+
+### 问题
+
+Ghost TUI 中 MOMENT 面板渲染内容极大（80+ 行），每次对话都铺满屏幕，严重干扰人的交互流。用户需要在折叠（默认）和展开之间快速切换。
+
+### 方案
+
+`ConsoleOutput.format_output()` 对 `role == 'moment'` 的面板默认渲染为单行摘要（`⊟ MOMENT (N messages, M lines) ctrl+o to expand`），其余角色默认展开。
+
+`ctrl+o` 一键展开当前缓冲区中所有面板（`ConsoleOutput.replay_recent(force_expand=True)`），不改变持久状态——新输出仍默认折叠。重复按 ctrl+o 不重复渲染（`_recent_expanded` 防抖）。
+
+### 改动
+
+- `tui.py` — `ConsoleOutput`: 新增 `_recent_items` 缓冲（max 50）、`_recent_expanded` 防抖、`replay_recent()` 方法；`format_output()` 接受 `force_expand` 参数，`role == 'moment'` 默认折叠
+- `tui.py` — `MossHostTUI.default_key_bindings()`: 新增 `c-o` 绑定
+- `tui.py` — Welcome 快捷指南新增 `Expand Panels | ctrl+o`
+
+### 位置
+
+- `src/ghoshell_moss/host/tui.py`
+
+---
+
 ## TUI logos 流式换行（基础设施已就绪，待集成，2026-05-23）
 
 > 渲染基础设施由 [tui-stream-rendering](../tui-stream-rendering/FEATURE.md) 提供。
