@@ -289,7 +289,7 @@ class MossHostTUI(Generic[RUNTIME], ABC):
         self.kb: KeyBindingsBase | None = None
         self._style = prompt_style or DEFAULT_PROMPT_STYLE
         self.host: MossHost | None = host or MossHost.discover()
-        self.runtime: RUNTIME = self._get_runtime(self.host)
+        self.runtime: RUNTIME = self._get_runtime()
         self._closing_event = ThreadSafeEvent()
         self._event_loop: asyncio.AbstractEventLoop | None = None
         self._main_loop_task: asyncio.Task | None = None
@@ -318,9 +318,8 @@ class MossHostTUI(Generic[RUNTIME], ABC):
             "exit": ("exit the tui", lambda: self.close())
         }
 
-    @classmethod
     @abstractmethod
-    def _get_runtime(cls, host: MossHost) -> RUNTIME:
+    def _get_runtime(self) -> RUNTIME:
         """从 host 上拿到 runtime 对象. """
         pass
 

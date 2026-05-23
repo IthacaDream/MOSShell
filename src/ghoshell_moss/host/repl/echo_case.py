@@ -65,8 +65,7 @@ class FakeRuntime(Runtime):
 
 class EchoCase(MossHostTUI):
 
-    @classmethod
-    def _get_runtime(cls, host: MossHost) -> RUNTIME:
+    def _get_runtime(self) -> RUNTIME:
         return FakeRuntime()
 
     def create_states(self) -> Iterable[TUIState]:

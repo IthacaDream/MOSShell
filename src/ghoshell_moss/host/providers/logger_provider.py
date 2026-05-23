@@ -48,7 +48,7 @@ class WorkspaceLoggerProvider(Provider[LoggerItf]):
         # 初始化 moss.
         moss_root_logger = logging.getLogger('moss')
         # 如果有 logging 日志配置, 从配置文件中读取.
-        if len(moss_root_logger.handlers) == 0:
+        if len([h for h in moss_root_logger.handlers if not isinstance(h, logging.NullHandler)]) == 0:
             expect_config_file = ws.configs().abspath().joinpath(self._logger_config_file)
             if expect_config_file.exists():
                 config_logger_from_yaml(str(expect_config_file))

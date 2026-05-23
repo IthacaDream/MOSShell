@@ -23,9 +23,12 @@ class GhostREPLState(REPLState):
             name: str = "echo",
     ) -> None:
         self._gr = ghost_runtime
-        self._session = ghost_runtime.moss.session
         self._logos_task: asyncio.Task | None = None
         super().__init__(name)
+
+    @property
+    def _session(self):
+        return self._gr.moss.session
 
     # ── REPLState overrides ──────────────────────
 
@@ -79,6 +82,8 @@ class GhostREPLState(REPLState):
 
     def _on_session_output(self, item: OutputItem) -> None:
         """session output 回调：将 OutputItem 渲染到 TUI。"""
+        if not item.messages:
+            return
         self.console.output(item)
 
     async def _consume_logos(self) -> None:
@@ -101,9 +106,8 @@ class GhostTUI(MossHostTUI[GhostRuntime]):
     def __init__(self, host: MossHost | None = None):
         super().__init__(host=host or MossHost.discover())
 
-    @classmethod
-    def _get_runtime(cls, host: MossHost) -> GhostRuntime:
-        return host.run_ghost(host.env.ghost_name)
+    def _get_runtime(self) -> GhostRuntime:
+        return self.host.run_ghost(self.host.env.ghost_name)
 
     def _get_custom_intro(self) -> str | None:
         from rich.text import Text

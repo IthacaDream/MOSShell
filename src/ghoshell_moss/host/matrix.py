@@ -143,7 +143,7 @@ class MatrixImpl(Matrix):
         self._cells = cells
         self._cell_alive_events = cell_alive_events
         self._is_main = isinstance(self._this_cell, HostMainCell)
-        self._logger: LoggerItf | logging.Logger | None = logger
+        self._logger_override: LoggerItf | logging.Logger | None = logger
         self._started = False
         self._channel_provider_task: asyncio.Task | None = None
         self._event_loop: asyncio.AbstractEventLoop | None = None
@@ -240,9 +240,6 @@ class MatrixImpl(Matrix):
             bootstrapper = ResourceStorageFactoryBootstrapper(storage_factory)
             container.add_bootstrapper(bootstrapper)
 
-        if self._logger is not None:
-            # 替换掉注册的.
-            container.set(LoggerItf, self._logger)
         return container
 
     def _default_providers(self) -> list[Provider]:
@@ -376,11 +373,9 @@ class MatrixImpl(Matrix):
 
     @property
     def logger(self) -> LoggerItf:
-        if self._logger is None:
-            self._logger = self._container.get(LoggerItf)
-            if self._logger is None:
-                self._logger = logging.getLogger(self._this_cell.log_name)
-        return self._logger
+        if self._logger_override is not None:
+            return self._logger_override
+        return self.env.logger
 
     @property
     def configs(self) -> ConfigStore:
@@ -628,6 +623,12 @@ class MatrixImpl(Matrix):
         self._exit_stack.enter_context(self._ensure_container_lifecycle_ctx_manager())
         # 实现 Matrix.session 的通讯总线同步启动部分.
         self._session_communication_bus_ctx_manager()
+
+        # 容器已启动，解析 workspace LoggerProvider 并更新 env.logger。
+        # 此后所有链路 (Host → Matrix → Ghost → Core) 统一使用 env.logger。
+        logger = self._container.get(LoggerItf)
+        if logger is not None:
+            self._env.set_logger(logger)
 
         # 启动 stack.
         try:
