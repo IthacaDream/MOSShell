@@ -7,7 +7,9 @@ from typing import Literal
 from typing_extensions import Self
 from pathlib import Path
 from ghoshell_common.helpers import uuid
+from ghoshell_common.contracts import LoggerItf
 from importlib import resources
+import logging
 from pydantic import BaseModel, Field
 from ghoshell_moss.core.ctml.versions import (
     CTML_VERSION, search_version_file_in_dir, default_moss_ctml_meta_instruction_directory,
@@ -197,6 +199,7 @@ class Environment:
         self._self_pid: int = os.getpid()
         self._parent_pid: int = int(os.environ.get(ENV_PARENT_PID_KEY, 0))
         self._bootstrapped = False
+        self._logger: LoggerItf = self._create_default_logger()
 
     def set_mode(self, mode: str) -> None:
         self._moss_mode = mode
@@ -231,6 +234,25 @@ class Environment:
             version_name = get_version_from_filename(version_file.name)
             version_name_to_files[version_name] = version_file
         return version_name_to_files
+
+    @staticmethod
+    def _create_default_logger() -> LoggerItf:
+        """进程级默认 logger，在 workspace LoggerProvider 替换前使用。
+
+        NullHandler 确保在 workspace 配置 handler 之前不会有任何输出
+        (包括 Python last resort handler 的 stderr 泄露).
+        """
+        logger = logging.getLogger('moss')
+        logger.addHandler(logging.NullHandler())
+        return logger
+
+    @property
+    def logger(self) -> LoggerItf:
+        return self._logger
+
+    def set_logger(self, logger: LoggerItf) -> None:
+        """由 Matrix 在 workspace LoggerProvider 初始化后调用，替换默认 logger。"""
+        self._logger = logger
 
     @classmethod
     def discover(cls) -> Self:

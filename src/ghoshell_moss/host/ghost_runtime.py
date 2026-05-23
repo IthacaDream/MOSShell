@@ -79,26 +79,25 @@ class GhostRuntimeImpl(GhostRuntime):
             raise RuntimeError("GhostRuntime already started")
 
         container = self._moss_runtime.container
+        logger = self.moss.logger
 
         # 1. 预注入 ghost providers → container
-        steps = [("%s step 1/5: registering ghost providers", self._log_prefix)]
+        logger.debug("%s step 1/5: registering ghost providers", self._log_prefix)
         for provider in self._ghost_meta.providers():
             container.register(provider)
         # GhostPlayground: manifests 可预先声明, 未声明则补充默认实现.
         # 注册必须在 Matrix 启动前 (step 2), 否则依赖方 fetch 时可能尚未绑定.
         if not container.bound(GhostPlayground):
-            steps.append(("%s step 1/5: registering default GhostPlayground provider", self._log_prefix))
+            logger.debug("%s step 1/5: registering default GhostPlayground provider", self._log_prefix)
             container.register(GhostPlaygroundProvider(ghost_name=self._ghost_meta.name()))
         # 校验 IoC 容器中注册依赖是否能满足 Ghost 的需要.
         self._ghost_meta.contracts().validate(container)
 
-        # 2. MossRuntime.__aenter__
-        steps.append(("%s step 2/5: entering MossRuntime", self._log_prefix))
+        # 2. MossRuntime.__aenter__ (env.logger 在此过程中被 workspace LoggerProvider 替换)
+        logger.debug("%s step 2/5: entering MossRuntime", self._log_prefix)
         await self._async_exit_stack.__aenter__()
         await self._async_exit_stack.enter_async_context(self._moss_runtime)
-        logger = self._moss_runtime.matrix.logger
-        for step in steps:
-            logger.debug(*step)
+        logger = self.moss.logger
 
         # 3. GhostMeta.factory(container) → ghost
         logger.debug("%s step 3/5: building ghost instance", self._log_prefix)
@@ -123,13 +122,13 @@ class GhostRuntimeImpl(GhostRuntime):
         try:
             await self._async_exit_stack.__aexit__(exc_type, exc_val, exc_tb)
         except Exception:
-            self._moss_runtime.matrix.logger.exception(
+            self.moss.logger.exception(
                 "%s error during teardown", self._log_prefix,
             )
         # todo: hook — GhostRuntimeLifecycleHook.on_stopped(self)
 
     def close(self) -> None:
-        logger = self._moss_runtime.matrix.logger
+        logger = self.moss.logger
         logger.debug("%s closing moss runtime", self._log_prefix)
         self._moss_runtime.close()
         if self._mindflow is not None:
@@ -153,7 +152,7 @@ class GhostRuntimeImpl(GhostRuntime):
             mindflow = container.get(Mindflow)
         if mindflow is None:
             from ghoshell_moss.core.mindflow.priority_mindflow import new_default_mindflow
-            mindflow = new_default_mindflow(logger=matrix.logger)
+            mindflow = new_default_mindflow(logger=self.moss.logger)
 
         container.set(Mindflow, mindflow)
 
@@ -169,13 +168,13 @@ class GhostRuntimeImpl(GhostRuntime):
             try:
                 nucleus = nucleus_meta.factory(container)
             except NotImplementedError:
-                matrix.logger.warning(
+                self.moss.logger.warning(
                     "%s nucleus %s is a stub (NotImplementedError), skipping",
                     self._log_prefix, nucleus_meta.name(),
                 )
                 continue
             except Exception:
-                matrix.logger.exception(
+                self.moss.logger.exception(
                     "%s failed to create nucleus %s, skipping",
                     self._log_prefix, nucleus_meta.name(),
                 )
@@ -356,7 +355,7 @@ class GhostRuntimeImpl(GhostRuntime):
         interpreter = await shell.interpreter(kind='clear', clear_after_exit=False)
         interpretation = interpreter.interpretation()
 
-        logger = self._moss_runtime.matrix.logger
+        logger = self.moss.logger
         session = self._moss_runtime.session
 
         def _on_task_done(task: CommandTask) -> None:

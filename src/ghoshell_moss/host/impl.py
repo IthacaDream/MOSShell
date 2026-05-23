@@ -7,7 +7,6 @@ from ghoshell_moss.core.blueprint.ghost import GhostMeta
 from ghoshell_moss.core.blueprint.manifests import Manifests
 from ghoshell_moss.core.blueprint.matrix import Matrix
 from ghoshell_moss.contracts.workspace import LocalWorkspace, Workspace
-from ghoshell_moss.contracts.logger import LoggerItf
 from ghoshell_moss.core.blueprint.environment import Environment
 from ghoshell_moss.host.manifests import PackageManifests, MergedManifests
 from ghoshell_moss.host.app_store import HostAppStore
@@ -16,7 +15,6 @@ from ghoshell_moss.host.ghosts import list_ghosts_from_root_package
 from ghoshell_moss.host.matrix import MatrixImpl
 from ghoshell_moss.host.moss_runtime import MossRuntimeImpl
 from ghoshell_moss.host.ghost_runtime import GhostRuntimeImpl
-import logging
 
 __all__ = ['Host']
 
@@ -31,7 +29,6 @@ class Host(MossHost):
             env: Environment | None = None,
             mode: Mode | str | None = None,
             session_scope: str | None = None,
-            logger: logging.Logger | None = None,
     ):
         self._env = env or Environment.discover()
         if mode is not None:
@@ -44,7 +41,6 @@ class Host(MossHost):
         if not self._workspace.root_path().exists():
             raise RuntimeError()
         self._env_manifest = PackageManifests.from_environment(self.env)
-        self._logger: LoggerItf | None = logger
 
         self._env_modes: dict[str, Mode] | None = None
         self._ghosts: dict[str, GhostMeta] | None = None
@@ -74,7 +70,6 @@ class Host(MossHost):
             manifest=self._manifest,
             app_store=self._app_store,
             workspace=self._workspace,
-            logger=self._logger,
         )
 
     def name(self) -> str:
