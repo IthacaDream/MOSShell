@@ -1,7 +1,7 @@
 from typing import Literal, Optional
 from typing_extensions import Self
 
-from ghoshell_moss import Addition
+from ghoshell_moss.message.message import Addition
 from ghoshell_moss.core.concepts.topic import (
     Publisher, Topic, Subscriber, TopicService, TopicModel, TOPIC_MODEL, TopicName,
     TopicClosedError,

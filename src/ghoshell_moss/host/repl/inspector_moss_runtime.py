@@ -1,6 +1,6 @@
 from textwrap import indent
 
-from ghoshell_moss import Command
+from ghoshell_moss.core.concepts.command import Command
 from ghoshell_moss.core.blueprint.host import MossRuntime
 from ghoshell_moss.host.tui import ConsoleOutput
 from ghoshell_moss.core.blueprint.session import OutputItem

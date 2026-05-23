@@ -1,6 +1,6 @@
 import pytest
 
-from ghoshell_moss import BaseCommandTask, PyChannel, new_channel
+from ghoshell_moss.core import BaseCommandTask, PyChannel, new_channel
 from ghoshell_moss.core.concepts.errors import CommandErrorCode
 import asyncio
 

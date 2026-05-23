@@ -2,7 +2,9 @@ from typing_extensions import Self
 
 import janus
 
-from ghoshell_moss import Message, MOSShell, CTMLShell
+from ghoshell_moss.message.message import Message
+from ghoshell_moss.core.concepts.shell import MOSShell
+from ghoshell_moss.core.ctml.shell.ctml_shell import CTMLShell
 from ghoshell_moss.core.blueprint.host import (
     MossRuntime, Mode, FractalHub, MossSystemPrompter
 )

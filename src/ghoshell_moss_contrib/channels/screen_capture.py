@@ -6,7 +6,7 @@ import mss
 from ghoshell_common.contracts import LoggerItf
 from PIL import Image
 
-from ghoshell_moss import PyChannel
+from ghoshell_moss.core import PyChannel
 from ghoshell_moss.message import Base64Image, Message, Text
 
 __all__ = ["ScreenCapture"]

@@ -1,4 +1,4 @@
-from ghoshell_moss import get_container
+from ghoshell_container import get_container
 from ghoshell_moss.bridges.zmq_channel import ZMQChannelProvider
 from ghoshell_moss_contrib.channels.opencv_vision import OpenCVVision
 

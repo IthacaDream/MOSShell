@@ -1,4 +1,4 @@
-from ghoshell_moss import ChannelProvider
+from ghoshell_moss.core.concepts.channel import ChannelProvider
 from ghoshell_moss.core.concepts.channel import ChannelProxy
 from ghoshell_moss.core.duplex import BridgeTestSuite
 from ghoshell_common.helpers import uuid

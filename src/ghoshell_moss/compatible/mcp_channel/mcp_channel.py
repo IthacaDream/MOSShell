@@ -4,7 +4,7 @@ from typing import Any, Optional, TypeVar
 
 from jsonschema import Draft202012Validator, Draft201909Validator, Draft7Validator, Draft6Validator
 
-from ghoshell_moss import CommandError, CommandErrorCode
+from ghoshell_moss.core.concepts.errors import CommandError, CommandErrorCode
 from ghoshell_moss.compatible.mcp_channel.utils import mcp_call_tool_result_to_message
 
 try:

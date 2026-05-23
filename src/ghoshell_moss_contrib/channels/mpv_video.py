@@ -7,7 +7,7 @@ from ghoshell_container import IoCContainer
 from pydantic import BaseModel, Field
 from python_mpv_jsonipc import MPV
 
-from ghoshell_moss import PyChannel
+from ghoshell_moss.core import PyChannel
 
 """
 # 介绍

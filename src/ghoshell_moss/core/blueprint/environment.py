@@ -53,9 +53,6 @@ __all__ = [
     'WORKSPACE_ENV_EXAMPLE_FILENAME',
 ]
 
-from ghoshell_moss import TopicModel
-from ghoshell_moss.contracts.configs import ConfigType
-
 # --- moss 的 workspace 发现机制 --- #
 
 # moss 默认的 workspace 文件夹名.

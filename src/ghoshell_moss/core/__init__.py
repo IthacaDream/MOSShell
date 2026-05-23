@@ -10,4 +10,5 @@ from .duplex import (
 from .duplex.protocol import *
 from .py_channel import PyChannel, StateChannelRuntime, PyChannelBuilder
 from .ctml.shell import CTMLShell, create_ctml_main_chan, new_ctml_shell
+from .ctml.interpreter import CTMLInterpreter
 from .blueprint import *

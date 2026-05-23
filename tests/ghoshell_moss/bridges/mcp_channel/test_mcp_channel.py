@@ -7,7 +7,7 @@ import pytest
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-from ghoshell_moss import CommandError
+from ghoshell_moss.core import CommandError
 from ghoshell_moss.compatible.mcp_channel.mcp_channel import MCPChannel
 from ghoshell_moss.compatible.mcp_channel.types import MCPCallToolResultAddition
 from ghoshell_moss.core.concepts.command import CommandErrorCode

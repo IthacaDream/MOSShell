@@ -10,7 +10,7 @@ from ghoshell_common.helpers import timestamp_ms
 from ghoshell_container import IoCContainer, Container
 from pydantic import Field, PrivateAttr
 
-from ghoshell_moss import PyChannel, CommandError, CommandErrorCode
+from ghoshell_moss.core import PyChannel, CommandError, CommandErrorCode
 from ghoshell_moss.message import Message, Base64Image, Text
 from ghoshell_moss_contrib.gui.image_viewer import SimpleImageViewer
 

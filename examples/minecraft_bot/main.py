@@ -9,7 +9,7 @@ from ghoshell_common.contracts.workspace import LocalWorkspaceProvider
 from ghoshell_container import Container
 from javascript import On, require
 
-from ghoshell_moss import PyChannel
+from ghoshell_moss.core import PyChannel
 from ghoshell_moss.core import new_ctml_shell
 from ghoshell_moss.message import Message, Text
 from ghoshell_moss.core.speech import make_baseline_tts_speech
