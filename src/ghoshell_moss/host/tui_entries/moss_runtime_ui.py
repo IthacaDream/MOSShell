@@ -55,9 +55,8 @@ class MOSSRuntimeREPLState(REPLState):
 
 class MossRuntimeTUI(MossHostTUI[MossRuntime]):
 
-    @classmethod
-    def _get_runtime(cls, host: MossHost) -> MossRuntime:
-        return host.run()
+    def _get_runtime(self) -> MossRuntime:
+        return self.host.run()
 
     def create_states(self) -> Iterable[TUIState]:
         yield MOSSRuntimeREPLState(self.host, self.runtime)

@@ -103,9 +103,8 @@ class GhostTUI(MossHostTUI[GhostRuntime]):
     def __init__(self, host: MossHost | None = None):
         super().__init__(host=host or MossHost.discover())
 
-    @classmethod
-    def _get_runtime(cls, host: MossHost) -> GhostRuntime:
-        return host.run_ghost(host.env.ghost_name)
+    def _get_runtime(self) -> GhostRuntime:
+        return self.host.run_ghost(self.host.env.ghost_name)
 
     def _get_custom_intro(self) -> str | None:
         from rich.text import Text
