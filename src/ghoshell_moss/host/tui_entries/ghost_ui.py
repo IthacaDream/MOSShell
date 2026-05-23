@@ -23,9 +23,12 @@ class GhostREPLState(REPLState):
             name: str = "echo",
     ) -> None:
         self._gr = ghost_runtime
-        self._session = ghost_runtime.moss.session
         self._logos_task: asyncio.Task | None = None
         super().__init__(name)
+
+    @property
+    def _session(self):
+        return self._gr.moss.session
 
     # ── REPLState overrides ──────────────────────
 
