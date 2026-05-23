@@ -9,7 +9,7 @@ from typing import Union, Callable, Coroutine, Any, Optional, TypeVar, AsyncIter
 from typing_extensions import Self
 
 from ghoshell_moss.message import Message
-from ghoshell_moss.core.concepts.command import Command, Observe
+from ghoshell_moss.core.concepts.command import Command, Observe, ObserveError
 from ghoshell_moss.core.concepts.channel import Channel
 from ghoshell_moss.core.blueprint.mindflow import Signal
 import asyncio
@@ -23,6 +23,7 @@ __all__ = [
     "MutableChannel",
     "new_channel", "new_command",
     'CommandUtil',
+    "Observe", "ObserveError",
 ]
 
 """
@@ -71,7 +72,8 @@ INSTANCE = TypeVar("INSTANCE", bound=object)
 
 class CommandUtil:
     """
-    use it in command to get runtime ctx
+    在 Command 内部使用的工具,
+    包含各种 Command 函数内需要的常用 API.
     """
 
     @classmethod
@@ -102,16 +104,55 @@ class CommandUtil:
         raise ObserveError(value)
 
     @classmethod
-    def send_signal(cls, signal: str | Signal) -> None:
-        """在 command 内发送信号给自己的大脑. 构成自驱循环."""
+    def send_signal(cls, signal: Signal) -> None:
+        """
+        在 command 内发送信号给自己的大脑. 构成自驱循环.
+        需要发送不同类型的 Signal, 可参考服务发现的 SignalMeta 协议.
+        """
         from ghoshell_moss.core.blueprint.session import Session
         session = cls.get_contract(Session)
-        if isinstance(signal, str):
-            session.add_input_signal(signal)
-        elif isinstance(signal, Signal):
+        if isinstance(signal, Signal):
             session.add_signal(signal)
         else:
             raise TypeError(f"only Signal or str is accepted")
+
+    @classmethod
+    def send_input_signal(cls, content: str, *, description: str = '') -> None:
+        """发送标准的请求信号给 ghost. """
+        from ghoshell_moss.core.blueprint.session import Session
+        session = cls.get_contract(Session)
+        session.add_input_signal(content, description=description)
+
+    @classmethod
+    async def create_signal_task(
+            cls,
+            *,
+            closure: Callable[[], Coroutine[None, None, Signal | str]],
+    ) -> None:
+        """
+        在 Command 内创建一个异步的 Signal 回调 task, 不阻塞 Command 返回.
+        当 closure 异步执行完毕后, 结果的 Signal 会发送给 ghost.
+        """
+        from ghoshell_moss.core.concepts.channel import ChannelCtx
+        task = ChannelCtx.task()
+        caller = task.caller_name()
+        task_ctx = task.context
+
+        async def _send_signal_after_task_done() -> None:
+            nonlocal closure, task_ctx, caller
+            signal = await closure()
+            if isinstance(signal, Signal):
+                cls.send_signal(signal)
+            elif isinstance(signal, str):
+                cls.send_input_signal(signal)
+            else:
+                cls.logger().error(
+                    "signal task returns invalid signal type: %s, task %s, task context %s,",
+                    signal, caller, task_ctx
+                )
+
+        runtime = ChannelCtx.runtime()
+        runtime.create_asyncio_task(_send_signal_after_task_done())
 
 
 def new_command(

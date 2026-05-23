@@ -590,7 +590,7 @@ class ChannelRuntime(ABC):
         """
         example to create channel task
         通过 Runtime 创建一个新的的 CommandTask.
-        不会执行.
+        不会执行, 需要执行可以用 execute task | execute command
         """
         command = self.get_command(name)
         if command is None:

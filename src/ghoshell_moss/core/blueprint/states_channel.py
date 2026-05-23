@@ -33,6 +33,8 @@ class ChannelModule(Protocol):
 
     Protocol 意味着结构子类型 — 只要实现了 name() + own_commands() 的类型就是 ChannelModule，
     不需要显式继承。on_startup/on_close/get_instruction/get_context_messages 是可选的生命周期钩子。
+
+    运行过程中要使用 IoC 容器, 可以通过 channel_builder.CommandUtil.get_contract 获取
     """
 
     def name(self) -> str: ...
@@ -55,6 +57,8 @@ class ChannelModule(Protocol):
 class ChannelState(ABC):
     """
     Channel 的运行时状态, 用来快速构建一个 StateChannel.
+
+    运行过程中要使用 IoC 容器, 可以通过 channel_builder.CommandUtil.get_contract 获取
     """
 
     @abstractmethod

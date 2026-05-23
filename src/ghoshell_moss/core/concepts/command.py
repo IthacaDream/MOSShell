@@ -768,7 +768,7 @@ class Observe(BaseModel):
 
     @classmethod
     def new(cls, value: str) -> Self:
-        return Message.new(tag="observe").with_content(value)
+        return Observe(messages=[Message.new(tag="observe").with_content(value)])
 
 
 class ObserveError(Exception):
@@ -802,6 +802,10 @@ class CommandTaskResult(BaseModel):
         default=None,
         description="command 的真实返回值",
     )
+    serialized: bool = Field(
+        default=False,
+        description='result is serialized',
+    )
     caller: str | None = Field(
         default=None, description="生成 CommandTask 的 caller name. 通常不用设置. 在 resolve 时自动添加."
     )
@@ -826,14 +830,26 @@ class CommandTaskResult(BaseModel):
 
     @classmethod
     def from_observe(cls, observe: "Observe") -> Self:
+        """create task result from Observe instance"""
         return cls(
-            messages=observe.messages,
+            # 不用 deepcopy
+            messages=observe.messages.copy(),
             observe=True,
         )
 
-    def serializable(self) -> Self:
+    def to_observe(self) -> Observe | None:
+        """ to Observe object if self is from Observe instance"""
+        if self.observe:
+            return Observe(messages=self.messages.copy() if len(self.messages) > 0 else [])
+        return None
+
+    def serializable_copy(self) -> Self:
+        """return a copy that serializable"""
         result = self.model_copy()
-        result.result = self.serialize_result()
+        serialized_result, ok = self.serialize_result()
+        if ok:
+            result.result = serialized_result
+            result.serialized = True
         return result
 
     @classmethod
@@ -842,6 +858,8 @@ class CommandTaskResult(BaseModel):
             return None
         if not isinstance(value.result, str):
             return value
+        if not value.serialized:
+            return value
         content = value.result
         try:
             result = json.loads(content)
@@ -849,16 +867,17 @@ class CommandTaskResult(BaseModel):
             result = content
         return value.model_copy(update={"result": result})
 
-    def serialize_result(self) -> Any:
+    def serialize_result(self) -> tuple[Any, bool]:
+        """serialize the result field"""
         if self.result is None:
-            return ''
+            return None, False
         if isinstance(self.result, str):
-            return self.result
+            return self.result, False
         try:
             serialized_content = json.dumps(self.result).decode("utf-8")
         except (ValueError, TypeError):
             serialized_content = repr(self.result)
-        return serialized_content
+        return serialized_content, True
 
     def as_messages(
             self,
@@ -880,7 +899,7 @@ class CommandTaskResult(BaseModel):
         # 先把结果序列化.
         if with_serialized_result and self.result is not None:
             # 保留 name.
-            serialized_content = self.serialize_result()
+            serialized_content, ok = self.serialize_result()
             if serialized_content:
                 result_message = Message.new(tag='result').with_content(serialized_content)
 
@@ -1261,6 +1280,8 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
     def result(self, throw: bool = True) -> Optional[RESULT]:
         if throw:
             self.raise_exception()
+        if self.done() and  self.__result is None and self.errcode == 0:
+            return self.task_result().to_observe()
         return self.__result
 
     def add_done_callback(self, fn: Callable[[CommandTask], None]):
@@ -1416,10 +1437,13 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
             return
         if isinstance(result, Observe):
             # 转化 Observe 为 CommandTaskResult
-            result = CommandTaskResult.from_observe(result)
+            task_result = CommandTaskResult.from_observe(result)
+            result = None
         # 如果数据类型不是 CommandTaskResult, 需要转化一次.
-        if result and isinstance(result, CommandTaskResult):
+        elif result and isinstance(result, CommandTaskResult):
             task_result = result
+            if task_result.serialized:
+                task_result = CommandTaskResult.from_serializable(task_result)
             result = task_result.result
         else:
             task_result = CommandTaskResult(

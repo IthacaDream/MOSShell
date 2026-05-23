@@ -365,6 +365,23 @@ class TestBridgeSuite:
         t.join()
 
     @pytest.mark.asyncio
+    async def test_provider_pass_observe_instance(self, suite: BridgeTestSuite) -> None:
+        from ghoshell_moss.core.blueprint.channel_builder import Observe
+        chan = PyChannel(name="provider")
+
+        @chan.build.command()
+        async def foo() -> Observe:
+            return Observe.new("helo world")
+
+        provider, proxy = suite.create("proxy")
+        async with provider.arun(chan):
+            async with proxy.bootstrap() as runtime:
+                await runtime.wait_connected()
+                assert runtime.is_running()
+                r = await runtime.execute_command('foo')
+                assert isinstance(r, Observe)
+
+    @pytest.mark.asyncio
     async def test_channel_with_delta_func(self, suite: BridgeTestSuite) -> None:
         chan = PyChannel(name="provider")
 

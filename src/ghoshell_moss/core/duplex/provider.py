@@ -660,7 +660,7 @@ class DuplexChannelProvider(ChannelProvider):
         finally:
             if not task.done():
                 task.cancel()
-            result = task.task_result().serializable() if task.success() else None
+            result = task.task_result().serializable_copy() if task.success() else None
             response = call_event.done(result, task.errcode, task.errmsg)
             await self._send_event_to_proxy(response.to_channel_event())
 

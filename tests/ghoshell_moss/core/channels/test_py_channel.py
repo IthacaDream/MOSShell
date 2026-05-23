@@ -505,7 +505,8 @@ async def test_py_channel_observe_command():
         bar_task = runtime.create_command_task("bar")
         runtime.push_task(bar_task)
         result = await bar_task
-        assert result is None
+        assert isinstance(result, Observe)
+        assert len(result.messages) == 0
         task_result = bar_task.task_result()
         assert task_result.observe
 
