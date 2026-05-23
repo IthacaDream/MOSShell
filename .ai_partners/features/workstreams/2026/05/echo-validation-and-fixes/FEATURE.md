@@ -3,7 +3,7 @@ title: Echo Ghost Validation & Fixes
 status: in-progress
 priority: P0
 created: 2026-05-23
-updated: 2026-05-23
+updated: 2026-05-23T21:30
 depends: [first-ghost-prototype]
 description: >-
   echo ghost human validation 中发现的 bug 修复。
@@ -49,6 +49,75 @@ Matrix.__aenter__           → container.get(LoggerItf) → WorkspaceLoggerProv
 | `host/matrix.py` | `_logger` → `_logger_override`；删除 `container.set(LoggerItf, ...)` 覆盖；`logger` 属性简化为 `_logger_override or env.logger`；`__aenter__` 中早期解析 LoggerItf 并 `env.set_logger()` |
 | `host/ghost_runtime.py` | 删除 `steps` 列表 workaround，统一所有 logger 访问为 `self.moss.logger` |
 | `host/providers/logger_provider.py` | 修复 YAML 配置加载判断：忽略 `NullHandler` 实例 |
+
+## TUI logos 流式换行（待修复，2026-05-23 发现）
+
+### 问题
+
+`moss-run-ghost` TUI 中模型 logos 流式输出换行频率极高，文本按 token 粒度断裂：
+
+```
+Oops
+
+，刚才 calculator
+
+ 可能还没完全启动我就
+
+急着算了
+```
+
+### 根因分析
+
+`ghost_ui.py:89` `_consume_logos` 对每个流式 delta 调用 `self.console.rprint(delta)`。`rprint()` → `_renderable_queue` → `_direct_print()` → `Console.print()` 每次调用自动换行。中文模型 token 粒度极细，每个 token 一个 delta，每个 delta 一行。
+
+`ghost_runtime.py:273-274` 中 `session.pub_logos(delta)` 以 `articulate()` 的 yield 粒度发布 delta，不做任何聚合。
+
+### 尝试过的方案
+
+| 方案 | 效果 |
+|------|------|
+| `Console.print(text, end='', markup=False)` | Rich 渲染管线光标控制序列互相干扰，后一次覆盖前一次，同位置闪烁 |
+| `Console.file.write(text) + flush()` | 同上，仍被覆盖 |
+
+在当前 `rprint()` → render queue → `Console.print()` 渲染设施下，未找到干净的同行追加方式。需要更底层的终端控制或不同的渲染架构。
+
+### 位置
+
+- `ghost_ui.py:84-91` — `_consume_logos`
+- `tui.py:105-111` — `ConsoleOutput.rprint()`
+- `tui.py:448-453` — `_direct_print()`
+- `ghost_runtime.py:273-274` — delta 发布点
+
+## TUI 空 COMMAND-RESULT 块（2026-05-23, fixed）
+
+### 问题
+
+CTML 命令 `<apps.tools_calculator:add _args="[3, 7]"/>` 在 TUI 中渲染 5 个 `COMMAND-RESULT` Panel，其中 4 个为空：
+
+```
+╭─  COMMAND-RESULT  ──╮  ← 空（__content__）
+╰──────────────────────╯
+╭─  COMMAND-RESULT  ──╮  ← 空（__enter__）
+╰──────────────────────╯
+╭─  COMMAND-RESULT  ──╮  ← 10.0（add 实际结果）
+╰──────────────────────╯
+╭─  COMMAND-RESULT  ──╮  ← 空（__content__）
+╰──────────────────────╯
+╭─  COMMAND-RESULT  ──╮  ← 空（__exit__）
+╰──────────────────────╯
+```
+
+### 根因
+
+`ghost_runtime.py:374-375` — 每个 `CommandTask` 完成时无条件发 `session.output('command-result', ...)`，
+即使 `msgs` 为空。Channel scope 生命周期产生 `__content__`、`__enter__`、`__exit__` 等内部任务，
+结果均为空但照样渲染 Panel。
+
+### 方案
+
+TUI 消费侧过滤，不动 session 数据总线：`_on_session_output` 遇到空 messages 直接 return。
+
+`ghost_ui.py:82` — `if not item.messages: return`
 
 ## Cleanup 死锁（待修复）
 

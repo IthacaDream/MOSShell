@@ -79,6 +79,8 @@ class GhostREPLState(REPLState):
 
     def _on_session_output(self, item: OutputItem) -> None:
         """session output 回调：将 OutputItem 渲染到 TUI。"""
+        if not item.messages:
+            return
         self.console.output(item)
 
     async def _consume_logos(self) -> None:
