@@ -43,7 +43,7 @@ app.add_typer(features_cli.features_app, name="features", short_help="AI-native 
 app.add_typer(ghosts_cli.ghost_app, name="ghosts", short_help="MOSS ghost discovery and management")
 app.add_typer(scripts_cli.script_app, name="script", short_help="One-shot dev-time scripts for matrix debugging")
 
-app.add_typer(docs_cli.docs_app, name="docs", short_help="Browse and read MOSS reference documentation")
+app.add_typer(docs_cli.docs_app, name="docs", short_help="Systematic architecture reference docs (low frequency)")
 
 
 @app.callback(invoke_without_command=True)

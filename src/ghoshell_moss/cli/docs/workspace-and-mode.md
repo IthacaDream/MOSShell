@@ -1,3 +1,8 @@
+---
+title: MOSS Workspace 与 Mode
+description: workspace 目录约定替代生命周期注册，mode 叠加声明替代配置切换。需要理解 manifests 声明体系或 mode 能力视图时阅读，是架构拓扑的补充
+---
+
 # MOSS Workspace 与 Mode — 自举地基
 
 本文档是[架构拓扑](architecture-topology.md)的延伸。读完拓扑文档后，本文解释 workspace 和 mode 的设计：它们为什么存在、解决什么问题、如何协同构成 MOSS 的自举地基。

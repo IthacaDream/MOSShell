@@ -5,9 +5,9 @@ description: moss docs 补齐 list/read 子命令，人类和 AI 都能直觉使
 milestone: null
 priority: P2
 status: completed
-status_note: list/read + three-set hint everywhere, how-tos recall removed
+status_note: list/read with MarkdownKnowledgeBase, three-set removed, how-tos hints everywhere
 title: Docs CLI Polish
-updated: '2026-05-19'
+updated: '2026-05-23'
 ---
 
 # Docs CLI Polish
@@ -33,3 +33,18 @@ updated: '2026-05-19'
 - `_print_doc_sets_hint()` 统一打印 doc set 切换提示
 - `main.py` 注册方式从 `app.command` 改为 `app.add_typer`
 - `howto_cli.py` 同步删除 `recall` 子命令
+
+## 2026-05-23 Refactor Round
+
+### Key Decisions
+
+1. **人类/AI 文档分离** — 删除 en/zh 空目录。人类文档放仓库根 `docs/`，不归 CLI 管。`moss docs` 只服务 AI 参考文档。
+2. **展平 ai/ 目录** — 只剩 AI 文档后，`ai/` 子目录冗余，四篇文档直接放在 `docs/` 下。
+3. **复用 MarkdownKnowledgeBase** — docs_cli.py 从 419 行手写扫描器重写为 136 行，对标 howto_cli.py 模式。删除所有手写函数、tree view、doc set 切换、`--lang`/`--path` 参数。
+4. **加 frontmatter 元数据** — 四篇文档各加 `title` + `description`（触发条件写入 description）。克制元数据字段，仅两个。
+5. **docs vs how-tos 边界** — docs = 低频系统化知识（"为什么这么设计"），how-tos = 日常任务导向（"怎么做 X"）。所有 CLI 输出末尾有 how-tos hint。
+6. **CLI 界面全英文** — help、hint、错误提示均为英文。文档正文语言不动。
+
+### 遗留
+
+- `docs/README.md` 正文是中文，`moss docs` 默认输出读的就是它。未来考虑英文化或中英双语，但非紧急。
