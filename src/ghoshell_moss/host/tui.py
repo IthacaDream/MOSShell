@@ -212,6 +212,8 @@ class ConsoleOutput:
         self._name: str = name
         self._alive_fn = alive
         self._queue = queue
+        self._recent_items: list[OutputItem] = []
+        self._recent_expanded: bool = False
         self._clear_fn = clear_func
 
     def clear(self) -> None:
@@ -226,16 +228,43 @@ class ConsoleOutput:
         self._queue.put_nowait(got_items)
 
     def output(self, item: OutputItem) -> None:
+        self._recent_items.append(item)
+        self._recent_expanded = False
+        if len(self._recent_items) > 50:
+            self._recent_items = self._recent_items[-50:]
         for i in self.format_output(item):
             self.rprint('', i)
 
-    def format_output(self, item: OutputItem) -> Iterable[RenderableType]:
-        title = Text(f" {item.role.upper()} ", style="bold cyan")
+    def replay_recent(self, force_expand: bool = False) -> None:
+        """Replay buffered items — used when toggling panel expand/collapse."""
+        if force_expand and self._recent_expanded:
+            return
+        for item in self._recent_items:
+            for i in self.format_output(item, force_expand=force_expand):
+                self.rprint('', i)
+        if force_expand:
+            self._recent_expanded = True
 
+    def format_output(self, item: OutputItem, force_expand: bool = False) -> Iterable[RenderableType]:
         # 2. 渲染消息体
         contents = []
         for msg in item.messages:
             contents.append(msg.to_content_string())
+
+        if not force_expand and item.role.lower() == 'moment':
+            msg_count = len(contents)
+            total_lines = sum(c.count('\n') + 1 for c in contents)
+            summary = Text(
+                f"⊟ {item.role.upper()} ({msg_count} messages, {total_lines} lines) ",
+                style="dim cyan",
+            )
+            summary.append("ctrl+o to expand", style="dim italic")
+            yield summary
+            if item.log:
+                yield Text(f"Log: {item.log}", style="dim italic green")
+            return
+
+        title = Text(f" {item.role.upper()} ", style="bold cyan")
 
         message_content = Syntax(
             "\n".join(contents),
@@ -490,6 +519,7 @@ class MossHostTUI(Generic[RUNTIME], ABC):
         guide.add_column("Key / Command")
         guide.add_row("Switch State (Next)", "Ctrl + P")
         guide.add_row("Switch State (Prev)", "Ctrl + B")
+        guide.add_row("Expand Panels", "ctrl+o")
         guide.add_row("Add New Line", "Ctrl + J")
         guide.add_row("Interrupt Task", "Esc")
         guide.add_row("REPL command", "Start with /")
@@ -551,6 +581,10 @@ class MossHostTUI(Generic[RUNTIME], ABC):
         def accept(event) -> None:
             event.current_buffer.validate_and_handle()
 
+        @kb.add('c-o')
+        def expand_panels(event) -> None:
+            self.current_state().console.replay_recent(force_expand=True)
+
         return kb
 
     def current_state(self) -> TUIState:
@@ -565,7 +599,7 @@ class MossHostTUI(Generic[RUNTIME], ABC):
             if isinstance(obj, OutputItem):
                 for item in self.console.format_output(obj):
                     self._rich_console.print(item)
-            elif hasattr(obj, 'render'):
+            elif isinstance(obj, LiveStreamSink):
                 obj.render(self._rich_console)
             else:
                 self._rich_console.print(obj)

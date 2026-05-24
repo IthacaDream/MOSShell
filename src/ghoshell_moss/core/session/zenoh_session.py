@@ -1,4 +1,6 @@
 import contextlib
+import logging
+import queue
 from typing import Callable, Self
 
 import janus
@@ -120,7 +122,7 @@ class MossSessionWithZenoh(Session):
         self._topic_service = topic_service
         self._closing_event = ThreadSafeEvent()
         self._session_root_storage = session_root_storage
-        self._session_storage: Storage | None = None
+        self._session_storage: Storage = self.make_session_level_storage(self._session_root_storage)
 
     def make_session_level_storage(self, storage: Storage) -> Storage:
         """提供 session 级别的一个独立 storage 空间. """
@@ -142,9 +144,6 @@ class MossSessionWithZenoh(Session):
 
     @property
     def storage(self) -> Storage:
-        if self._session_storage is None:
-            # todo: 思考这里是否会有竞态问题.
-            self._session_storage = self.make_session_level_storage(self._session_root_storage)
         return self._session_storage
 
     @property
@@ -156,9 +155,13 @@ class MossSessionWithZenoh(Session):
             raise RuntimeError(f'HostSession is closed')
 
     def add_signal(self, signal: Signal) -> None:
+        """向 session 总线发布信号。
+
+        调用方负责控制发送频率。本方法不做限频——连续高频调用会直接打满 zenoh
+        发布通道，淹没下游 subscriber 回调链。限频应在 Mindflow 的 signal
+        ingestion 层实现，而非 transport 层。
+        """
         self._check_running()
-        # todo: 未来加防蠢限频.
-        # 现在有一种深刻的感觉, 不存在过度设计, 只存在过度实现.
         js = signal.to_json()
         self._zenoh_session.put(self._input_signal_expr, js)
 
@@ -259,7 +262,10 @@ class MossSessionWithZenoh(Session):
 
             _relative_key = self._parse_stream_relative_key(str(_sample.key_expr))
             if _relative_key is None:
-                # todo: 这里有静默失败.
+                self._logger.warning(
+                    "%s stream subscriber received sample with unexpected key: %s (prefix: %s)",
+                    self._log_prefix, str(_sample.key_expr), self._stream_key_expr_prefix,
+                )
                 return
             _moss_sample = Sample(
                 relative_key=_relative_key,
@@ -342,7 +348,11 @@ class _SessionStreamSubscriber(StreamSubscriber):
         return self._relative_key
 
     def _on_zenoh_sample(self, sample: zenoh.Sample) -> None:
-        """做跨线程卸载."""
+        """跨线程卸载：zenoh 回调 → janus 同步队列。
+
+        使用 put_nowait 避免阻塞 zenoh 内部线程。队列满时丢弃并 log，
+        优于阻塞 zenoh 影响全局通讯总线。
+        """
         if self._closed:
             return
         key_expr = str(sample.key_expr)
@@ -353,10 +363,14 @@ class _SessionStreamSubscriber(StreamSubscriber):
                 payload=sample.payload.to_bytes(),
             )
             try:
-                self._queue.sync_q.put(moss_sample)
+                self._queue.sync_q.put_nowait(moss_sample)
             except janus.SyncQueueShutDown:
-                # todo: 这里也有静默失败问题, 没体现消费能力不足, 消费侧毫无感知.
                 self._closed = True
+            except queue.Full:
+                logging.getLogger(__name__).warning(
+                    "stream subscriber queue full (%s), dropping sample: %s",
+                    self._full_key, relative_key,
+                )
 
     async def _wait_session_closed(self) -> None:
         await self._session_stop_event.wait()
