@@ -1,17 +1,19 @@
 ---
-title: Cell Discovery Refactor — 从去中心化 liveness 到中心化 queryable
-status: draft
-priority: P0
 created: 2026-05-19
-updated: 2026-05-19
 depends: []
-milestone:
-description: >-
-  重构 Matrix cell 发现机制：用 zenoh queryable (中心化查询) 替代 N 个 liveness subscriber (去中心化声明)，
-  将 is_alive 替换为 reported_at 时间戳，封装发现逻辑为可重写的钩子方法。
+description: 重构 Matrix cell 发现机制：用 zenoh queryable (中心化查询) 替代 N 个 liveness subscriber
+  (去中心化声明)， 将 is_alive 替换为 reported_at 时间戳，封装发现逻辑为可重写的钩子方法。
+milestone: null
+priority: P0
+status: completed
+title: Cell Discovery Refactor — 从去中心化 liveness 到中心化 queryable
+updated: '2026-05-25'
 ---
 
 # Cell Discovery Refactor
+
+> **Absorbed into [matrix-channel-hub](../matrix-channel-hub/FEATURE.md) on 2026-05-24.**
+> Design rationale preserved below for reference. Implementation will happen in matrix-channel-hub.
 
 ## Motivation
 
