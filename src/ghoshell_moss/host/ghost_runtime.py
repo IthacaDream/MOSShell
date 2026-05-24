@@ -339,7 +339,7 @@ class GhostRuntimeImpl(GhostRuntime):
     async def _stream_execute(self, action: Action) -> tuple[list[Message], _Observe]:
         """流式执行: action.received_logos() → interpreter.feed(delta) → 结算.
 
-        返回 (status_messages, observe) 闭合 observe 回路.
+        返回 (as_messages, observe) 闭合 observe 回路.
         logos 已走 session stream 实时广播, 此处只发射 command-output/result.
         InterpretError 被捕获 — interpretation 已保留 partial results.
         """
@@ -404,8 +404,8 @@ class GhostRuntimeImpl(GhostRuntime):
                 )
 
         # __aexit__ 已调 close(), interpretation.done = True
-        status = interpretation.status_messages()
-        session.output('system', *status)
+        messages = interpretation.as_messages()
+        session.output('system', *interpretation.status_messages())
         logger.info(
             "interpreter settled: compiled=%d done=%d failed=%d cancelled=%d observe=%s",
             len(interpretation.compiled_tasks),
@@ -414,4 +414,4 @@ class GhostRuntimeImpl(GhostRuntime):
             len(interpretation.cancelled_tasks),
             interpretation.observe,
         )
-        return status, interpretation.observe
+        return messages, interpretation.observe
