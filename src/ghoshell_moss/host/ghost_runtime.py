@@ -93,7 +93,7 @@ class GhostRuntimeImpl(GhostRuntime):
         # 校验 IoC 容器中注册依赖是否能满足 Ghost 的需要.
         self._ghost_meta.contracts().validate(container)
 
-        # 2. MossRuntime.__aenter__ (env.logger 在此过程中被 workspace LoggerProvider 替换)
+        # 2. MossRuntime.__aenter__ (Matrix 从 IoC 注入 LoggerItf 或 fallthrough 到 env.logger)
         logger.debug("%s step 2/5: entering MossRuntime", self._log_prefix)
         await self._async_exit_stack.__aenter__()
         await self._async_exit_stack.enter_async_context(self._moss_runtime)

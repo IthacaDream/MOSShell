@@ -53,6 +53,22 @@ Matrix.__aenter__           → container.get(LoggerItf) → WorkspaceLoggerProv
 | `host/ghost_runtime.py` | 删除 `steps` 列表 workaround，统一所有 logger 访问为 `self.moss.logger` |
 | `host/providers/logger_provider.py` | 修复 YAML 配置加载判断：忽略 `NullHandler` 实例 |
 
+### 二次简化（2026-05-25）
+
+初版实现引入了不必要的复杂度：Environment 持有 NullHandler logger 然后被 Matrix.__aenter__ 替换、WorkspaceLoggerProvider 同时管 YAML 加载/命名/默认 handler 三件事、env.set_logger() 形成双向依赖。
+
+**简化方案**：
+
+| 职责 | 归属 | 说明 |
+|------|------|------|
+| logging.yml 按约定加载 | `Environment.bootstrap()` | workspace/configs/logging.yml 存在则 `config_logger_from_yaml()` |
+| 日志名约定 (`moss.<address>`) | `Environment.logger` property | cell address 替换 `/` → `.`，`logging.getLogger()` O(1) 无缓存 |
+| 默认 file handler | `WorkspaceLoggerProvider` | 仅确保 moss root logger 有 handler，返回 `logging.getLogger('moss')` |
+
+**Matrix.logger 优先级**：`_logger`（IoC 注入）→ `env.logger`（约定名）。
+
+**删除**：`_create_default_logger()`、`NullHandler`、`Environment.set_logger()`、`WorkspaceLoggerProvider` 的 `logger_name` 参数和 YAML 加载逻辑。
+
 ## TUI 面板折叠/展开（2026-05-23, fixed）
 
 ### 问题

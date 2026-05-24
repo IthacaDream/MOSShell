@@ -143,7 +143,7 @@ class MatrixImpl(Matrix):
         self._cells = cells
         self._cell_alive_events = cell_alive_events
         self._is_main = isinstance(self._this_cell, HostMainCell)
-        self._logger_override: LoggerItf | logging.Logger | None = logger
+        self._logger: LoggerItf | logging.Logger | None = logger
         self._started = False
         self._channel_provider_task: asyncio.Task | None = None
         self._event_loop: asyncio.AbstractEventLoop | None = None
@@ -259,7 +259,7 @@ class MatrixImpl(Matrix):
         # 注册 session.
         default_providers.append(WorkspaceSessionProvider(session_scope=self.env.session_scope))
         # 否则注册约定的日志模块, 但仍然可能被 contracts 覆盖.
-        default_providers.append(WorkspaceLoggerProvider(self._this_cell.log_name))
+        default_providers.append(WorkspaceLoggerProvider())
 
         # 注册 Topic Service.
         default_providers.append(ZenohTopicServiceProvider(
@@ -373,8 +373,8 @@ class MatrixImpl(Matrix):
 
     @property
     def logger(self) -> LoggerItf:
-        if self._logger_override is not None:
-            return self._logger_override
+        if self._logger is not None:
+            return self._logger
         return self.env.logger
 
     @property
@@ -624,11 +624,10 @@ class MatrixImpl(Matrix):
         # 实现 Matrix.session 的通讯总线同步启动部分.
         self._session_communication_bus_ctx_manager()
 
-        # 容器已启动，解析 workspace LoggerProvider 并更新 env.logger。
-        # 此后所有链路 (Host → Matrix → Ghost → Core) 统一使用 env.logger。
+        # IoC 容器已启动，探查是否注册了 LoggerItf，有则覆写 _logger。
         logger = self._container.get(LoggerItf)
         if logger is not None:
-            self._env.set_logger(logger)
+            self._logger = logger
 
         # 启动 stack.
         try:

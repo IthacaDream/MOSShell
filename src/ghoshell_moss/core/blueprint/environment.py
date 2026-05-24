@@ -7,7 +7,7 @@ from typing import Literal
 from typing_extensions import Self
 from pathlib import Path
 from ghoshell_common.helpers import uuid
-from ghoshell_common.contracts import LoggerItf
+from ghoshell_common.contracts import config_logger_from_yaml
 from importlib import resources
 import logging
 from pydantic import BaseModel, Field
@@ -196,7 +196,6 @@ class Environment:
         self._self_pid: int = os.getpid()
         self._parent_pid: int = int(os.environ.get(ENV_PARENT_PID_KEY, 0))
         self._bootstrapped = False
-        self._logger: LoggerItf = self._create_default_logger()
 
     def set_mode(self, mode: str) -> None:
         self._moss_mode = mode
@@ -218,6 +217,10 @@ class Environment:
         self._ghost_name = ghost_name
         os.environ[ENV_GHOST_NAME_KEY] = ghost_name
 
+    @property
+    def logger(self) -> logging.Logger:
+        return logging.getLogger('moss.' + self._cell_address.replace('/', '.'))
+
     def ctml_prompts_dir(self) -> Path:
         return self.workspace_path.joinpath("ctml_versions")
 
@@ -231,25 +234,6 @@ class Environment:
             version_name = get_version_from_filename(version_file.name)
             version_name_to_files[version_name] = version_file
         return version_name_to_files
-
-    @staticmethod
-    def _create_default_logger() -> LoggerItf:
-        """进程级默认 logger，在 workspace LoggerProvider 替换前使用。
-
-        NullHandler 确保在 workspace 配置 handler 之前不会有任何输出
-        (包括 Python last resort handler 的 stderr 泄露).
-        """
-        logger = logging.getLogger('moss')
-        logger.addHandler(logging.NullHandler())
-        return logger
-
-    @property
-    def logger(self) -> LoggerItf:
-        return self._logger
-
-    def set_logger(self, logger: LoggerItf) -> None:
-        """由 Matrix 在 workspace LoggerProvider 初始化后调用，替换默认 logger。"""
-        self._logger = logger
 
     @classmethod
     def discover(cls) -> Self:
@@ -312,23 +296,22 @@ class Environment:
             return
         self._bootstrapped = True
         if not self.workspace_path.exists():
-            # 初始化 workspace.
-            # 如果 workspace 不存在的话.
-            # 启动脚本应该提示用户
             raise EnvironmentError(f"Workspace `{self.workspace_path}` does not exist")
 
         env_file = self.env_file
-        # 确认加载一次环境变量.
         if env_file is not None:
             dotenv.load_dotenv(env_file)
 
-        # 确认路径被正确加载.
         source_path = self.source_dir
         if source_path is not None:
             abs_source_path = str(source_path.absolute())
-            # 加载路径.
             if abs_source_path not in sys.path:
                 sys.path.append(abs_source_path)
+
+        # 按约定加载 logging 配置: workspace/configs/logging.yml
+        logging_config = self._workspace_path / 'configs' / 'logging.yml'
+        if logging_config.exists():
+            config_logger_from_yaml(str(logging_config))
 
     @staticmethod
     def find_workspace_path() -> Path:
