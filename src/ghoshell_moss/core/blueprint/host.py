@@ -15,6 +15,7 @@ from ghoshell_moss.message import Message
 from ghoshell_moss.contracts import SystemPrompter, LoggerItf, Storage
 from .ghost import Ghost, GhostMeta
 from .app import AppStore
+from .environment import Environment
 
 __all__ = [
     'MossRuntime', 'MossHost', 'Mode', 'FractalHub', 'FractalCellProvider',
@@ -557,12 +558,13 @@ class MossHost(ABC):
         pass
 
     @classmethod
-    def discover(cls) -> Self:
+    def discover(cls, env: Environment | None = None) -> Self:
         """
         环境发现的标准实现.
         """
         from ghoshell_moss.host import Host
-        return Host.discover()
+        # 使用反范式定义项目的默认约定.
+        return Host.discover(env)
 
     @property
     @abstractmethod

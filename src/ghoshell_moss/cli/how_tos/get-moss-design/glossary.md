@@ -101,7 +101,7 @@ moss codex get-interface ghoshell_moss.core.blueprint.states_channel       # 状
 对 MOSS 体系的高阶封装。基于 workspace 的环境发现，生成可通讯的运行时体系。
 提供多进程组网通讯、session 隔离、TUI 交互。
 
-工具入口：`moss concepts blueprint host`
+工具入口：`moss codex blueprint host`
 
 ### Matrix
 

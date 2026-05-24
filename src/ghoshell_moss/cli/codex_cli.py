@@ -21,7 +21,7 @@ codex_app = typer.Typer(
 )
 
 from ghoshell_moss.cli.utils import (
-    print_success, print_error, print_info, print_code,
+    print_success, print_error, print_info, print_code, echo,
     print_simple_panel, print_simple_table, console
 )
 
@@ -479,3 +479,101 @@ def eval_code(
         raise typer.Exit(code=1)
 
     console.print(child.stdout.rstrip())
+
+
+# ---------------------------------------------------------------------------
+# Knowledge index commands — reflect-generated concept explorers
+# ---------------------------------------------------------------------------
+
+CONCEPT_PACKAGE = "ghoshell_moss.core.concepts"
+BLUEPRINT_PACKAGE = "ghoshell_moss.core.blueprint"
+CONTRACTS_PACKAGE = "ghoshell_moss.contracts"
+
+
+def _show_package_module(package: str, module_name: str | None = None, *, cmd_name: str = "") -> None:
+    """Reflect concept modules from a package. Lists all if no module_name given."""
+    from ghoshell_moss.core.codex.discover import scan_package
+    from ghoshell_moss.core.codex import reflect_any_by_import_path
+
+    modules = list(scan_package(package, parse=lambda x: not x.is_package))
+
+    if module_name is None:
+        if not modules:
+            print_info("No concept modules found.")
+            return
+
+        table_data = []
+        for mod in modules:
+            desc = ' '.join(mod.short_doc.split()) if mod.short_doc else ""
+            table_data.append([f"[bold cyan]{mod.module_name}[/bold cyan]", desc])
+
+        print_simple_table(
+            data=table_data,
+            headers=["Module", "Description"],
+            title=f"Available Modules in {package}",
+            column_styles=["bold cyan", ""],
+            title_style="bold bright_cyan",
+            column_ratios=[1, 3],
+        )
+
+        console.print(f"\n[dim]Total: {len(modules)} modules[/dim]")
+        console.print(f"[dim]Tip: Run [bold]moss codex {cmd_name} <name>[/bold] to see details.[/dim]")
+        return
+
+    modules_map = {mod.module_name: mod for mod in modules}
+
+    if module_name not in modules_map:
+        print_error(f"Module '{module_name}' not found in {package}.")
+        print_info("Available modules:")
+        for mod in modules:
+            print_info(f"  * {mod.module_name}")
+        raise typer.Exit(code=1)
+
+    import_path = modules_map[module_name].module_path
+
+    try:
+        print_info(f"Reflecting: {import_path}...")
+        result = reflect_any_by_import_path(import_path)
+        echo(result)
+    except Exception as e:
+        print_error(f"Failed to reflect module '{import_path}': {e}")
+        raise typer.Exit(code=1)
+
+
+@codex_app.command(
+    name='concepts',
+    help="List or show detail of the core concepts of MOSS structure",
+)
+def codex_concepts(
+        module_name: str | None = typer.Argument(
+            None,
+            help="Specific core concept module to reflect. If omitted, lists all available modules."
+        )
+):
+    _show_package_module(CONCEPT_PACKAGE, module_name, cmd_name="concepts")
+
+
+@codex_app.command(
+    name='blueprint',
+    help="List or show detail of the blueprint for building model-oriented operating system from MOSS",
+)
+def codex_blueprint(
+        module_name: str | None = typer.Argument(
+            None,
+            help="Specific blueprint module to reflect. If omitted, lists all available modules."
+        )
+):
+    _show_package_module(BLUEPRINT_PACKAGE, module_name, cmd_name="blueprint")
+
+
+@codex_app.command(
+    name='contracts',
+    help="List or show detail of the basic abstract dependencies of MOSS",
+)
+def codex_contracts(
+        module_name: str | None = typer.Argument(
+            None,
+            help="Specific contracts module to reflect. If omitted, lists all available modules."
+        )
+):
+    _show_package_module(CONTRACTS_PACKAGE, module_name, cmd_name="contracts")

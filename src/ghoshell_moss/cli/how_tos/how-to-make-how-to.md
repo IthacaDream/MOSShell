@@ -67,7 +67,7 @@ Markdown 格式。遵循下面的结构约定。
 moss codex get-interface ghoshell_moss.core.blueprint.channel_builder
 
 # 查看相关概念
-moss concepts blueprint channel_builder
+moss codex blueprint channel_builder
 ```
 
 这样当源码变化时，文档不会过时，读者看到的始终是最新的接口。

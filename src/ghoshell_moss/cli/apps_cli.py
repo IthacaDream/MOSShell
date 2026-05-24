@@ -100,7 +100,7 @@ def show_app(
         console.print(f"[dim]App store: {host.apps().app_store_directory}[/dim]")
 
 
-@app_store_app.command(name="init")
+@app_store_app.command(name="create")
 def create_app(
         fullname: str = typer.Argument(..., help="App fullname as group/name (e.g., 'my_group/my_app')"),
         description: str = typer.Option("", "-d", "--description", help="App description"),
@@ -114,7 +114,7 @@ def create_app(
         )
 ):
     """
-    Initialize a new app from the stub template.
+    Create a new app from the stub template.
 
     Creates the app directory under apps/<group>/<name> with:
     - APP.md (metadata declaration)

@@ -79,10 +79,10 @@ class Host(MossHost):
         return self._env.meta_config.description
 
     @classmethod
-    def discover(cls) -> Self:
+    def discover(cls, env: Environment | None = None) -> Self:
         global _host_instance
         if _host_instance is None:
-            _host_instance = Host()
+            _host_instance = Host(env=env)
         return _host_instance
 
     def reboot(self) -> Self:

@@ -20,7 +20,7 @@ source .venv/bin/activate
 uv sync --ative --all-extras
 
 # 初始化运行环境. 
-moss ws init
+moss workspace init
 
 # 查看更多命令
 moss

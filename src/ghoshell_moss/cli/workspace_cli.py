@@ -124,13 +124,13 @@ def init_workspace(
     Initialize a MOSS workspace.
 
     Interactive mode (default):
-        moss ws init          # prompts for path and confirmation
+        moss workspace init          # prompts for path and confirmation
 
     Non-interactive mode (for scripts and AI):
-        moss ws init /path    # explicit path, skips path prompt
-        moss ws init /path -y # skip all prompts including confirmation
-        moss ws init --cwd -y # current directory, no prompts
-        moss ws init --home -y # home directory, no prompts
+        moss workspace init /path    # explicit path, skips path prompt
+        moss workspace init /path -y # skip all prompts including confirmation
+        moss workspace init --cwd -y # current directory, no prompts
+        moss workspace init --home -y # home directory, no prompts
     """
     env = Environment.discover()
     home_path = env.expect_home_workspace_path()
@@ -198,7 +198,7 @@ def init_workspace(
     try:
         Environment.init_workspace(target_path)
         print_success("Initialization completed successfully.")
-        print_info("Next step: use 'moss ws copy-env' to create env file, then configure credentials.")
+        print_info("Next step: use 'moss workspace copy-env' to create env file, then configure credentials.")
     except Exception as e:
         print_error(f"Failed to initialize: {e}")
         raise typer.Exit(code=1)
@@ -233,7 +233,7 @@ def override_workspace(
 
     if not ws_path.exists() or not (ws_path / META_CONFIG_FILENAME).exists():
         print_error(f"No existing MOSS workspace found at '{ws_path}'.")
-        print_info("Use 'moss ws init' to create a new workspace.")
+        print_info("Use 'moss workspace init' to create a new workspace.")
         raise typer.Exit(code=1)
 
     if not yes and not typer.confirm(

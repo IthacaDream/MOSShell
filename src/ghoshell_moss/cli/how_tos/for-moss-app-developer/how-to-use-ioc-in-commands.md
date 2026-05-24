@@ -82,7 +82,7 @@ moss manifests providers
 moss codex get-interface ghoshell_container:Provider
 
 # 看实际声明示例
-cat $(moss ws where 2>/dev/null | grep "Expect Root" | cut -d'|' -f3 | xargs)/src/MOSS/manifests/providers.py
+cat $(moss workspace where 2>/dev/null | grep "Expect Root" | cut -d'|' -f3 | xargs)/src/MOSS/manifests/providers.py
 ```
 
 更深入的内核知识（父子容器隔离、Bootstrapper 生命周期、provide 语法糖）属于内核开发者范畴：
