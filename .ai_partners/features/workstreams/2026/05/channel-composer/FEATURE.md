@@ -1,14 +1,13 @@
 ---
-title: Channel Module — 生命周期感知的模块化 Channel 集成机制
-status: in-progress
-priority: P1
 created: 2026-05-22
-updated: 2026-05-23
 depends: []
-milestone:
-description: >-
-  Channel 树体系缺失的能力层：通过 ChannelModule Protocol + BaseStateChannel.with_module()
+description: Channel 树体系缺失的能力层：通过 ChannelModule Protocol + BaseStateChannel.with_module()
   实现累积叠加，与 with_state（排他）共享 ChannelState 基础设施但语义正交。
+milestone: null
+priority: P1
+status: completed
+title: Channel Module — 生命周期感知的模块化 Channel 集成机制
+updated: '2026-05-25'
 ---
 
 # Channel Composer
