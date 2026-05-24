@@ -335,13 +335,15 @@ manifests 是 MOSS 环境中所有能力的自解释声明。Matrix 启动时自
 | 类型 | 职责 | 工作空间路径 | 发现方式 |
 |------|------|-------------|---------|
 | **providers** | IoC 依赖注入：声明"这个接口由这个工厂生产" | `MOSS.manifests.providers` | `isinstance(obj, Provider)`，以 `contract()` 的 import path 为键 |
-| **channels** | 一级 Channel：Shell 主通道下直接可调用的能力单元 | `MOSS.manifests.channels` | `isinstance(obj, Channel)`，以 `Channel.name()` 为键 |
-| **primitives** | Shell 原语：sleep、noop、observe、interrupt 等基础命令 | `MOSS.manifests.primitives` | `isinstance(obj, Command)`，以 `Command.name()` 为键 |
+| **channels** | 主 Channel：扫描 `__main__` channel 作为 CTML shell 的根。所有 import_channels / with_state / with_module 组合在 manifest 定义时完成 | `MOSS.manifests.channels` | `isinstance(obj, Channel)`，取 `name == "__main__"` 的实例 |
 | **configs** | 配置模型：声明配置的 schema 和默认值 | `MOSS.manifests.configs` | `isinstance(obj, ConfigType)`，以 `ConfigType.conf_name()` 为键 |
 | **topics** | 事件协议：约束可通讯的 topic 类型 | `MOSS.manifests.topics` | `isinstance(obj, TopicModel)` 或 `isinstance(obj, TopicSchema)`，以 topic_name 为键 |
 | **resources** | 资源存储：声明可寻址的资源数据集 | `MOSS.manifests.resources` | `isinstance(obj, ResourceStorageMeta)`，以 `scheme://host/path` 为键 |
 | **nuclei** | 感知核：Mindflow 输入信号源的声明 | `MOSS.manifests.nuclei` | `isinstance(obj, NucleusMeta)`，以 `NucleusMeta.name()` 为键 |
 | **CTML versions** | CTML 提示词版本：环境可覆盖默认版本 | `ctml_versions/` 目录 | 扫描 `.md` 文件，以文件名为版本号 |
+
+> **Primitives 已移除**。原语不再作为独立 manifest 类型。改为在 `channels.py` 中直接通过
+> `main.build.add_command()` 注册到 `__main__` channel，与其他 command 统一管理。
 
 所有类型共享同一发现模式：`scan_package(约定路径)` → `isinstance` 过滤 → 按类型特定键聚合。
 

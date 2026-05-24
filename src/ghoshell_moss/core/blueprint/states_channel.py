@@ -13,7 +13,7 @@ from PIL.Image import Image
 __all__ = [
     'ChannelState', 'ChannelStateBuilder', 'StatefulChannel',
     'new_state_builder', 'new_channel_from_state', 'new_stateful_channel',
-    'PrimeChannel', 'new_prime_channel',
+    'PrimeChannel', 'new_prime_channel', 'new_main_channel',
     'ChannelModule',
 ]
 
@@ -275,3 +275,17 @@ def new_stateful_channel(name: str, description: str = "") -> StatefulChannel:
 def new_prime_channel(name: str, description: str = "") -> PrimeChannel:
     from ghoshell_moss.core.py_channel import PyChannel
     return PyChannel(name=name, description=description)
+
+
+def new_main_channel(description: str = "") -> PrimeChannel:
+    """
+    创建 CTML shell 的主 channel (__main__)。
+
+    FastAPI-like 入口: 创建工作空间中定义 main channel 的起点。
+    返回的 channel 可以继续 import_channels / with_state / with_module 进行组合。
+
+    仅创建空的 main channel — 不自动添加 primitives。
+    primitives 通过 manifest 的 primitives 机制独立注册。
+    """
+    from ghoshell_moss.core.py_channel import PyChannel
+    return PyChannel(name="__main__", description=description)

@@ -7,12 +7,10 @@ from .configs import search_config_infos_from_package
 from .providers import search_provider_infos_from_package
 from .topics import search_topic_infos_from_package
 from .channels import search_channels_from_package
-from .primitives import search_primitives_from_package
 from .resource_storages import PackageResourceStorages
 from .nuclei import search_nucleus_infos
 from ghoshell_moss.core.blueprint.environment import Environment
 from ghoshell_moss.core.concepts.channel import Channel, ChannelName
-from ghoshell_moss.core.concepts.command import Command
 from ghoshell_moss.core.ctml.versions import (
     default_moss_ctml_meta_instruction_directory,
     search_version_file_in_dir,
@@ -39,7 +37,6 @@ class PackageManifests(Manifests):
         self._provider_infos: list[ProviderInfo] | None = None
         self._topic_infos: dict[str, TopicInfo] | None = None
         self._channels: dict[str, Channel] | None = None
-        self._primitives: dict[str, Command] | None = None
         self._ctml_versions: dict[str, CtmlVersionInfo] = ctml_versions or {}
         self._resource_storages: PackageResourceStorages | None = None
         self._nuclei: dict[str, NucleusMetaInfo] | None = None
@@ -87,15 +84,6 @@ class PackageManifests(Manifests):
     def ctml_versions(self) -> dict[str, CtmlVersionInfo]:
         return self._ctml_versions
 
-    def primitives(self) -> dict[str, Command]:
-        """
-        find moss shell primitive in the package.
-        """
-        if self._primitives is None:
-            primitives_package = '.'.join([self.root_package_name, 'primitives'])
-            self._primitives = search_primitives_from_package(primitives_package)
-        return self._primitives
-
     def configs(self) -> dict[str, ConfigInfo]:
         if self._config_infos is None:
             configs_package = '.'.join([self.root_package_name, 'configs'])
@@ -136,7 +124,24 @@ class PackageManifests(Manifests):
         return items
 
     def explain(self) -> str:
-        return f"发现自 Python 包 `{self.root_package_name}`。所有声明类型从此包及其子模块中扫描获得。"
+        return (
+            f"此清单扫描自 workspace 中的 Python 包 `{self.root_package_name}` "
+            f"及其子模块。\n\n"
+            "### 目录约定\n\n"
+            f"workspace 的 `src/{self.root_package_name.replace('.', '/')}/` 目录下，\n"
+            "按子模块名约定各类声明：\n"
+            "- `channels.py` — 定义 `__main__` channel（FastAPI-like 入口），原语也在此注册\n"
+            "- `providers.py` — 定义 IoC Provider\n"
+            "- `configs.py` — 定义配置模型\n"
+            "- `topics.py` — 定义事件协议\n"
+            "- `resources.py` — 定义资源存储\n"
+            "- `nuclei.py` — 定义感知核\n\n"
+            "### Channels 发现规则\n\n"
+            "扫描 `channels` 子模块，寻找 name == '__main__' 的 Channel 实例。\n"
+            "若存在，整个对象作为 CTML shell 的主 channel，"
+            "所有 import_channels / with_state / with_module 组合在定义时已完成。\n"
+            "若不存在，MossRuntime 使用空白默认 main channel。"
+        )
 
 
 class MergedManifests(Manifests):
@@ -150,7 +155,6 @@ class MergedManifests(Manifests):
         self._contract_infos: list[ProviderInfo] = []
         self._topic_infos: dict[str, TopicInfo] = {}
         self._channels: dict[str, Channel] = {}
-        self._primitives: dict[str, Command] = {}
         self._ctml_versions: dict[str, CtmlVersionInfo] = {}
         self._resource_storages: PackageResourceStorages = PackageResourceStorages("")
         self._nuclei: dict[str, NucleusMetaInfo] = {}
@@ -160,7 +164,6 @@ class MergedManifests(Manifests):
             self._contract_infos.extend(manifest.providers())
             self._topic_infos.update(manifest.topics())
             self._channels.update(manifest.channels())
-            self._primitives.update(manifest.primitives())
             self._ctml_versions.update(manifest.ctml_versions())
             # merge resource storages (右边优先)
             # 屏蔽 storage 实现.
@@ -188,9 +191,6 @@ class MergedManifests(Manifests):
     def ctml_versions(self) -> dict[str, CtmlVersionInfo]:
         return self._ctml_versions
 
-    def primitives(self) -> dict[str, Command]:
-        return self._primitives
-
     def configs(self) -> dict[str, ConfigInfo]:
         return self._config_infos
 
@@ -217,8 +217,11 @@ class MergedManifests(Manifests):
         for i, m in enumerate(self._manifests_list):
             parts.append(f"### 源 {i + 1}: {type(m).__name__}\n{m.explain()}")
         parts.append(
-            "### 合并规则\n"
-            f"以上 {len(self._manifests_list)} 个源按序合并。"
-            "同类别内右边覆盖左边（dict.update / list.extend）。不同类别不互相影响。"
+            "### 合并规则\n\n"
+            f"以上 {len(self._manifests_list)} 个源按序合并（先全局，后 mode），右边覆盖左边。\n"
+            "- Channels：mode 若定义了 `__main__`，完全替代全局的 main channel。\n"
+            "- 其余类型（providers/configs/topics/nuclei/resources）："
+            "dict.update / list.extend 叠加。\n"
+            "- 不同类别之间不互相影响。"
         )
         return "\n\n".join(parts)

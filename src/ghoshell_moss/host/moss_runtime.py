@@ -12,6 +12,7 @@ from ghoshell_moss.core.blueprint.app import AppStore
 from ghoshell_moss.core.blueprint.matrix import Matrix
 from ghoshell_moss.core.helpers import ThreadSafeEvent
 from ghoshell_moss.core.ctml import new_ctml_shell
+from ghoshell_moss.core.blueprint.states_channel import new_main_channel
 from ghoshell_moss.contracts import Workspace
 from .app_store import HostAppStore
 from .matrix import MatrixImpl
@@ -32,7 +33,6 @@ class MossRuntimeImpl(MossRuntime):
             mode: Mode,
             matrix: MatrixImpl,
             run_shell_on_start: bool = True,
-            with_primitives: bool = True,
             name: str | None = None,
             description: str | None = None,
     ):
@@ -42,7 +42,6 @@ class MossRuntimeImpl(MossRuntime):
         # 主节点自解释发现逻辑, 手动定义优先, 其次是模式定义, 其次是环境定义.
         self._description = description or mode.description or env.meta_config.description
         self._workspace = workspace
-        self._with_primitives = with_primitives
         self._matrix = matrix
         self._mode = mode
         self._app_store: HostAppStore | None = None
@@ -61,14 +60,20 @@ class MossRuntimeImpl(MossRuntime):
         self._shell_logos_queue: janus.Queue = janus.Queue()
         # --- prepare shell --- #
         system_prompt = self._matrix.moss_system_prompter()
+        # 从 manifest 发现 __main__ channel，没有则用默认空白 main。
+        # main channel 上的 import_channels / with_state / with_module 已在 manifest 中完成组合。
+        manifests_main = self._matrix.manifests.channels().get("__main__")
+        if manifests_main is None:
+            manifests_main = new_main_channel(
+                description=f"Default main channel for {self._description or self._name}"
+            )
         self._ctml_shell = new_ctml_shell(
             name=self._name,
             description=self._description,
             parent_container=self.matrix.container,
+            main_channel=manifests_main,
             experimental=False,
             meta_instruction=system_prompt.instruction(),
-            # 只用环境发现的原语. 不做任何隐式原语.
-            primitives=list(self._matrix.manifests.primitives().values()) if self._with_primitives else [],
         )
 
     @property
@@ -205,10 +210,8 @@ class MossRuntimeImpl(MossRuntime):
             bringup=self._mode.bringup_apps,
             logger=self.matrix.logger,
         )
-        # 注册 Apps
-        for channel in self._matrix.manifests.channels().values():
-            # 注册环境发现的 channels.
-            self._ctml_shell.main_channel.import_channels(channel)
+        # __main__ channel 已在 __init__ 中从 manifests 发现并传入 shell。
+        # 所有 import_channels / with_state / with_module 组合在 manifest 中已完成。
 
         self._matrix.container.set(AppStore, self._app_store)
         self._matrix.container.set(MOSShell, self._ctml_shell)

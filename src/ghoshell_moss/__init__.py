@@ -33,6 +33,7 @@ from ghoshell_moss.message.message import Addition, Message
 from ghoshell_moss.core.blueprint.channel_builder import new_channel
 from ghoshell_moss.core.blueprint.states_channel import (
     new_channel_from_state,
+    new_main_channel,
     new_prime_channel,
     new_state_builder,
     new_stateful_channel,

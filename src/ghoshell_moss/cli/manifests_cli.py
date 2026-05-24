@@ -342,52 +342,6 @@ def _display_channel_table(channels: dict, is_filtered: bool):
         console.print("\n[dim]Hint: Use [bold]moss manifest channels <name>[/bold] to see full detail.[/dim]")
 
 
-@manifest_app.command(name="primitives")
-def list_primitives(
-        search: str = typer.Argument("", help="Search pattern for command name."),
-        json_out: bool = typer.Option(False, "--json", help="Output as raw JSON for AI."),
-        json_schema: bool = typer.Option(False, "--json-schema", help="Output with json schema")
-):
-    """
-    Explore MOSS Primitives (Commands).
-    """
-    host = Host()
-    primitives = host.manifests.primitives()
-
-    results = {name: cmd for name, cmd in primitives.items() if search.lower() in name.lower()}
-
-    if json_out:
-        # AI 模式只返回核心元数据和 Schema
-        data = {name: {
-            "name": cmd.meta().name,
-            "description": cmd.meta().description,
-            "params": cmd.meta().json_schema
-        } for name, cmd in results.items()}
-        console.print_json(data=data)
-        return
-    if len(primitives) == 0:
-        console.print("no primitive found")
-        return
-    for key, cmd in results.items():
-        _display_command_detail(cmd, json_schema)
-
-
-def _display_command_detail(cmd, with_json_schema: bool):
-    meta = cmd.info()
-    console.print(f"\n[bold green]==== Command:[/bold green] {meta.name} ====")
-    console.print(f"[dim]Dynamic: {cmd.is_dynamic()}[/dim]\n")
-
-    # 重点展示接口定义
-    console.print(f"[dim]Interface:[/dim]\n")
-    console.print(Syntax(cmd.info().interface, 'python'))
-
-    # 展示 JSON Schema
-    if with_json_schema and meta.json_schema is not None:
-        console.print("\n[bold]Arguments Schema:[/bold]")
-        console.print_json(data=meta.json_schema)
-    console.print("")
-
-
 @manifest_app.command(name="contracts")
 def list_contracts(
         search: str = typer.Argument("", help="Search pattern for contract name or module path."),

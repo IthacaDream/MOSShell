@@ -140,7 +140,6 @@ class Host(MossHost):
             self,
             *,
             run_shell: bool = True,
-            with_primitives: bool = True,
             name: str | None = None,
             description: str | None = None,
     ) -> MossRuntime:
@@ -150,7 +149,6 @@ class Host(MossHost):
             mode=self._moss_mode,
             matrix=self._matrix,
             run_shell_on_start=run_shell,
-            with_primitives=with_primitives,
         )
 
     def run_ghost(

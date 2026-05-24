@@ -615,7 +615,6 @@ class MossHost(ABC):
             self,
             *,
             run_shell: bool = True,
-            with_primitives: bool = True,
             name: str | None = None,
             description: str | None = None,
     ) -> MossRuntime:
@@ -623,7 +622,6 @@ class MossHost(ABC):
         bootstrap moss runtime.
         flags:
         :param run_shell: if true, start shell when runtime aenter.
-        :param with_primitives: if true, register manifests primitives into the shell
         :param name: set the moss name else use meta config
         :param description: set the moss description else use meta config
         """
@@ -648,8 +646,6 @@ class MossHost(ABC):
             # shell 本身就是主节点 channel runtime 的自解释封装.
             # 所以仍然可以运行 shell, 它不提供 logos 控制根 channel 即可.
             run_shell=True,
-            # 原语只有主轨执行有意义, 所以这个 flag 设置为 false.
-            with_primitives=False,
             description=description,
         )
         # 这里的实现作为 code as prompt 的一部分, 解释自身的使用逻辑.
