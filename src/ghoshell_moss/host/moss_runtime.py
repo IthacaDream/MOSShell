@@ -62,7 +62,11 @@ class MossRuntimeImpl(MossRuntime):
         system_prompt = self._matrix.moss_system_prompter()
         # 从 manifest 发现 __main__ channel，没有则用默认空白 main。
         # main channel 上的 import_channels / with_state / with_module 已在 manifest 中完成组合。
-        manifests_main = self._matrix.manifests.channels().get("__main__")
+        # channels() key 是 Python 变量名，查找需匹配 channel.name()。
+        manifests_main = next(
+            (ch for ch in self._matrix.manifests.channels().values() if ch.name() == "__main__"),
+            None,
+        )
         if manifests_main is None:
             manifests_main = new_main_channel(
                 description=f"Default main channel for {self._description or self._name}"

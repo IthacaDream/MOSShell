@@ -284,6 +284,39 @@ Session 输出保持只显示状态（给人看的），返回值承载全部执
 
 ---
 
+## channels() key 约定不一致导致 main channel 未被发现（2026-05-25, fixed）
+
+### 问题
+
+`moss-run-ghost echo` 无法发现 `.moss_ws/src/MOSS/manifests/channels.py` 中注册的 channel。Shell 启动后使用的是 fallback 空白默认 channel，注册的 AppStoreChannel 和原语（sleep/noop/observe/interrupt）全部丢失。
+
+### 根因
+
+`channel-discovery-rework` 重构后，`search_channels_from_package` 用 **Python 变量名**作为 `channels()` 字典的 key（注释写明"以 attr name 作为唯一键"）。但 `MossRuntimeImpl.__init__` 用 `channels().get("__main__")` 去查找——`"__main__"` 是 `Channel.name()` 的值，不是变量名。
+
+`.moss_ws/src/MOSS/manifests/channels.py` 中变量名为 `main`，`Channel.name()` 为 `"__main__"`。`channels()` 返回 `{"main": PyChannel}`，`.get("__main__")` 返回 `None` → fallback 空白 channel。
+
+### 方案
+
+`MossRuntimeImpl.__init__` 中把 key lookup 改为遍历 values 匹配 `ch.name() == "__main__"`：
+
+```python
+# before
+manifests_main = self._matrix.manifests.channels().get("__main__")
+
+# after
+manifests_main = next(
+    (ch for ch in self._matrix.manifests.channels().values() if ch.name() == "__main__"),
+    None,
+)
+```
+
+不改 `search_channels_from_package` 的 key 语义，因为注释已明确约定"以 attr name 作为唯一键"，且调用方（`manifests_cli.py`、`inspector_manifests.py`）均按变量名 key 使用。
+
+### 位置
+
+- `src/ghoshell_moss/host/moss_runtime.py:65-68`
+
 ## 复苏指引
 
 新 AI 实例进入此 workstream 时：
