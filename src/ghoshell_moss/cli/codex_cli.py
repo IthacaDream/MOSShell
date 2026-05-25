@@ -490,7 +490,13 @@ BLUEPRINT_PACKAGE = "ghoshell_moss.core.blueprint"
 CONTRACTS_PACKAGE = "ghoshell_moss.contracts"
 
 
-def _show_package_module(package: str, module_name: str | None = None, *, cmd_name: str = "") -> None:
+def _show_package_module(
+        package: str,
+        module_name: str | None = None,
+        *,
+        cmd_name: str = "",
+        deps: bool = False,
+) -> None:
     """Reflect concept modules from a package. Lists all if no module_name given."""
     from ghoshell_moss.core.codex.discover import scan_package
     from ghoshell_moss.core.codex import reflect_any_by_import_path
@@ -517,7 +523,8 @@ def _show_package_module(package: str, module_name: str | None = None, *, cmd_na
         )
 
         console.print(f"\n[dim]Total: {len(modules)} modules[/dim]")
-        console.print(f"[dim]Tip: Run [bold]moss codex {cmd_name} <name>[/bold] to see details.[/dim]")
+        console.print(f"[dim]Tip: Run [bold]moss codex {cmd_name} <name>[/bold] for source, "
+                      f"add [bold]--deps[/bold] for full dependency reflection.[/dim]")
         return
 
     modules_map = {mod.module_name: mod for mod in modules}
@@ -533,8 +540,10 @@ def _show_package_module(package: str, module_name: str | None = None, *, cmd_na
 
     try:
         print_info(f"Reflecting: {import_path}...")
-        result = reflect_any_by_import_path(import_path)
+        result = reflect_any_by_import_path(import_path, deps=deps)
         echo(result)
+        if not deps:
+            console.print(f"\n[dim]Use [bold]--deps[/bold] to include dependency interfaces.[/dim]")
     except Exception as e:
         print_error(f"Failed to reflect module '{import_path}': {e}")
         raise typer.Exit(code=1)
@@ -548,9 +557,13 @@ def codex_concepts(
         module_name: str | None = typer.Argument(
             None,
             help="Specific core concept module to reflect. If omitted, lists all available modules."
-        )
+        ),
+        deps: bool = typer.Option(
+            False, "--deps", "-d",
+            help="Include reflected dependency interfaces in the output.",
+        ),
 ):
-    _show_package_module(CONCEPT_PACKAGE, module_name, cmd_name="concepts")
+    _show_package_module(CONCEPT_PACKAGE, module_name, cmd_name="concepts", deps=deps)
 
 
 @codex_app.command(
@@ -561,9 +574,13 @@ def codex_blueprint(
         module_name: str | None = typer.Argument(
             None,
             help="Specific blueprint module to reflect. If omitted, lists all available modules."
-        )
+        ),
+        deps: bool = typer.Option(
+            False, "--deps", "-d",
+            help="Include reflected dependency interfaces in the output.",
+        ),
 ):
-    _show_package_module(BLUEPRINT_PACKAGE, module_name, cmd_name="blueprint")
+    _show_package_module(BLUEPRINT_PACKAGE, module_name, cmd_name="blueprint", deps=deps)
 
 
 @codex_app.command(
@@ -574,6 +591,10 @@ def codex_contracts(
         module_name: str | None = typer.Argument(
             None,
             help="Specific contracts module to reflect. If omitted, lists all available modules."
-        )
+        ),
+        deps: bool = typer.Option(
+            False, "--deps", "-d",
+            help="Include reflected dependency interfaces in the output.",
+        ),
 ):
-    _show_package_module(CONTRACTS_PACKAGE, module_name, cmd_name="contracts")
+    _show_package_module(CONTRACTS_PACKAGE, module_name, cmd_name="contracts", deps=deps)
