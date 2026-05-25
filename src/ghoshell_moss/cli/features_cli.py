@@ -276,7 +276,7 @@ def status_cmd(
 def create_cmd(
     name: str = typer.Argument(..., help="Feature name in kebab-case."),
     features_dir: Optional[Path] = typer.Option(
-        None, "--dir", "-d",
+        None, "--dir",
         help="Path to .ai_partners/features/ directory. Defaults to current project.",
     ),
 ):
@@ -290,7 +290,7 @@ def create_cmd(
         fm_path = create_feature(str(fd), name, template_path=template if template.is_file() else None)
         print_success(f"Workstream '{name}' created: {fm_path}")
         print_info("Read the convention: moss features specification")
-        print_info("Next: Read and edit the FEATURE.md to record motivation and key decisions.")
+        print_info(f"Next: edit {fm_path} to record motivation and key decisions.")
     except FileExistsError:
         print_error(f"Workstream '{name}' already exists.")
         raise typer.Exit(code=1)
