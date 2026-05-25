@@ -6,7 +6,7 @@ from typing import Iterable
 from ghoshell_moss.core.blueprint.host import MossHost, GhostRuntime, MossRuntime
 from ghoshell_moss.core.blueprint.environment import Environment
 from ghoshell_moss.core.blueprint.session import OutputItem
-from ghoshell_moss.host.tui import TUIState, MossHostTUI
+from ghoshell_moss.host.tui import TUIState, MossHostTUI, LiveStreamSink
 from ghoshell_moss.host.repl.repl_state import REPLState
 from ghoshell_moss.host.repl.inspector_ghost import GhostInspector
 from ghoshell_moss.host.repl.inspector_matrix import MatrixInspector
@@ -87,13 +87,32 @@ class GhostREPLState(REPLState):
         self.console.output(item)
 
     async def _consume_logos(self) -> None:
-        """消费 logos 流，逐 delta 实时渲染。"""
+        """消费 logos 流，按 utterance 聚合渲染，避免 token 粒度换行断裂。
+
+        LiveStreamSink 跨 asyncio/sync 边界：asyncio 侧 send(delta) 通过
+        janus 队列传递 delta，渲染线程在 render(console) 中阻塞消费并聚合。
+        ghost_runtime._articulate_loop 在每个 articulation 结束后
+        pub_logos("\\n\\n") 作为 utterance 边界标记。
+        """
+        sink: LiveStreamSink | None = None
         try:
             async for delta in self._session.get_logos():
-                if delta:
-                    self.console.rprint(delta)
+                if not delta:
+                    continue
+                if delta == "\n\n":
+                    if sink is not None:
+                        sink.commit()
+                        sink = None
+                    continue
+                if sink is None:
+                    sink = LiveStreamSink()
+                    self.console.rprint(sink, spacing=False)
+                await sink.send(delta)
         except asyncio.CancelledError:
             pass
+        finally:
+            if sink is not None:
+                await sink.close()
 
 
 class GhostTUI(MossHostTUI[GhostRuntime]):

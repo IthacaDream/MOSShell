@@ -1,9 +1,9 @@
 ---
 title: TUI Stream Rendering
-status: in-progress
+status: completed
 priority: P0
 created: 2026-05-23
-updated: 2026-05-23
+updated: 2026-05-25
 depends: []
 description: >-
   跨 asyncio/sync 边界的流式渲染基础设施 — LiveStreamSink + duck-type render(console) 模式。
@@ -78,3 +78,30 @@ self.console.rprint(sink)
 ```
 
 不使用 context manager 时，异常路径需手动 `await sink.close()`。
+
+## 集成完成（2026-05-25）
+
+### 集成方式
+
+`ghost_ui.py:_consume_logos` 按 utterance 使用 `LiveStreamSink`：
+- `"\n\n"`（ghost_runtime._articulate_loop finally 块发布的 articulation 边界标记）触发 `sink.commit()`
+- 每个 utterance 创建新 sink → `rprint(sink)` → 渲染线程进入 `render()` 独占模式
+- asyncio 侧 `await sink.send(delta)` → janus 队列桥接到渲染线程
+
+### render() 终版方案
+
+经过多次迭代，最终使用 **ANSI 原地替换 + Rich Panel**：
+
+1. `console.file.write("\033[{N}F")` + `"\033[J"` — 上移光标并清屏，擦除上一版 panel
+2. `console.capture()` + `console.print(Panel(...))` — 用 Rich 渲染 panel 但不输出
+3. `console.file.write(captured_output)` — 将 rendered panel 直写终端
+
+迭代历史：
+- 初版 `console.print(text, end='')` → Rich 与 prompt_toolkit 光标控制冲突，吞字符
+- 二版 `console.file.write(text)` → 无 panel，与用户期望不符
+- 终版 `ANSI + Panel` → 独立的 RESPONSE panel，原地流式更新
+
+### 涉及文件
+
+- `tui.py` — `LiveStreamSink.render()`：ANSI 原地替换 + Panel 渲染
+- `ghost_ui.py` — `_consume_logos`：按 utterance 管理 sink 生命周期
