@@ -13,7 +13,7 @@ from ghoshell_moss.core.duplex import (
 )
 from ghoshell_moss.core.duplex.protocol import HeartbeatEvent
 from ghoshell_moss.contracts import LoggerItf, get_moss_logger
-from ._utils import NodeChannelBridgeExpr
+from ._utils import BridgeExpr, NodeChannelBridgeExpr
 from pydantic import ValidationError
 import janus
 import asyncio
@@ -42,12 +42,16 @@ class ZenohProviderConnection(Connection):
             node_name: str,
             session_scope: str,
             logger: LoggerItf | None = None,
+            bridge_expr: BridgeExpr | None = None,
     ) -> None:
         self._logger = logger or get_moss_logger()
         self._session_scope = session_scope
         self._session = session
         self._node = node_name
-        self._bridge_expr = NodeChannelBridgeExpr(session_scope=self._session_scope, address=self._node)
+        if bridge_expr is not None:
+            self._bridge_expr = bridge_expr
+        else:
+            self._bridge_expr = NodeChannelBridgeExpr(session_scope=self._session_scope, address=self._node)
         # 默认为 disconnected.
         self._disconnected_event = threading.Event()
         # 从 proxy 读取的队列.
@@ -222,6 +226,7 @@ class ZenohChannelProvider(DuplexChannelProvider):
             container: IoCContainer | None = None,
             zenoh_session: zenoh.Session | None = None,
             liveness_check_interval: float = 3.0,
+            bridge_expr: BridgeExpr | None = None,
     ):
         self._node_name = address
         self._session_scope = session_scope
@@ -242,6 +247,7 @@ class ZenohChannelProvider(DuplexChannelProvider):
             session_scope=session_scope,
             node_name=address,
             logger=container.get(LoggerItf),
+            bridge_expr=bridge_expr,
         )
         self._connection_keys = connection.all_key_expressions()
         super().__init__(

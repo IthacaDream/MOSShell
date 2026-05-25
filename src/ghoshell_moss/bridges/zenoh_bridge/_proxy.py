@@ -12,7 +12,7 @@ from ghoshell_moss.core.duplex import (
 )
 from ghoshell_moss.core.duplex.protocol import HeartbeatEvent
 from ghoshell_moss.contracts import LoggerItf, get_moss_logger
-from ._utils import NodeChannelBridgeExpr
+from ._utils import BridgeExpr, NodeChannelBridgeExpr
 from pydantic import ValidationError
 import janus
 import asyncio
@@ -35,12 +35,16 @@ class ZenohProxyConnection(Connection):
             address: str,
             session_scope: str,
             logger: LoggerItf | None = None,
+            bridge_expr: BridgeExpr | None = None,
     ) -> None:
         self._logger = logger or get_moss_logger()
         self._session_scope = session_scope
         self._zenoh_session = session
         self._address = address
-        self._bridge_expr = NodeChannelBridgeExpr(session_scope=self._session_scope, address=self._address)
+        if bridge_expr is not None:
+            self._bridge_expr = bridge_expr
+        else:
+            self._bridge_expr = NodeChannelBridgeExpr(session_scope=self._session_scope, address=self._address)
 
         # 状态控制
         self._disconnected_event = threading.Event()
@@ -204,10 +208,12 @@ class ZenohProxyChannel(DuplexChannelProxy):
             description: str = "",
             zenoh_session: zenoh.Session | None = None,
             uid: str | None = None,
+            bridge_expr: BridgeExpr | None = None,
     ):
         self._address = address
         self._session_scope = session_scope
         self._zenoh_session = zenoh_session
+        self._bridge_expr = bridge_expr
         self._connection_keys = {}
         super().__init__(
             name=name,
@@ -219,13 +225,13 @@ class ZenohProxyChannel(DuplexChannelProxy):
     def _create_connection(self, container: IoCContainer) -> Connection:
         session = self._zenoh_session
         if session is None:
-            # must find from container
             session = container.force_fetch(zenoh.Session)
         connection = ZenohProxyConnection(
             session,
             address=self._address,
             session_scope=self._session_scope,
             logger=container.get(LoggerItf),
+            bridge_expr=self._bridge_expr,
         )
         self._connection_keys = connection.all_key_expressions()
         return connection
