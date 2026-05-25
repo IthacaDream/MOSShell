@@ -103,15 +103,6 @@ async def test_topic_keep_latest():
     producer_done = asyncio.Event()
     consumer_done = asyncio.Event()
 
-    async def produce():
-        await consumer_started.wait()
-        publisher = service.model_publisher("publisher", ErrorTopic)
-        async with publisher:
-            for idx in range(5):
-                publisher.pub(ErrorTopic(errmsg=str(idx)))
-                await asyncio.sleep(0.0)
-        producer_done.set()
-
     received = []
 
     async def consumer(_subscriber: Subscriber):
@@ -124,10 +115,16 @@ async def test_topic_keep_latest():
         consumer_done.set()
 
     async with service:
-        producer_task = asyncio.create_task(produce())
+        consumer_started.set()
+        publisher = service.model_publisher("publisher", ErrorTopic)
         subscriber = service.subscribe_model(ErrorTopic, maxsize=1)
         consumer_task = asyncio.create_task(consumer(subscriber))
-        await producer_task
+        async with publisher:
+            for idx in range(5):
+                publisher.pub(ErrorTopic(errmsg=str(idx)))
+                await asyncio.sleep(0.0)
+        await service.wait_sent()
+        producer_done.set()
     await consumer_task
     assert len(received) == 1
     assert received[0].errmsg == "4"

@@ -111,7 +111,7 @@ class LiveStreamSink:
         self._rich_print_kwargs = rich_print_kwargs or {}
         self._committed = False
         self._render_count = 0
-        self._buffer: list[Segment] = []
+        self._buffer: list[str] = []
 
     async def __aenter__(self):
         return self
@@ -158,37 +158,51 @@ class LiveStreamSink:
     def render(self, console: Console) -> None:
         if self._render_count > 0:
             if self._buffer:
-                console.print(Text.assemble(*self._buffer))
+                console.print(Panel(
+                    Text("".join(self._buffer)),
+                    title=" RESPONSE ",
+                    title_align="left",
+                    border_style="cyan",
+                ))
             return
 
-        self._buffer = []
+        self._buffer: list[str] = []
         pending: list[str] = []
+        rendered_lines = 0
 
-        def _flush() -> Segment | None:
-            if pending:
-                text = "".join(pending)
-                seg = Segment(text)
-                self._buffer.append(seg)
-                pending.clear()
-                return seg
-            return None
+        def _render_panel() -> None:
+            nonlocal rendered_lines
+            if rendered_lines > 0:
+                # 光标上移到上一个 panel 的起始行 + 清屏
+                console.file.write(f"\033[{rendered_lines}F")
+                console.file.write("\033[J")
+            panel = Panel(
+                Text("".join(self._buffer)),
+                title=" RESPONSE ",
+                title_align="left",
+                border_style="cyan",
+            )
+            with console.capture() as capture:
+                console.print(panel)
+            output = capture.get()
+            rendered_lines = output.count('\n')
+            console.file.write(output)
+            console.file.flush()
 
         try:
-            first = True
             while True:
                 item = self._queue.sync_q.get()
                 if item is None:
                     break
                 pending.append(item)
-                # 队列非空时继续聚合，为空时 flush 并阻塞等下一个 delta
                 if self._queue.sync_q.empty():
-                    seg = _flush()
-                    if seg is not None:
-                        kwargs = self._rich_print_kwargs.copy()
-                        kwargs['new_line_start'] = first
-                        console.print(seg.text, **kwargs)
-                        first = False
-            _flush()
+                    self._buffer.append("".join(pending))
+                    pending.clear()
+                    _render_panel()
+            if pending:
+                self._buffer.append("".join(pending))
+                pending.clear()
+            _render_panel()
         except janus.SyncQueueShutDown:
             pass
         finally:

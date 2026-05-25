@@ -1,5 +1,6 @@
 import inspect
-from typing import Dict, Any, Iterable, Optional, TypedDict
+from typing import Dict, Any, Iterable, Optional
+from typing_extensions import TypedDict
 from ghoshell_moss.core.helpers.func import parse_function_interface
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.document import Document

@@ -1,6 +1,7 @@
 import asyncio
 import time
-from typing import Callable, Self
+from typing import Callable
+from typing_extensions import Self
 from ghoshell_moss.core.blueprint.mindflow import Nucleus, Signal, Impulse, Priority
 from ghoshell_moss.contracts.logger import LoggerItf, get_moss_logger
 import threading

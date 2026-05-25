@@ -231,9 +231,10 @@ You must complete the presentation on the current page firstly, then call the co
                 f"Page number:{i + 1} Title={f.title} Outline={f.outline} Finished={f.finished}"
                 for i, f in enumerate(self.frames)
             ]
+            frames_text = "Frames and Progress:\n" + "\n".join(frames)
             message.with_content(
                 Text(text=f"Current playing slide asset name: {self.loaded.name}"),
-                Text(text=f"Frames and Progress:\n{'\n'.join(frames)}"),
+                Text(text=frames_text),
                 Text(
                     text=f"Current frame name: {self._current_frame.title} content: {self._current_frame.content} image is under"
                 ),
@@ -282,7 +283,8 @@ class SlideStudio:
         if not slide_texts:
             message.with_content("There has no slides in Slide Studio")
         else:
-            message.with_content(f"All assets in Slide Studio:\n{'\n'.join(slide_texts)}")
+            slide_list = "\n".join(slide_texts)
+            message.with_content(f"All assets in Slide Studio:\n{slide_list}")
         return [message]
 
     def as_channel(self):

@@ -10,14 +10,14 @@ from ghoshell_container import IoCContainer
 from ghoshell_moss.core.blueprint.manifests import Manifests
 from pydantic import BaseModel, Field
 from pathlib import Path
-from enum import StrEnum
+from enum import Enum
 import asyncio
 import frontmatter
 
 __all__ = ['Matrix', 'Cell', 'SystemPrompter', 'ScopesKey', 'MatrixLifecycleObject', 'Mode']
 
 
-class CellType(StrEnum):
+class CellType(str, Enum):
     host = 'host',  # 表示为启动网络的主进程节点.
     app = 'app',  # 表示在相同的 workspace 下的 App 节点. 由 main 节点管理生命周期.
     fractal = 'fractal',  # Matrix 的分形通讯机制下, 其它 Matrix 连接到当前 Matrix, 所形成的 cell 节点.

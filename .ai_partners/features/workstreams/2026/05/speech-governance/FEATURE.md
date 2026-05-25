@@ -1,6 +1,6 @@
 ---
 title: Speech Governance — 解耦、多后端、容错降级
-status: draft
+status: in-progress
 priority: P2
 created: 2026-05-25
 updated: 2026-05-25
@@ -146,7 +146,31 @@ Player (miniaudio) → 失败 → 系统默认播放器 → 失败 → MockSpeec
 
 这样 speech 可以作为独立 app cell 运行在单独进程中，通过 zenoh session 通讯。但这**不是第一版的 scope**——第一版先完成 speech 的解耦和 player/provider 治理，跨进程 speech 作为未来迭代方向。
 
+### 问题 6: AI 模型构造 JSON 参数的认知冲突 (2026-05-25)
+
+**现象**：模型在调用 `say` 命令时，`voice: dict` 参数需要传递 JSON 字符串，但模型总是用 CTML 的原生 key-value 属性语法来写，导致参数解析失败。
+
+**根因**：CTML 的属性语法天然是**扁平的 key-value**（如 `<say speed="1.0" pitch="high">`），而 `voice: dict` 要求模型在属性值内部嵌套 JSON 字符串（如 `<say voice:dict="{'speed': 1.0}">`）。模型已经在用 XML 属性表达结构了，突然要求它在属性值内部再塞一个序列化结构，它在两种语法之间切换时容易出错。CTML 的 `:dict` 类型后缀机制虽然存在，但模型不容易自然地想到"先把 dict 序列化成 JSON 字符串，再塞进属性值"。
+
+**本质**：这不是模型能力问题，而是 **"flat syntax for nested data" 的认知 dissonance**。CTML interface 设计原则应该是：凡是模型要通过 CTML 调用的命令，参数应尽量是标量类型（str/int/float/bool）或流式参数（chunks__/text__/ctml__），避免 dict/list 这类需要二次序列化的复杂类型。当无法避免 dict 参数时，必须在 docstring 中提供显式的 CTML 调用示例。
+
+**当前缓解策略（方案 C）**：强化 command docstring 中的 CTML 示例。在 `say_doc()` 和类似涉及 dict 参数的命令中，显式展示 JSON 字符串的正确写法，让模型有明确的 copy-paste 模板。远期考虑拆分命令（方案 A：`set_voice` + `say` 分离），从根本上消除嵌套 dict 参数。
+
 ## Key Decisions
+
+### D6: 强化 CTML docstring 中的 JSON 参数示例 (P1)
+
+**决策**: 对涉及 `dict`/`list` 等复杂类型参数的命令，在 docstring 中显式提供 CTML 调用示例，展示 JSON 字符串的正确构造方式。不改变接口签名，不改变 CTML 解析规则。
+
+**具体措施**:
+- `say_doc()` 中加入 CTML 示例：`<say voice:dict=\"{'speed': 1.0, 'pitch': 'high'}\">你好</say>`
+- 样本应覆盖：单层 dict、嵌套 dict、带默认值的省略写法
+- 示例中展示 `:dict` 类型后缀的使用，利用 CTML parser 已有的 `AttrWithTypeSuffixParser` 机制
+- 此模式作为约定推广到其它有 dict/list 参数的命令
+
+**Why**: 改动最小，立即生效。模型对 docstring 中的示例有很强的跟随能力，好的示例可以显著降低出错率。长期看，如果某个 dict 参数频繁出错，再考虑拆分命令（方案 A）。
+
+**非目标**: 不改 CTML 语法，不加新的 parser 约定。不强制所有命令都避免 dict 参数。
 
 ### D1: Speech 不再生成 Command，转为 Channel Module (P0)
 

@@ -1,7 +1,8 @@
 import asyncio
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Any, Optional, Callable, TypedDict, AsyncIterable
+from typing import Any, Optional, Callable, AsyncIterable
+from typing_extensions import TypedDict
 
 import numpy as np
 from pydantic import BaseModel, Field
