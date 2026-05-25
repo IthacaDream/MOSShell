@@ -1,8 +1,8 @@
 import contextlib
-from typing import Protocol, Callable, Any, ClassVar, Literal, TypedDict
+from typing import Protocol, Callable, Any, ClassVar, Literal
 
 from ghoshell_container import IoCContainer
-from typing_extensions import Self
+from typing_extensions import Self, TypedDict
 from abc import ABC, abstractmethod
 
 from ghoshell_moss.core.concepts.channel import Channel, ChannelProvider

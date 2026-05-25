@@ -1,3 +1,4 @@
+import types
 from typing import NamedTuple, List
 from typing_extensions import is_protocol, is_typeddict
 from ghoshell_moss.core.codex._utils import (
@@ -217,7 +218,7 @@ def test_parse_doc_string():
 def test_is_class_and_is_subclass():
     import inspect
     a = dict[str, int]
-    assert not inspect.isclass(a)
+    assert type(a) is types.GenericAlias
     assert not is_protocol(a)
     assert is_typing(a)
     assert not inspect.isabstract(a)
@@ -234,7 +235,7 @@ def test_is_class_and_is_subclass():
 def test_is_typing():
     import inspect
     a = dict[str, int]
-    assert not inspect.isclass(a)
+    assert type(a) is types.GenericAlias
     assert not inspect.isbuiltin(a)
     assert is_typing(a)
     assert str(a) == "dict[str, int]"

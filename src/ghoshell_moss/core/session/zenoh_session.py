@@ -1,7 +1,8 @@
 import contextlib
 import logging
 import queue
-from typing import Callable, Self
+from typing import Callable
+from typing_extensions import Self
 
 import janus
 from ghoshell_moss.message import Message

@@ -1,5 +1,5 @@
-from typing import TypedDict, Required, Optional, Any
-from typing_extensions import Self
+from typing import Optional, Any
+from typing_extensions import Self, Required, TypedDict
 from abc import ABC, abstractmethod
 from pydantic import BaseModel, Field
 

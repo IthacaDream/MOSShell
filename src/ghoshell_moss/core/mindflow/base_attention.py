@@ -1,5 +1,6 @@
 from abc import abstractmethod
-from typing import Coroutine, Callable, Self, AsyncIterator, AsyncGenerator
+from typing import Coroutine, Callable, AsyncIterator, AsyncGenerator
+from typing_extensions import Self
 from ghoshell_moss.message import Message
 from ghoshell_moss.core.blueprint.mindflow import (
     Attention, Impulse, Flag, Priority, Moment,

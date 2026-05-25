@@ -1,4 +1,5 @@
-from typing import Callable, Iterable, Self
+from typing import Callable, Iterable
+from typing_extensions import Self
 from prompt_toolkit.completion import WordCompleter, Completer
 from prompt_toolkit.widgets import TextArea, Frame
 from prompt_toolkit.key_binding import KeyPressEvent

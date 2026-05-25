@@ -3,7 +3,7 @@ title: Echo Ghost Validation & Fixes
 status: in-progress
 priority: P0
 created: 2026-05-23
-updated: 2026-05-23T23:00
+updated: 2026-05-25T23:00
 depends: [first-ghost-prototype]
 description: >-
   echo ghost human validation 中发现的 bug 修复。
@@ -316,6 +316,42 @@ manifests_main = next(
 ### 位置
 
 - `src/ghoshell_moss/host/moss_runtime.py:65-68`
+
+## Python 3.10 兼容性降级（2026-05-25, fixed）
+
+### 问题
+
+项目原本在 Python 3.11+ 上开发（`typing.Self`、`enum.StrEnum`、f-string 内 `\n` 转义等 3.11+ 语法特性）。降级到 Python 3.10 后编译/导入失败。
+
+### 语法兼容
+
+| 问题 | 方案 | 涉及文件 |
+|---|---|---|
+| `typing.Self`（3.11+） | → `typing_extensions.Self` | `input_signal_nucleus.py`, `base_attention.py`, `buffer_nucleus.py`, `zenoh_session.py`, `echo_case.py` |
+| `typing.TypedDict`（Pydantic 要求 3.12 以下用 `typing_extensions`） | → `typing_extensions.TypedDict` | `host.py`, `repl_registrar.py`, `speech.py`, `abcd.py` |
+| `enum.StrEnum`（3.11+） | → `(str, Enum)` | `matrix.py`, `app.py` |
+| f-string 内 `\n` 转义（3.12 前不允许） | 提取到外部变量 | `slide_studio.py`（2 处） |
+
+### 测试适配
+
+| 问题 | 方案 |
+|---|---|
+| `ExceptionGroup`（3.11+ 内置） | 统一 `from exceptiongroup import ExceptionGroup`（anyio 的传递依赖，全版本可用） |
+| `inspect.isclass(dict[str, int])` 在 3.10 返回 `True` | 改用 `type(a) is types.GenericAlias`（版本无关的精确断言） |
+| `test_topic_keep_latest` 消费者/主循环竞态 | 消费者读前加 `await service.wait_sent()`，消除竞态窗口 |
+| `test_primitive_cannot_be_used_in_non_root_channel` 解析错误被 `raise_exception()` 直接抛出 | 改为 `pytest.raises(InterpretError)`，匹配实际错误传播路径 |
+
+### 位置
+
+- `src/ghoshell_moss/core/mindflow/` — Self → typing_extensions
+- `src/ghoshell_moss/core/session/zenoh_session.py` — Self → typing_extensions
+- `src/ghoshell_moss/host/repl/echo_case.py` — Self → typing_extensions
+- `src/ghoshell_moss/core/blueprint/` — TypedDict → typing_extensions, StrEnum → (str, Enum)
+- `src/ghoshell_moss/contracts/speech.py` — TypedDict → typing_extensions
+- `src/ghoshell_moss/host/repl/repl_registrar.py` — TypedDict → typing_extensions
+- `src/ghoshell_moss/message/contents/abcd.py` — TypedDict → typing_extensions
+- `src/ghoshell_moss_contrib/channels/slide_studio.py` — f-string 修复
+- `tests/` — 上述 4 个测试文件
 
 ## 复苏指引
 

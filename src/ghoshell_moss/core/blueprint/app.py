@@ -3,7 +3,7 @@ from typing import Iterable, Optional
 from typing_extensions import Self
 from pathlib import Path
 from pydantic import BaseModel, Field
-from enum import StrEnum
+from enum import Enum
 from .matrix import Cell
 import frontmatter
 import fnmatch
@@ -51,7 +51,7 @@ class AppWatcher(BaseModel):
     )
 
 
-class AppState(StrEnum):
+class AppState(str, Enum):
     STOPPED = 'stopped'
     STARTING = 'starting'
     RUNNING = 'running'
