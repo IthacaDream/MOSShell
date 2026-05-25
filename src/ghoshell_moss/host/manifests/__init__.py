@@ -6,7 +6,7 @@ from ghoshell_moss.core.blueprint.manifests import (
 from .configs import search_config_infos_from_package
 from .providers import search_provider_infos_from_package
 from .topics import search_topic_infos_from_package
-from .channels import search_channels_from_package
+from .channels import search_channels_from_package, search_main_channel_from_manifest
 from .resource_storages import PackageResourceStorages
 from .nuclei import search_nucleus_infos
 from ghoshell_moss.core.blueprint.environment import Environment
@@ -37,6 +37,7 @@ class PackageManifests(Manifests):
         self._provider_infos: list[ProviderInfo] | None = None
         self._topic_infos: dict[str, TopicInfo] | None = None
         self._channels: dict[str, Channel] | None = None
+        self._main_found_module: str | None = None
         self._ctml_versions: dict[str, CtmlVersionInfo] = ctml_versions or {}
         self._resource_storages: PackageResourceStorages | None = None
         self._nuclei: dict[str, NucleusMetaInfo] | None = None
@@ -78,8 +79,19 @@ class PackageManifests(Manifests):
     def channels(self) -> dict[str, Channel]:
         if self._channels is None:
             channels_package = '.'.join([self.root_package_name, 'channels'])
-            self._channels = search_channels_from_package(channels_package)
+            found = search_main_channel_from_manifest(channels_package)
+            if found is not None:
+                channel, found_module = found
+                self._channels = {"__main__": channel}
+                self._main_found_module = found_module
+            else:
+                self._channels = {}
         return self._channels
+
+    def main_channel_source(self) -> str | None:
+        """返回 __main__ channel 被发现时的 Python 模块路径，未找到则 None。"""
+        self.channels()  # 触发搜索
+        return self._main_found_module
 
     def ctml_versions(self) -> dict[str, CtmlVersionInfo]:
         return self._ctml_versions
@@ -155,6 +167,7 @@ class MergedManifests(Manifests):
         self._contract_infos: list[ProviderInfo] = []
         self._topic_infos: dict[str, TopicInfo] = {}
         self._channels: dict[str, Channel] = {}
+        self._main_channel_source: str | None = None
         self._ctml_versions: dict[str, CtmlVersionInfo] = {}
         self._resource_storages: PackageResourceStorages = PackageResourceStorages("")
         self._nuclei: dict[str, NucleusMetaInfo] = {}
@@ -163,7 +176,12 @@ class MergedManifests(Manifests):
             self._config_infos.update(manifest.configs())
             self._contract_infos.extend(manifest.providers())
             self._topic_infos.update(manifest.topics())
-            self._channels.update(manifest.channels())
+            # channel: mode 的 __main__ 完全覆盖全局 (K5)
+            manifest_channels = manifest.channels()
+            if "__main__" in manifest_channels:
+                self._channels = {"__main__": manifest_channels["__main__"]}
+                if isinstance(manifest, PackageManifests):
+                    self._main_channel_source = manifest.main_channel_source()
             self._ctml_versions.update(manifest.ctml_versions())
             # merge resource storages (右边优先)
             # 屏蔽 storage 实现.
@@ -187,6 +205,10 @@ class MergedManifests(Manifests):
 
     def channels(self) -> dict[ChannelName, Channel]:
         return self._channels
+
+    def main_channel_source(self) -> str | None:
+        """返回最终生效的 __main__ channel 的发现位置（Python 模块路径），未找到则 None。"""
+        return self._main_channel_source
 
     def ctml_versions(self) -> dict[str, CtmlVersionInfo]:
         return self._ctml_versions

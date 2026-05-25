@@ -281,11 +281,9 @@ def new_main_channel(description: str = "") -> PrimeChannel:
     """
     创建 CTML shell 的主 channel (__main__)。
 
-    FastAPI-like 入口: 创建工作空间中定义 main channel 的起点。
-    返回的 channel 可以继续 import_channels / with_state / with_module 进行组合。
-
-    仅创建空的 main channel — 不自动添加 primitives。
-    primitives 通过 manifest 的 primitives 机制独立注册。
+    FastAPI-like 入口。返回空的 main channel，
+    可选调用 ``inject_system_primitives(main)`` 注入系统原语，
+    可继续 import_channels / with_state / with_module 组合。
     """
     from ghoshell_moss.core.py_channel import PyChannel
-    return PyChannel(name="__main__", description=description)
+    return PyChannel(name="__main__", description=description, blocking=True)

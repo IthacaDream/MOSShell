@@ -302,44 +302,52 @@ def list_channels(
         json_out: bool = typer.Option(False, "--json", help="Output as raw JSON for AI.")
 ):
     """
-    List and inspect available communication channels.
+    Inspect the __main__ channel discovered from MOSS manifests.
     """
     host = Host(mode=mode)
     channels = host.manifests.channels()
+    main_channel = channels.get("__main__")
 
-    # 过滤
-    results = {name: c for name, c in channels.items() if search.lower() in name.lower()}
+    if main_channel is None:
+        console.print("[yellow]No __main__ channel discovered in manifests.[/yellow]")
+        return
+
+    if search and search.lower() not in "__main__":
+        console.print(f"[yellow]Only __main__ channel exists. No match for: '{search}'[/yellow]")
+        return
+
+    # 发现位置
+    source = getattr(host.manifests, 'main_channel_source', lambda: None)()
+    found_at = source or "unknown"
 
     if json_out:
-        # 给 AI 返回纯净数据
-        data = {name: {"name": name, "desc": c.description(), "type": str(type(c))}
-                for name, c in results.items()}
+        data = {
+            "name": "__main__",
+            "type": str(type(main_channel)),
+            "description": main_channel.description(),
+            "found_module": found_at,
+        }
         console.json(data=data)
         return
-    _display_channel_table(results, is_filtered=bool(search))
+    _display_main_channel_detail(main_channel, found_at)
 
 
-def _display_channel_table(channels: dict, is_filtered: bool):
-    # 准备表格数据
-    table_data = []
-    for name, c in channels.items():
-        table_data.append([
-            f"[green]{name}[/green]",
-            f"[dim]{type(c).__name__}[/dim]",
-            c.description().split('\n')[0] if c.description() else ""
-        ])
+def _display_main_channel_detail(channel, found_module: str):
+    """展示 __main__ channel 的详情视图。"""
+    from ghoshell_moss.core.py_channel import PyChannel
 
-    # 使用简洁表格显示
-    print_simple_table(
-        data=table_data,
-        headers=["Channel Name", "Type", "Description"],
-        title="MOSS Channels",
-        column_styles=["green", "dim", ""],
-        title_style="bold cyan",
-    )
+    console.print(f"\n[bold cyan]__main__ Channel[/bold cyan]")
+    console.print(f"[dim]Type:[/dim] {type(channel).__name__}")
+    console.print(f"[dim]Description:[/dim] {channel.description() or '(none)'}")
+    console.print(f"[dim]Discovered at:[/dim] {found_module}")
 
-    if not is_filtered:
-        console.print("\n[dim]Hint: Use [bold]moss manifest channels <name>[/bold] to see full detail.[/dim]")
+    if isinstance(channel, PyChannel):
+        builder = channel.build
+        commands = list(builder.iter_commands()) if hasattr(builder, 'iter_commands') else []
+        children = list(builder.iter_channels()) if hasattr(builder, 'iter_channels') else []
+        console.print(f"[dim]Commands:[/dim] {len(commands)}")
+        console.print(f"[dim]Sub-channels:[/dim] {len(children)}")
+        # TODO: 未来可展示 commands 列表、states、modules 等更丰富的静态能力
 
 
 @manifest_app.command(name="contracts")

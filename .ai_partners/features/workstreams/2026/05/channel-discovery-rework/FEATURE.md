@@ -3,7 +3,7 @@ title: Channel Discovery Rework — __main__ 单一发现 + 移除 primitives ma
 status: completed
 priority: P0
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-05-25T23:59
 depends: []
 milestone:
 description: >-
@@ -118,6 +118,38 @@ main channel 的构造和 primitives 的注册是两个独立的关注点。
 - fractal_hub 的 `import_channels` 保留不动 — 它是运行时动态组件，不属于 manifests 发现
 - explain 机制重构为"描述规则而非自述类身份"，后续文档治理时进一步完善
 - **Primitives 移除**：从 manifest 类型中彻底移除，ABC 保留默认 `return {}`。原语改为在 `channels.py` 中通过 `main.build.add_command()` 注册。Mode 的 `__main__` 完全覆盖全局，mode 需显式声明自己需要的全部原语。
+
+## Follow-up: 收尾清理 (2026-05-26)
+
+上一轮改动留下了几个不彻底的地方，本轮收尾：
+
+### 问题
+
+1. **`search_channels_from_package` 未收窄** — 仍扫描返回所有 Channel 实例，但语义上只有 `__main__` 有效。manifests CLI 会展示多余 channel。
+2. **原语列表分散** — `ctml_main.py`、workspace stub、mode stub 各自维护一份原语列表，手动同步。
+3. **`create_ctml_main_chan` 未标记废弃** — 旧构造路径仍活着，`CTMLMainChannel` 空子类无调用方。
+4. **`new_main_channel` 未设 `blocking=True`** — 行为回归。
+5. **Mode 复用全局 main 的模式未文档化** — 最简单的 `from MOSS.manifests.channels import main` 然后继续改造。
+
+### 本轮变更
+
+| 文件 | 变更 |
+|---|---|
+| `core/ctml/shell/ctml_main.py` | 新增 `inject_system_primitives()` 权威注入函数；`create_ctml_main_chan` + `CTMLMainChannel` 标记 deprecated |
+| `core/blueprint/states_channel.py` | `new_main_channel()` 显式 `blocking=True`；docstring 精简 |
+| `host/manifests/channels.py` | 新增 `search_main_channel_from_manifest()` — 只返回 `__main__` channel，记录发现位置 |
+| `host/manifests/__init__.py` | `PackageManifests.channels()` 改用新搜索函数；记录 `_main_found_module` |
+| `cli/manifests_cli.py` | channels 命令改为详情视图：名称/类型/描述/发现位置；PyChannel 展示静态能力 |
+| `stubs/.../channels.py` | 改用 `inject_system_primitives()`；加 mode 复用注释 |
+| `stubs/.../modes/system_test/channels.py` | `from MOSS.manifests.channels import main` 复用全局 main + 追加实验性原语 |
+| `core/blueprint/manifests.py` | ABC `channels()` docstring 更新 |
+| `__init__.py` | 导出 `inject_system_primitives` |
+
+### 关键决策
+
+- **K7: `inject_system_primitives(main, *, extended=False)` 为唯一权威原语源**。标准原语 (sleep/noop/observe/interrupt) 始终注入，扩展原语通过 `extended=True` 可选。workspace stubs 不再手动枚举原语列表。
+- **K8: `search_main_channel_from_manifest` 返回 `(Channel, found_module) | None`**。旧 `search_channels_from_package` 保留不动作为遗产。新函数只找 `__main__`，同时记录发现位置供 CLI 展示。
+- **K9: Mode 复用全局 main 的最简方式** — `from MOSS.manifests.channels import main`，纯 Python，零框架介入。
 
 - `new_main_channel()` 定义在 `states_channel.py`，与 `new_prime_channel` 并列。只创建 `PyChannel(name="__main__")`，零隐式逻辑
 - `manifests.channels()` API 不变，仍返回 `dict[str, Channel]`。MossRuntime 从 dict 中取 `"__main__"` key

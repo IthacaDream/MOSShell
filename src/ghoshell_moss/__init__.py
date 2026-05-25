@@ -42,7 +42,7 @@ from ghoshell_moss.core.py_channel import PyChannel
 
 # -- CTML Shell & Interpreter ------------------------------------------------
 from ghoshell_moss.core.ctml.interpreter import CTMLInterpreter
-from ghoshell_moss.core.ctml.shell.ctml_main import create_ctml_main_chan
+from ghoshell_moss.core.ctml.shell.ctml_main import create_ctml_main_chan, inject_system_primitives
 from ghoshell_moss.core.ctml.shell.ctml_shell import CTMLShell, new_ctml_shell
 
 # -- Blueprint: Environment & Host -------------------------------------------

@@ -5,27 +5,20 @@
 # 所有组合显式可见，零隐式逻辑。
 #
 # 如果这个文件没有定义 name == "__main__" 的 channel，MossRuntime 会使用默认空白 main。
-# Mode 可以定义自己的 channels.py 来完全覆盖全局的 main channel。
 #
-# 原语 (primitives) 不再有独立的 manifest 类型 — 直接通过 main.build.add_command() 注册。
+# Mode 复用全局 main 的最简方式：
+#     from MOSS.manifests.channels import main
+#     然后继续 inject_system_primitives(main, extended=True) 或 import_channels 等。
+#     MergedManifests 合并时 mode 的 __main__ 完全覆盖全局 (K5)。
 
 from ghoshell_moss import new_main_channel
-from ghoshell_moss.core.blueprint.channel_builder import new_command
-from ghoshell_moss.core.ctml.shell.primitives import (
-    interrupt_command,
-    noop,
-    observe,
-    sleep,
-)
+from ghoshell_moss.core.ctml.shell.ctml_main import inject_system_primitives
 from ghoshell_moss.host.app_store_channel import AppStoreChannel
 
 main = new_main_channel(description="Default MOSS main channel with app store")
 
-# -- Shell 原语 --------------------------------------------------
-main.build.add_command(new_command(sleep))
-main.build.add_command(new_command(noop))
-main.build.add_command(new_command(observe))
-main.build.add_command(interrupt_command)
+# -- 系统原语 --------------------------------------------------
+inject_system_primitives(main)
 
 # -- App Store ---------------------------------------------------
 main.import_channels(AppStoreChannel(name='apps'))

@@ -374,7 +374,7 @@ class PyChannel(BaseStateChannel, PrimeChannel):
         """
         :param name: channel 的名称.
         :param description: channel 的静态描述, 给模型看的.
-        :param blocking: channel 里默认的 command 类型, 是阻塞的还是非阻塞的.
+        :param blocking: 默认所有 command 序列执行 (blocking=True)。此参数是设计不佳的语法糖——阻塞语义应由 command 自身声明，而非 channel 统一施加。未来版本应移除。
         """
         matched = _ChannelNamePattern.fullmatch(name)
         if matched is None:

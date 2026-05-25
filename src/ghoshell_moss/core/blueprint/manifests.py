@@ -273,8 +273,11 @@ class Manifests:
 
     def channels(self) -> dict[ChannelName, Channel]:
         """
-        从环境中发现的运行时的一级 Channel. 会自动注册到 Shell main channel
-        通过 ghoshell_moss.core.concepts.channel.Channel 实例发现.
+        从环境中发现的 __main__ channel。只返回 name == '__main__' 的 Channel，
+        键为 '__main__'。未找到时返回空 dict。
+
+        Mode 的 __main__ 完全覆盖全局 (K5)。
+        发现位置通过 ``main_channel_source()`` 获取。
         """
         return {}
 
