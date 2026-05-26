@@ -75,6 +75,7 @@ __all__ = [
     "CommandCtx",
     "TaskScope",
     "CommandFunc",
+    "CommandTaskContextKey",
 ]
 
 RESULT = TypeVar("RESULT")
@@ -266,6 +267,10 @@ class CommandMeta(BaseModel):
     json_schema: Optional[dict[str, Any]] = Field(
         default=None,
         description="the json schema. 兼容性实现.",
+    )
+    timeout: float | None = Field(
+        default=None,
+        description="command protocol level max timeout"
     )
 
     # --- advance options --- #
@@ -517,7 +522,9 @@ class PyCommand(CliCommand):
     将 python 的 Coroutine 函数封装成 Command
     通过反射获取 interface.
 
-    Example of how to implement a Command
+    推荐永远用 async def 函数去封装 PyCommand.
+    这样才能定义一个可以 cancel 的生命周期.
+    否则需要用特别 trick 的方式去理解. 比如 ChannelCtx.task().done()
     """
 
     def __init__(
@@ -539,6 +546,7 @@ class PyCommand(CliCommand):
             priority: int = 0,
             delta_types: Optional[set] = None,
             with_json_schema: bool = False,
+            timeout: Optional[float] = None,
     ):
         """
         :param func: origin coroutine function
@@ -563,6 +571,9 @@ class PyCommand(CliCommand):
         self._func = func
         self._func_itf = parse_function_interface(func)
         self._partial = partial
+        if timeout is not None and timeout < 0:
+            raise ValueError(f"timeout {timeout} is invalid")
+        self._timeout = timeout or None
         self._is_coroutine_func = inspect.iscoroutinefunction(func)
         self._interface_or_fn: Optional[str] = None
         if interface:
@@ -666,6 +677,7 @@ class PyCommand(CliCommand):
         meta.call_soon = self._call_soon
         meta.tags = self._tags or []
         meta.blocking = self._blocking
+        meta.timeout = self._timeout
         docstring = doc or self._func_itf.docstring
         meta.description = docstring.splitlines()[0] if docstring else ''
         # 标记 meta 是否是动态变更的.
@@ -917,6 +929,9 @@ class CommandTaskResult(BaseModel):
                 self.messages.extend(messages)
 
 
+CommandTaskContextKey = str
+
+
 class CommandTask(Generic[RESULT], ABC):
     """
     线程安全的 Command Task 对象. 相当于重新实现一遍 asyncio.Task 类似的功能.
@@ -943,8 +958,10 @@ class CommandTask(Generic[RESULT], ABC):
             args: list,
             kwargs: dict[str, Any],
             cid: str | None = None,
-            context: dict[str, Any] | None = None,
+            # 必须是可序列化对象.
+            context: dict[CommandTaskContextKey, Any] | None = None,
             call_id: str | int | None = None,
+            timeout: float | None = None,
     ) -> None:
         self.chan = chan
         self.cid: str = cid or uuid()
@@ -960,6 +977,9 @@ class CommandTask(Generic[RESULT], ABC):
         self.context = context or {}
         self.errcode: int = 0
         self.errmsg: Optional[str] = None
+        if timeout is not None and timeout < 0:
+            raise ValueError(f"timeout {timeout} is invalid")
+        self.timeout: float | None = timeout or meta.timeout or None
         # --- debug --- #
         self.last_trace: tuple[str, float] = ('', 0.0)
         self.trace: dict[str, float] = {
@@ -1154,6 +1174,13 @@ class CommandTask(Generic[RESULT], ABC):
         r = await self.func(*args, **kwargs)
         return r
 
+    async def dry_run_with_timeout(self, timeout: float | None = None) -> RESULT:
+        timeout = timeout or self.timeout
+        if timeout is not None and timeout > 0:
+            return await asyncio.wait_for(self.dry_run(), timeout=timeout)
+        else:
+            return await self.dry_run()
+
     async def run(self) -> RESULT:
         """
         典型的案例展示如何使用一个 command task. 有状态的运行逻辑.
@@ -1165,11 +1192,14 @@ class CommandTask(Generic[RESULT], ABC):
 
         set_token = CommandTaskContextVar.set(self)
         try:
-            dry_run_task = asyncio.create_task(self.dry_run())
-            wait_done_task = asyncio.create_task(self.wait(throw=False))
+            dry_run_task = asyncio.create_task(self.dry_run_with_timeout())
+            wait_task_done_by_outside = asyncio.create_task(self.wait(throw=False))
             # resolve 生效, wait 就会立刻生效.
             # 否则 wait 先生效, 也一定会触发 cancel, 确保 resolve task 被 wait 了, 而且执行过 cancel.
-            done, pending = await asyncio.wait([dry_run_task, wait_done_task], return_when=asyncio.FIRST_COMPLETED)
+            done, pending = await asyncio.wait(
+                [dry_run_task, wait_task_done_by_outside],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
             for task in pending:
                 task.cancel()
             if dry_run_task in done:
@@ -1194,25 +1224,22 @@ class CommandTask(Generic[RESULT], ABC):
                 self.cancel()
 
     def __await__(self):
+        """
+        等待 task 执行结束, 但和 asyncio.Task 不同, 这里不会真的执行 task 的 run 逻辑
+        它仍然要被别的地方 (比如 ChannelRuntime) 执行完后 resolve 才能解除阻塞.
+        这是 Command 体系跨进程的本质决定的.
+        """
         if self.done():
             async def _already_done():
                 return self.result(throw=True)
 
             return _already_done().__await__()
-        future = ThreadSafeFuture()
 
-        def _resolve_future(_task: CommandTask):
-            if future.done():
-                return
-            elif _task.cancelled():
-                future.cancel()
-            elif _task.is_failed():
-                future.set_exception(_task.exception())
-            else:
-                future.set_result(_task.result())
+        async def _wait_done():
+            await self.wait(throw=True)
+            return self.result(throw=True)
 
-        self.add_done_callback(_resolve_future)
-        return future.__await__()
+        return _wait_done().__await__()
 
     def __repr__(self):
         tokens = self.tokens
@@ -1248,6 +1275,7 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
             context: dict[str, Any] | None = None,
             call_id: str | int | None = None,
             partial: CommandPartial | None = None,
+            timeout: float | None = None,
     ) -> None:
         super().__init__(
             chan=chan,
@@ -1260,6 +1288,7 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
             context=context,
             call_id=call_id,
             partial=partial,
+            timeout=timeout,
         )
         self.__result: Optional[RESULT] = None
         self.__done_event: ThreadSafeEvent = ThreadSafeEvent()
@@ -1407,7 +1436,13 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
                 errmsg = error.message
             elif isinstance(error, asyncio.CancelledError):
                 errcode = CommandErrorCode.CANCELLED.value
-                errmsg = ""
+                errmsg = "cancelled"
+            elif isinstance(error, asyncio.TimeoutError):
+                errcode = CommandErrorCode.TIMEOUT.value
+                errmsg = "timeout"
+            elif isinstance(error, TimeoutError):
+                errcode = CommandErrorCode.TIMEOUT.value
+                errmsg = "timeout"
             elif isinstance(error, Exception):
                 errcode = CommandErrorCode.UNKNOWN_ERROR.value
                 # 忽略回调.
@@ -1482,7 +1517,9 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
         """
         等待命令被执行完毕. 但不会主动运行这个任务. 仅仅是等待.
         Command Task 的 Await done 要求跨线程安全.
-        :throw: 如果为 True, 有异常, 或者有 observe == True 都会抛出异常.
+        :param throw: 如果为 True, 有异常, 或者有 observe == True 都会抛出异常.
+        :param timeout: 等待的超时时间, 并不是 task 自身的异常时间.
+        :raise CommandError: task 自身的异常.
         """
         if self.__done_event.is_set():
             if throw:
@@ -1494,10 +1531,7 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
             await self.__done_event.wait()
         if throw:
             if self.errcode != 0:
-                raise CommandError(self.errcode, self.errmsg or "")
-            elif self.__task_result and self.__task_result.observe:
-                # observe 可以中断 wait FIRST_EXCEPTION
-                raise CommandErrorCode.OBSERVE.error("need observe")
+                raise CommandError(self.errcode, self.errmsg or "", at_line=self.done_at)
         return self.__result
 
     def wait_sync(self, *, throw: bool = True, timeout: float | None = None) -> Optional[RESULT]:

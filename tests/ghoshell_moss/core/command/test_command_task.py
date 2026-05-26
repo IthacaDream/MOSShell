@@ -267,3 +267,15 @@ async def test_bare_and_magic_task():
     assert task.is_magical()
     r = await task.dry_run()
     assert r is 123
+
+
+@pytest.mark.asyncio
+async def test_command_task_timeout():
+    async def foo() -> int:
+        await asyncio.sleep(1)
+        return 123
+
+    foo_command = PyCommand(foo, timeout=0.01)
+    task = BaseCommandTask.from_command(foo_command)
+    with pytest.raises(asyncio.TimeoutError):
+        await task.run()

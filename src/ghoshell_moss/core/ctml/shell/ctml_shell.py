@@ -293,6 +293,7 @@ class CTMLShell(MOSShell[PrimeChannel]):
             ignore_wrong_command: bool = False,
             token_replacements: dict[str, str] | None = None,
             clear_after_exit: bool | None = None,
+            task_context: dict[str, Any] | None = None,
     ) -> Interpreter:
         self._check_running()
         self._check_paused()
@@ -339,6 +340,7 @@ class CTMLShell(MOSShell[PrimeChannel]):
             tokens_replacement=token_replacements,
             clear_after_exit=clear_after_exit,
             moss_static=self._moss_static_cache,
+            task_context=task_context,
         )
 
         # 会接受回调的话, 更新最新的 interpreter.

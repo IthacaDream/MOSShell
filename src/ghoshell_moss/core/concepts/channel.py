@@ -611,11 +611,14 @@ class ChannelRuntime(ABC):
             *,
             args: tuple | None = None,
             kwargs: dict | None = None,
+            timeout: float | None = None,
     ) -> Awaitable:
         """
         执行命令并且阻塞等待拿到结果.
         """
         task = self.create_command_task(name, args=args, kwargs=kwargs)
+        if timeout is not None:
+            task.timeout = timeout
         self.push_task(task)
         return task
 

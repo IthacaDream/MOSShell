@@ -258,13 +258,12 @@ class AbsChannelTreeRuntime(Generic[CHANNEL], AbsChannelRuntime[CHANNEL], ABC):
 
     async def _get_task_result(self, task: CommandTask) -> Any:
         # 准备执行.
-        await asyncio.sleep(0)
         self.logger.info("%s start task %s", self.log_prefix, task.cid)
         # 初始化函数运行上下文.
         # 使用 dry run 来管理生命周期.
         with ChannelCtx(self, task).in_ctx():
             # dry run 不会清空 task 状态.
-            return await task.dry_run()
+            return await task.dry_run_with_timeout()
 
     async def _execute_self_task_none_block(self, task: CommandTask, depth: int = 0) -> asyncio.Task | None:
         """

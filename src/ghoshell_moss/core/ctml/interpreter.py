@@ -1,12 +1,12 @@
 import asyncio
 import logging
-from typing import Optional, ClassVar, Callable, Coroutine, Iterable
+from typing import Optional, ClassVar, Callable, Coroutine, Iterable, Any
 from typing_extensions import Self
 
 from ghoshell_common.contracts import LoggerItf
 from ghoshell_common.helpers import Timeleft, uuid
 from ghoshell_moss.core.concepts.channel import ChannelFullPath, ChannelMeta
-from ghoshell_moss.core.concepts.command import Command, CommandTask, CommandToken
+from ghoshell_moss.core.concepts.command import Command, CommandTask, CommandToken, CommandTaskContextKey
 from ghoshell_moss.core.concepts.errors import CommandErrorCode, InterpretError
 from ghoshell_moss.core.concepts.interpreter import (
     CommandTaskCallback,
@@ -36,6 +36,7 @@ _Title = str
 _Description = str
 _Interface = str
 
+InterpreterIdKey: CommandTaskContextKey = 'interpreter_id'
 
 class CTMLInterpreter(Interpreter):
     instances_count: ClassVar[int] = 0
@@ -61,6 +62,7 @@ class CTMLInterpreter(Interpreter):
             ctml_attr_parser: Optional[AttrWithTypeSuffixParser] = None,
             moss_static: str | None = None,
             moss_dynamic: list[Message] | None = None,
+            task_context: dict[str, Any] | None = None,
     ):
         """
         :param commands: 所有 interpreter 可以使用的命令. key 是 channel path, value 是这个 channel 可以用的 commands.
@@ -125,6 +127,7 @@ class CTMLInterpreter(Interpreter):
         self._input_deltas_queue: queue.Queue[str | None] = queue.Queue()
         # 内部传输 tokens 的通道.
         self._text_to_parsed_tokens_queue: asyncio.Queue[CommandToken | None] = asyncio.Queue()
+        self._task_context = task_context or {}
 
         # create task element
         self._managing_tasks: dict[str, CommandTask] = {}  # 解析生成的 tasks.
@@ -222,6 +225,8 @@ class CTMLInterpreter(Interpreter):
                 self._interpretation.on_task_compiled(task)
                 # 注册 task 的回调, 如果出了异常就干脆中断整个流程, 也别解析了.
                 task.add_done_callback(self._task_done_callback)
+                task.context = self._task_context.copy()
+                task.context[InterpreterIdKey] = self._id
 
             if len(self._on_task_created_callbacks) > 0:
                 for callback in self._on_task_created_callbacks:

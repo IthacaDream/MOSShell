@@ -660,3 +660,23 @@ async def test_async_iterable_and_generator():
     async for val in foo():
         contents.append(val)
     assert len(contents) == 10
+
+
+@pytest.mark.asyncio
+async def test_sync_command_cancelable():
+    data = []
+
+    def foo():
+        time.sleep(0.02)
+        data.append(1)
+
+    task = asyncio.create_task(asyncio.to_thread(foo))
+    await asyncio.sleep(0.01)
+    assert len(data) == 0
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+    assert len(data) == 0
+    # 凡是用 Sync 函数, 没有办法进行中断.
+    await asyncio.sleep(0.015)
+    assert len(data) == 1

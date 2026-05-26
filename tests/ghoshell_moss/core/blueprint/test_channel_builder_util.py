@@ -2,12 +2,15 @@
 
 import pytest
 
+from ghoshell_moss import CTMLShell, new_ctml_shell
 from ghoshell_moss.core.blueprint.channel_builder import CommandUtil, new_command, new_channel
 from ghoshell_moss.core.blueprint.session import Session
 from ghoshell_moss.core.blueprint.mindflow import Signal
-from ghoshell_moss.core.concepts.command import Observe, ObserveError, CommandErrorCode
+from ghoshell_moss.core.concepts.command import Observe, CommandErrorCode
 from ghoshell_moss.core.session.mock_session import MockSession
 from ghoshell_moss.core.ctml import ctml_shell_test
+import time
+import asyncio
 
 
 # ── new_command 纯函数测试 ──────────────────────
@@ -15,6 +18,7 @@ from ghoshell_moss.core.ctml import ctml_shell_test
 @pytest.mark.asyncio
 async def test_new_command_basic():
     """new_command 创建可执行的 PyCommand."""
+
     async def add(a: int, b: int) -> int:
         """Add two numbers."""
         return a + b
@@ -27,6 +31,7 @@ async def test_new_command_basic():
 @pytest.mark.asyncio
 async def test_new_command_sets_metadata():
     """new_command 传递 name/doc/comments 等元数据."""
+
     async def greet(name: str) -> str:
         """Say hello."""
         return f"Hello, {name}"
@@ -163,6 +168,7 @@ async def test_command_util_get_contract_returns_registered():
 @pytest.mark.asyncio
 async def test_command_util_get_contract_missing_raises():
     """CommandUtil.get_contract 缺少依赖时抛出错误."""
+
     def builder(shell):
         # 不注册 Session
 
@@ -212,3 +218,54 @@ async def test_command_util_send_signal_rejects_non_signal():
     tasks = await ctml_shell_test(builder=builder, ctml="<bad_signal/>")
     assert tasks[0].exception() is not None
     assert "only Signal or str is accepted" in tasks[0].errmsg
+
+
+@pytest.mark.asyncio
+async def test_command_util_is_task_done_in_sync_task():
+    test_channel = new_channel(name="test")
+    data = []
+    done = asyncio.Event()
+
+    @test_channel.build.command()
+    def foo():
+        # 同步函数要用这种方式去做 cancel 逻辑.
+        while not CommandUtil.is_task_done():
+            time.sleep(0.01)
+        data.append(1)
+        done.set()
+
+    shell = new_ctml_shell()
+    shell.main_channel.import_channels(test_channel)
+    async with shell:
+        async with shell.interpreter_in_ctx(
+        ) as i:
+            i.feed("<test:foo />")
+            i.commit()
+            await i.wait_compiled()
+            assert len(i.compiled_tasks()) == 1
+            await asyncio.sleep(0.01)
+            assert len(data) == 0
+        await shell.clear()
+        await done.wait()
+        assert data == [1]
+
+
+@pytest.mark.asyncio
+async def test_command_util_get_task_context():
+    test_channel = new_channel(name="test")
+    data = {}
+
+    @test_channel.build.command()
+    async def foo():
+        # 同步函数要用这种方式去做 cancel 逻辑.
+        data.update(CommandUtil.get_task_context())
+        return
+
+    shell = new_ctml_shell()
+    shell.main_channel.import_channels(test_channel)
+    async with shell:
+        async with shell.interpreter_in_ctx(task_context={"hello": "world"}) as i:
+            i.feed("<test:foo />")
+            await i.wait_tasks()
+        assert data['hello'] == 'world'
+        assert len(data) > 1

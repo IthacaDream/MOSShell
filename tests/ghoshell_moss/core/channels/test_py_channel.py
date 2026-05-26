@@ -4,7 +4,7 @@ import pytest
 
 from ghoshell_moss.core.concepts.channel import ChannelCtx
 from ghoshell_moss.core.concepts.command import CommandTask, PyCommand
-from ghoshell_moss.core.concepts.errors import CommandError
+from ghoshell_moss.core.concepts.errors import CommandError, CommandErrorCode
 from ghoshell_moss.core.py_channel import PyChannel, PyChannelBuilder
 from ghoshell_moss.message import Message, Text
 
@@ -741,3 +741,22 @@ async def test_py_channel_virtual_children():
         main.build.add_virtual_channel(sub_main)
         await runtime.refresh_metas()
         assert len(runtime.virtual_sub_channels()) == 1
+
+
+@pytest.mark.asyncio
+async def test_py_channel_run_task_with_timeout():
+    main = PyChannel(name="channel")
+
+    @main.build.command()
+    async def foo() -> int:
+        await asyncio.sleep(1)
+        return 123
+
+    err = None
+    async with main.bootstrap() as runtime:
+        try:
+            await runtime.execute_command("foo", timeout=0.01)
+        except CommandError as e:
+            err = e
+    assert err is not None
+    assert err.code == CommandErrorCode.TIMEOUT.value

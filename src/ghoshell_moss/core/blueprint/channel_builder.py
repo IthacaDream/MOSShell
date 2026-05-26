@@ -139,6 +139,25 @@ class CommandUtil:
         return runtime.create_asyncio_task(coroutine)
 
     @classmethod
+    def is_task_done(cls) -> bool:
+        """
+        判断触发当前 command 执行的 task 是否已经完成.
+        方便同步函数里做状态清理.
+        """
+        from ghoshell_moss.core.concepts.channel import ChannelCtx
+        task = ChannelCtx.task()
+        return task.done()
+
+    @classmethod
+    def get_task_context(cls) -> dict[str, Any]:
+        """
+        返回 task 创建时从环境传入的参数.
+        """
+        from ghoshell_moss.core.concepts.channel import ChannelCtx
+        task = ChannelCtx.task()
+        return task.context
+
+    @classmethod
     def send_input_signal(cls, content: str, *, description: str = '') -> None:
         """发送标准的请求信号给 ghost. """
         from ghoshell_moss.core.blueprint.session import Session
@@ -190,6 +209,7 @@ def new_command(
         call_soon: bool = False,
         priority: int = 0,
         always_observe: bool = False,
+        timeout: Optional[float] = None,
 ) -> Command:
     """
     定义一个 Command. 逻辑与 Builder.command 相同.
@@ -206,6 +226,7 @@ def new_command(
         call_soon=call_soon,
         priority=priority,
         always_observe=always_observe,
+        timeout=timeout,
     )
 
 
@@ -325,6 +346,7 @@ class Builder(ABC):
             priority: int = 0,
             return_command: bool = False,
             always_observe: bool = False,
+            timeout: float | None = None,
     ) -> Callable[[CommandFunction], CommandFunction | Command]:
         """
         decorator
@@ -361,8 +383,9 @@ class Builder(ABC):
 
         :param return_command: 为真的话, 返回的不是原函数, 而是一个可以视作该函数的 Command 对象. 通常用于测试.
         :param always_observe: 为 True 的话, 不需要特别声明, command 的返回值总是会标记需要下一轮观察思考.
-        CommandFunction 最佳实践是:
+        :param timeout: if not None, set default timeout for the command.
 
+        CommandFunction 最佳实践是:
         >>> # 原始函数是 async, 从而有能力根据真实运行的时间, 阻塞 Channel 后续命令.
         >>> # 参数和返回值有明确的类型约束, 类型约束也是 prompt 的一部分.
         >>> # 使用可序列化对象作为入参和出参
@@ -386,6 +409,9 @@ class Builder(ABC):
         >>>     finally:
         >>>         # 有运行结束逻辑.
         >>>         ...
+
+        async 函数支持 cancel 生命周期, 所以 command 是一个拥有 done / cancel / exception 完整语义的单元.
+        如果用同步函数定义, 需要通过 CommandUtil.is_task_done 来管理中间中断和清空状态逻辑, 避免阻塞行为因为同步函数未完成而冲突.
         """
         pass
 
