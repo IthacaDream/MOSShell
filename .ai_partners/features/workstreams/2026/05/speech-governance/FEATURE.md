@@ -3,7 +3,7 @@ title: Speech Governance — 解耦、多后端、容错降级
 status: in-progress
 priority: P2
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-05-26
 depends: []
 milestone:
 description: >-
@@ -39,6 +39,47 @@ description: >-
 - Channel 分形参考: `zenoh-fractal` feature (Hub/Provider 分离 + manifests 自动发现)
 - pyproject.toml: `src/ghoshell_moss/pyproject.toml` (optional dependency groups)
 
+## 实施进度
+
+### Phase 2: Player 轻量化 (P1) — DONE (2026-05-26)
+
+**完成内容**:
+
+1. `miniaudio>=0.67` 加入核心依赖 (`pyproject.toml` dependencies)，零系统依赖，跨平台一致
+2. 新增 `MiniAudioStreamPlayer` (`core/speech/player/miniaudio_player.py`)，实现 `BaseAudioStreamPlayer` 的三个抽象方法
+3. `AudioPlayerProvider` 替代 `PyAudioPlayerProvider`，默认 backend 为 `miniaudio`，可通过 `AudioPlayerConfig.backend: "pyaudio"` 切换
+4. PyAudio 仍可通过 `pip install ghoshell_moss[audio]` 安装，惰性导入，切换 backend 即可使用
+5. 10 个单元测试覆盖：生命周期、格式转换、重采样、流式播放、clear、幂等性
+
+**miniaudio 1.x 适配要点**:
+- miniaudio 1.71 使用 generator 模式：`PlaybackDevice.start(gen)` 接受 callback generator
+- 内部线程通过 `gen.send(frame_count)` 请求精确帧数，generator 必须返回恰好 `frame_count * channels * 2` 字节
+- 实现内部 buffer `_buf` 机制：队列数据先入 buffer，按需切分 yield，多余留在 buffer 供下次请求
+- 数据不足时用静音补齐，避免 underrun 噪声
+
+**变更文件**:
+| 文件 | 变更 |
+|------|------|
+| `pyproject.toml` | 核心依赖新增 `miniaudio>=0.67` |
+| `core/speech/player/miniaudio_player.py` | **新文件** — MiniAudioStreamPlayer |
+| `core/speech/player/__init__.py` | 导出 MiniAudioStreamPlayer |
+| `core/speech/__init__.py` | `make_baseline_tts_speech()` 默认改用 MiniAudioStreamPlayer |
+| `host/providers/audio_player_provider.py` | AudioPlayerProvider (miniaudio 默认 + pyaudio 可切换) |
+| `host/stubs/workspace/src/MOSS/manifests/providers.py` | 引用 AudioPlayerProvider |
+| `host/stubs/workspace/src/MOSS/manifests/configs.py` | 引用 AudioPlayerConfig |
+| `tests/ghoshell_moss/speech/test_miniaudio_player.py` | **新文件** — 10 个单元测试 |
+
+**Player 选型结论**:
+- **miniaudio**: 零系统依赖（libvorbis/libopus/libmp3 内置），纯 wheel 安装，跨平台一致，解码+播放一体
+- **PyAudio**: 降级为可选，通过 `audio` extras 安装，config 切换 backend 即可使用
+- **PulseAudio**: Linux only，保持现状
+
+### 剩余 Phase
+
+```
+Phase 2 ✅ → D6 (docstring 示例) → Phase 1 (解耦) → Phase 3 (多 provider) → Phase 4 (降级)
+```
+
 ## 调研结论 (2026-05-25)
 
 ### 问题 1: Speech → Command 的权责泄漏
@@ -70,30 +111,13 @@ self.main_channel.build.add_command(default_content_command, override=False)
 
 参考 `zenoh-fractal` 中 `FractalHub.as_channel()` 的模式——能力提供方只暴露自身抽象，由 channel builder 完成到 shell 的桥接。
 
-### 问题 2: Player 选型
+### 问题 2: Player 选型 — RESOLVED (Phase 2 完成)
 
 **当前状态**：
 - `BaseAudioStreamPlayer` — 基于线程 + queue 的抽象基类，含 scipy resample。设计 OK。
-- `PyAudioStreamPlayer` — 唯一默认。PyAudio 是 PortAudio 的 Python binding，C 编译依赖，macOS/Linux/Windows 都需要系统级音频库。
-- `PulseAudioStreamPlayer` — Linux only。
-
-**候选方案对比**：
-
-| 方案 | 依赖 | 跨平台 | 安装难度 | 活跃度 | 备注 |
-|------|------|--------|----------|--------|------|
-| PyAudio (当前) | PortAudio C lib | macOS/Linux/Win | 高（C 编译失败常见） | 低（年更） | 不适合做默认 |
-| **miniaudio** | 零系统依赖（内置解码） | macOS/Linux/Win | 极低（纯 wheel） | 活跃 | 支持播放+录制+格式转换 |
-| sounddevice | PortAudio C lib | macOS/Linux/Win | 中（同 PyAudio） | 活跃 | API 更现代，但依赖同 PyAudio |
-| GStreamer | 系统级框架 | 主要 Linux | 极高 | 活跃 | 重量级，适合复杂 pipeline |
-| simpleaudio | 系统依赖 | macOS/Linux/Win | 低 | 低 | 功能太少 |
-
-**推荐**: **miniaudio** (`pyminiaudio` / `miniaudio`)。理由：
-- 纯 wheel 安装，零系统依赖（libvorbis/libopus/libmp3 全部内置）
-- 跨平台一致行为
-- 支持 PCM 直接写入，与 `BaseAudioStreamPlayer._audio_stream_write()` 模式兼容
-- 可作为默认 player，PyAudio/PulseAudio 降级为可选
-
-**迁移代价**：`BaseAudioStreamPlayer` 的三个抽象方法 `_audio_stream_start/stop/write` 设计良好，miniaudio 实现只需实现这三个方法。`resample()` 静态方法可保留（scipy 依赖已在 pyproject.toml 中）。
+- `MiniAudioStreamPlayer` — **新默认**，基于 miniaudio，零系统依赖。
+- `PyAudioStreamPlayer` — 降级为可选，通过 `ghoshell_moss[audio]` 安装。
+- `PulseAudioStreamPlayer` — Linux only，保持可选。
 
 ### 问题 3: 国际 TTS API 集成
 
@@ -158,6 +182,22 @@ Player (miniaudio) → 失败 → 系统默认播放器 → 失败 → MockSpeec
 
 ## Key Decisions
 
+### D2: miniaudio 作为默认 Player (P1) — DONE
+
+**决策**: 新增 `MiniAudioStreamPlayer(BaseAudioStreamPlayer)` 作为默认 player 实现。PyAudio 和 PulseAudio 降级为可选（通过 extras 安装）。
+
+**实施**:
+- `miniaudio>=0.67` 加入核心依赖，零系统依赖
+- `AudioPlayerProvider` 支持 `backend: Literal["miniaudio", "pyaudio"]` 配置切换
+- PyAudio 惰性导入，只在 backend="pyaudio" 且已安装 `ghoshell_moss[audio]` 时才加载
+- miniaudio 1.x 使用 generator 模式，通过内部 buffer 实现帧精确 yield
+
+**Why**:
+- 零系统依赖，wheel 安装即用
+- 跨平台一致
+- 与 `BaseAudioStreamPlayer` 的三个抽象方法完全兼容
+- PyAudio 历史上安装失败是 MOSS 试用者的第一道门槛
+
 ### D6: 强化 CTML docstring 中的 JSON 参数示例 (P1)
 
 **决策**: 对涉及 `dict`/`list` 等复杂类型参数的命令，在 docstring 中显式提供 CTML 调用示例，展示 JSON 字符串的正确构造方式。不改变接口签名，不改变 CTML 解析规则。
@@ -186,16 +226,6 @@ Player (miniaudio) → 失败 → 系统默认播放器 → 失败 → MockSpeec
 - `MockSpeech` — 测试用，不需要 command 能力
 
 **Why**: zenoh fractal 改造后，channel 可以通过 manifests 被自动发现。Speech 的能力（say, set_voice, use_tone 等）通过 channel 的 command 装饰器暴露，责任在 channel builder 而不是 speech 自身。
-
-### D2: miniaudio 作为默认 Player (P1)
-
-**决策**: 新增 `MiniAudioStreamPlayer(BaseAudioStreamPlayer)` 作为默认 player 实现。PyAudio 和 PulseAudio 降级为可选（通过 extras 安装）。
-
-**Why**:
-- 零系统依赖，wheel 安装即用
-- 跨平台一致
-- 与 `BaseAudioStreamPlayer` 的三个抽象方法完全兼容
-- PyAudio 历史上安装失败是 MOSS 试用者的第一道门槛
 
 ### D3: TTS provider 用 str + registry 替代 Literal (P1)
 
@@ -261,14 +291,16 @@ class FallbackSpeech(Speech):
 | 1.5 | 创建 speech channel module（`core/speech/speech_channel.py` 或在 host manifests 中定义）| 新文件 |
 | 1.6 | 确保 `make_content_command_from_speech` 的等价功能通过 channel command 提供 | speech channel module |
 
-### Phase 2: Player 轻量化 (P1)
+### Phase 2: Player 轻量化 (P1) — ✅ DONE (2026-05-26)
 
-| # | 任务 | 影响文件 |
-|---|------|----------|
-| 2.1 | 新增 `MiniAudioStreamPlayer` 实现 | `core/speech/player/miniaudio_player.py` |
-| 2.2 | 新增 `depend_miniaudio()` | `depends.py` |
-| 2.3 | pyproject.toml 添加 `[audio-miniaudio]` extras | `pyproject.toml` |
-| 2.4 | PyAudio 改为 optional（`[audio-pyaudio]` extras） | `pyproject.toml`, `depends.py` |
+| # | 任务 | 影响文件 | 状态 |
+|---|------|----------|------|
+| 2.1 | 新增 `MiniAudioStreamPlayer` 实现 | `core/speech/player/miniaudio_player.py` | ✅ |
+| 2.2 | miniaudio 加入核心依赖 | `pyproject.toml` | ✅ |
+| 2.3 | `AudioPlayerProvider` 替代 `PyAudioPlayerProvider`，backend 可切换 | `host/providers/audio_player_provider.py` | ✅ |
+| 2.4 | PyAudio 改惰性导入，按需加载 | `audio_player_provider.py` | ✅ |
+| 2.5 | 更新 workspace manifests/stubs | stubs + .moss_ws | ✅ |
+| 2.6 | 10 个单元测试 | `tests/ghoshell_moss/speech/test_miniaudio_player.py` | ✅ |
 
 ### Phase 3: TTS 多 provider (P1)
 
@@ -300,11 +332,11 @@ class FallbackSpeech(Speech):
 
 | 改动 | 影响范围 |
 |------|----------|
+| ~~PyAudio → miniaudio 默认~~ | ✅ 已实施。miniaudio 核心依赖，PyAudio audio extras 可选。`AudioPlayerConfig.backend` 可切换 |
 | 删除 `make_content_command_from_speech()` | 仅 `ctml_shell.py` 中 `_speech_context_manager` 调用方，测试 |
 | 删除 `TTSSpeech.commands()` | 同上 |
 | `CTMLShell._speech_context_manager` 重构 | 核心启动路径，需要全量回归 |
-| 新增 `MiniAudioStreamPlayer` | 纯新增，不影响现有 player |
-| PyAudio → optional | 安装文档、CI 配置 |
+| 新增 `MiniAudioStreamPlayer` | ✅ 纯新增，不影响现有 player |
 | `TTSServiceProvider.use` 类型变更 | 配置文件格式小幅调整 |
 | 新增 TTS providers | 纯新增 |
 | `FallbackSpeech` | 纯新增 |
@@ -314,7 +346,11 @@ class FallbackSpeech(Speech):
 ## Test Plan
 
 ### T1: 单元测试
-- `MiniAudioStreamPlayer` start/stop/write 基本流程
+- ✅ `MiniAudioStreamPlayer` start/stop/write 基本流程
+- ✅ `MiniAudioStreamPlayer` 格式转换 (PCM_S16LE, PCM_F32LE)
+- ✅ `MiniAudioStreamPlayer` 重采样
+- ✅ `MiniAudioStreamPlayer` 流式多次 add
+- ✅ `MiniAudioStreamPlayer` clear / 幂等 start / close 后 add
 - `FallbackSpeech` 降级链：第1个成功 → 不尝试第2个；第1个失败 → 自动切换到第2个；全部失败 → 兜底 MockSpeech
 - TTS provider registry 注册/查找/异常
 - Speech channel module commands 注册正确性
