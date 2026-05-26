@@ -3,7 +3,7 @@ from collections.abc import AsyncIterable
 
 import pytest
 
-from ghoshell_moss.core.concepts.command import CommandType, PyCommand, CommandWrapper
+from ghoshell_moss.core.concepts.command import PyCommand, CommandWrapper
 
 
 async def foo(a: int, b: str = "hello") -> int:
@@ -26,8 +26,6 @@ def test_pycommand_baseline():
 
         meta = command.meta()
         assert meta.name == "foo"
-        assert meta.chan == ""
-        assert meta.type is CommandType.FUNCTION.value
         assert meta.delta_arg is None
         assert meta.available
         assert meta.interface == expect
@@ -129,7 +127,6 @@ async def test_command_rename():
 
     command = PyCommand(_foo, name="bar", chan="test")
     assert command.name() == "bar"
-    assert command.meta().chan == "test"
 
 
 @pytest.mark.asyncio
@@ -150,7 +147,7 @@ async def test_pydantic_understand_schema():
 
     adapter = TypeAdapter(bar)
     assert "properties" in adapter.json_schema()
-    command = PyCommand(bar)
+    command = PyCommand(bar, with_json_schema=True)
     assert command.meta().json_schema is not None
 
 

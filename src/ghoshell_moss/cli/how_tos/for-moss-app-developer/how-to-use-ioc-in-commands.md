@@ -22,7 +22,7 @@ async def my_command(self, text: str) -> str:
     logger = CommandUtil.logger()
 
     # 获取任意已注册的服务
-    tts = CommandUtil.get_contract(TTS)
+    tts = CommandUtil.force_get_contract(TTS)
 
     logger.info(f"synthesizing: {text}")
     return await tts.synthesize(text)

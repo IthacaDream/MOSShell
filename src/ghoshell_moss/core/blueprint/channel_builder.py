@@ -72,18 +72,30 @@ INSTANCE = TypeVar("INSTANCE", bound=object)
 
 class CommandUtil:
     """
-    在 Command 内部使用的工具,
+    在 Command 内部使用的工具, 仅在 Command 被执行时可以使用.
+    通过 contextlib ctx 获取调用者能力.
     包含各种 Command 函数内需要的常用 API.
     """
 
     @classmethod
-    def get_contract(cls, contract: type[INSTANCE]) -> INSTANCE:
+    def force_get_contract(cls, contract: type[INSTANCE]) -> INSTANCE:
         """
-        get contract from ioc Container.
-        but you must know what contract is registered.
+        force get contract from ioc Container.
+        raise Error if the contract is not registered.
+        combine with moss manifests to know existing contracts
         """
+        # dig deeper only when necessary
         from ghoshell_moss.core.concepts.channel import ChannelCtx
         return ChannelCtx.get_contract(contract)
+
+    @classmethod
+    def get_contract(cls, contract: type[INSTANCE]) -> INSTANCE | None:
+        """
+        if contract is not registered, return None
+        """
+        from ghoshell_moss.core.concepts.channel import ChannelCtx
+        runtime = ChannelCtx.runtime()
+        return runtime.container.get(contract)
 
     @classmethod
     def logger(cls):
@@ -110,17 +122,27 @@ class CommandUtil:
         需要发送不同类型的 Signal, 可参考服务发现的 SignalMeta 协议.
         """
         from ghoshell_moss.core.blueprint.session import Session
-        session = cls.get_contract(Session)
+        session = cls.force_get_contract(Session)
         if isinstance(signal, Signal):
             session.add_signal(signal)
         else:
             raise TypeError(f"only Signal or str is accepted")
 
     @classmethod
+    def create_task(cls, coroutine) -> asyncio.Task:
+        """
+        create an asyncio task in channel lifecycle.
+        useful for some task going on after command itself done
+        """
+        from ghoshell_moss.core.concepts.channel import ChannelCtx
+        runtime = ChannelCtx.runtime()
+        return runtime.create_asyncio_task(coroutine)
+
+    @classmethod
     def send_input_signal(cls, content: str, *, description: str = '') -> None:
         """发送标准的请求信号给 ghost. """
         from ghoshell_moss.core.blueprint.session import Session
-        session = cls.get_contract(Session)
+        session = cls.force_get_contract(Session)
         session.add_input_signal(content, description=description)
 
     @classmethod
@@ -167,6 +189,7 @@ def new_command(
         blocking: bool = True,
         call_soon: bool = False,
         priority: int = 0,
+        always_observe: bool = False,
 ) -> Command:
     """
     定义一个 Command. 逻辑与 Builder.command 相同.
@@ -182,6 +205,7 @@ def new_command(
         blocking=blocking,
         call_soon=call_soon,
         priority=priority,
+        always_observe=always_observe,
     )
 
 
@@ -300,6 +324,7 @@ class Builder(ABC):
             call_soon: bool = False,
             priority: int = 0,
             return_command: bool = False,
+            always_observe: bool = False,
     ) -> Callable[[CommandFunction], CommandFunction | Command]:
         """
         decorator
@@ -335,6 +360,7 @@ class Builder(ABC):
                 高级功能, 不理解的情况下请不要改动它.
 
         :param return_command: 为真的话, 返回的不是原函数, 而是一个可以视作该函数的 Command 对象. 通常用于测试.
+        :param always_observe: 为 True 的话, 不需要特别声明, command 的返回值总是会标记需要下一轮观察思考.
         CommandFunction 最佳实践是:
 
         >>> # 原始函数是 async, 从而有能力根据真实运行的时间, 阻塞 Channel 后续命令.
@@ -345,7 +371,12 @@ class Builder(ABC):
         >>>     '''有清晰的说明'''
         >>>     try
         >>>         # 执行逻辑, 不能有线程阻塞, 否则会阻塞全局.
+        >>>         # CommandUtil.create_task
         >>>         ...
+        >>>         # return None # 仅表示执行结束, 不需要特别观察
+        >>>         # return Any  # 返回讯息反馈给上下文, 但不需要触发 Re-Act. 或配置 always_observe 使之触发思考.
+        >>>         # return CommandUtil.observe('xxx')  记模型需要观察和思考的结果, 会触发 Re-Act.
+        >>>         # raise CommandUtil.raise_observe(...)  中断所有的行动, 立刻触发思考.
         >>>     except asyncio.CancelledError:
         >>>         # 命令可以被调度层正常取消, 有取消的行为. 通常 AI 可以随时取消一个运行的 Command.
         >>>         ...
@@ -371,7 +402,7 @@ class Builder(ABC):
         >>>     # 可以获取执行这个 command 的真实 runtime
         >>>     try
         >>>         # 通过全局的 IoC 容器获取依赖, 可以拿到运行时的依赖注入.
-        >>>         contract = CommandUtil.get_contract(...)
+        >>>         contract = CommandUtil.force_get_contract(...)
         >>>         ...
         >>>     except asyncio.CancelledError:
         >>>         # 生命周期函数随时会被 Channel Runtime 调度取消

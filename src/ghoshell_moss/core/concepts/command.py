@@ -66,7 +66,6 @@ __all__ = [
     "CommandTaskState",
     "CommandToken",
     "CommandTokenSeq",
-    "CommandType",
     "CommandWrapper",
     "PyCommand", "CliCommand",
     "make_command_group",
@@ -109,37 +108,6 @@ class CommandTaskState(str, Enum):
 
 
 StringType = Union[str, Callable[[], str]]
-
-
-class CommandType(str, Enum):
-    """
-    Command 的基础类型, 用来在调用大模型前, 根据情况筛选不同类型的 Command.
-    """
-
-    FUNCTION = ""
-    """函数, 需要一段时间执行, 执行完后结束. 其值为空, 降低传输成本. """
-
-    PROMPTER = "prompter"
-    """
-    返回一个字符串, 可以用来生成 prompt. 是构成 PML (prompter markdown language) 语法的核心函数. 
-    PML 指一段 XML 风格的函数调用, 作为模板语法, 将所有函数返回的字符串结果拼到模板中, 生成一个动态的 Prompt. 
-    
-    Agent 可以同时看到自己某块上下文的 PML + prompt,  它通过暴露出来的函数修改 PML, 就可以修改自己的 prompt. 
-    从而达到认知的自治.  
-    """
-
-    PRIMITIVE = "primitive"
-    """
-    控制原语类型. 
-    """
-
-    @classmethod
-    def all(cls) -> set[str]:
-        return {
-            cls.FUNCTION.value,
-            cls.PROMPTER.value,
-            cls.PRIMITIVE.value,
-        }
 
 
 class CommandTokenSeq(str, Enum):
@@ -274,16 +242,10 @@ class CommandMeta(BaseModel):
 
     name: str = Field(description="the name of the command")
     description: str = Field(default="", description="the description of the command")
-    chan: str = Field(default="", description="the origin channel name/path that the command belongs to")
     dynamic: bool = Field(default=False, description="whether this command is dynamic or not")
     available: bool = Field(
         default=True,
         description="whether this command is available",
-    )
-    type: str = Field(
-        default=CommandType.FUNCTION.value,
-        description="",
-        json_schema_extra={"enum": CommandType.all()},
     )
     tags: list[str] = Field(default_factory=list, description="tags of the command")
     delta_arg: Optional[str] = Field(
@@ -328,6 +290,10 @@ class CommandMeta(BaseModel):
                     "如果下一个高优先级的命令入队, 前一个会被立刻取消. "
                     "如果优先级为负值, 任何新任务在排队, 都会被立刻取消.",
     )
+    always_observe: bool = Field(
+        default=False,
+        description="if the command result shall always be observed or not",
+    )
 
 
 CommandUniqueName = str
@@ -362,6 +328,11 @@ class Command(Generic[RESULT], ABC):
     def split_unique_name(name: str) -> tuple[str, str]:
         parts = name.split(":", 1)
         return (parts[0], parts[1]) if len(parts) == 2 else ("", parts[0])
+
+    @staticmethod
+    def is_magic_command(name: str) -> bool:
+        """魔法函数默认由 channel 判断是否存在, 如何使用."""
+        return len(name) >= 5 and name.startswith("__") and name.endswith("__")
 
     @abstractmethod
     def is_available(self) -> bool:
@@ -563,8 +534,10 @@ class PyCommand(CliCommand):
             tags: Optional[list[str]] = None,
             call_soon: bool = False,
             blocking: bool = True,
+            always_observe: bool = False,
             priority: int = 0,
             delta_types: Optional[set] = None,
+            with_json_schema: bool = False,
     ):
         """
         :param func: origin coroutine function
@@ -580,6 +553,7 @@ class PyCommand(CliCommand):
         :param call_soon: the command will be called right after it is sent to the channel.
         :param blocking: blocking command will be called only when channel is idle, one at a time.
         :param priority: the priority of the command. see command meta
+        :param always_observe: shall always observe the command result
         :param delta_types: don't set it if you do not know why
         """
         self._chan = chan
@@ -606,9 +580,11 @@ class PyCommand(CliCommand):
         self._blocking = blocking
         self._tags = tags
         self._meta = meta
+        self._always_observe = always_observe
         self._json_arg_parser: JsonArgumentParser | None = None
         self._priority = priority
         self._delta_types = delta_types if delta_types is not None else list(CommandDeltaArgName2TypeMap.keys())
+        self._with_json_schema = with_json_schema
         delta_arg = None
         for arg_name in self._func_itf.signature.parameters:
             if arg_name.endswith("__") or arg_name in self._delta_types:
@@ -682,7 +658,6 @@ class PyCommand(CliCommand):
 
     def _generate_meta(self) -> CommandMeta:
         meta = CommandMeta(name=self._name)
-        meta.chan = self._chan or ""
         doc = self._unwrap_string_type(self._doc_or_fn, "")
         meta.interface = self._gen_interface(meta.name, doc)
         meta.available = self.is_available()
@@ -696,7 +671,7 @@ class PyCommand(CliCommand):
         meta.dynamic = self._is_dynamic_itf
         meta.priority = self._priority
 
-        if self._func is not None:
+        if self._with_json_schema and self._func is not None:
             try:
                 adapter = TypeAdapter(self._func)
                 schema = adapter.json_schema()
@@ -1003,6 +978,10 @@ class CommandTask(Generic[RESULT], ABC):
     def __del__(self):
         CommandTask.instances_count -= 1
 
+    def is_magic(self) -> bool:
+        """未完成创建的魔法 command task"""
+        return Command.is_magic_command(self.meta.name) and self.func is None
+
     def caller_name(self) -> str:
         """
         用三元信息标定一个调用名.
@@ -1280,7 +1259,7 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
     def result(self, throw: bool = True) -> Optional[RESULT]:
         if throw:
             self.raise_exception()
-        if self.done() and  self.__result is None and self.errcode == 0:
+        if self.done() and self.__result is None and self.errcode == 0:
             return self.task_result().to_observe()
         return self.__result
 
@@ -1473,6 +1452,8 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
             else:
                 # 返回空对象.
                 self.__task_result = CommandTaskResult()
+        # command 可以约定 always observe, 这样不用特地返回 Observe 对象.
+        self.__task_result.observe = self.__task_result.observe or self.meta.always_observe
         return self.__task_result
 
     def exception(self) -> Optional[Exception]:
@@ -1717,14 +1698,17 @@ class CommandStackResult:
         return item
 
 
-def make_command_group(*commands: Command) -> dict[str, dict[str, Command]]:
+def make_command_group(
+        chan: str,
+        *commands: Command,
+        groups: dict[str, dict[str, Command] | None] = None,
+) -> dict[str, dict[str, Command]]:
     """
-    方便测试用的语法糖.
+    command 分组的基本逻辑. ChannelPath: {command_name: command}
     """
-    result = {}
+    result = groups or {}
     for command in commands:
         meta = command.meta()
-        chan = meta.chan
         if chan not in result:
             result[chan] = {}
         result[chan][meta.name] = command

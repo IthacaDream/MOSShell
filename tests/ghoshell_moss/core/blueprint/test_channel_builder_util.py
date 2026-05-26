@@ -153,7 +153,7 @@ async def test_command_util_get_contract_returns_registered():
 
         @shell.main_channel.build.command()
         async def fetch_session() -> str:
-            sess = CommandUtil.get_contract(Session)
+            sess = CommandUtil.force_get_contract(Session)
             return sess.session_id
 
     tasks = await ctml_shell_test(builder=builder, ctml="<fetch_session/>")
@@ -168,7 +168,7 @@ async def test_command_util_get_contract_missing_raises():
 
         @shell.main_channel.build.command()
         async def fetch_missing() -> None:
-            CommandUtil.get_contract(Session)
+            CommandUtil.force_get_contract(Session)
 
     tasks = await ctml_shell_test(builder=builder, ctml="<fetch_missing/>")
     assert tasks[0].exception() is not None

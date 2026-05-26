@@ -280,7 +280,7 @@ class ZenohTopicSubscriber(Subscriber[TOPIC_MODEL | None]):
         self._logger = logger or get_moss_logger()
         self._started = False
         self._closed = False
-        self._service_wait_task: Optional[asyncio.Task] = None
+        self._stopped_watch_task: Optional[asyncio.Task] = None
         self._main_listening_loop_done_event = ThreadSafeEvent()
         self._log_prefix = f"<ZenohBasedSubscriber listening=%s id=%s>" % (self._listening, self._uid)
 
@@ -298,11 +298,15 @@ class ZenohTopicSubscriber(Subscriber[TOPIC_MODEL | None]):
         self._declared_subscriber = self._session.declare_subscriber(self._zenoh_key_expr)
         self._zenoh_subscribing_thread = threading.Thread(target=self._listening_loop, daemon=True)
         self._zenoh_subscribing_thread.start()
+        self._stopped_watch_task = asyncio.create_task(self._watch_stopped())
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         if not self._closed:
             self._closed = True
+            if self._stopped_watch_task and not self._stopped_watch_task.done():
+                self._stopped_watch_task.cancel()
+                self._stopped_watch_task = None
             if self._declared_subscriber is not None and not self._service_stopped.is_set():
                 try:
                     self._declared_subscriber.undeclare()
@@ -323,6 +327,14 @@ class ZenohTopicSubscriber(Subscriber[TOPIC_MODEL | None]):
 
     def is_running(self) -> bool:
         return self._started and not self._closed and not self._main_listening_loop_done_event.is_set()
+
+    async def _watch_stopped(self):
+        """service 关闭时主动 shutdown queue，确保 poll() 立即返回而不是无限阻塞."""
+        try:
+            await self._service_stopped.wait()
+            self._queue.shutdown(immediate=True)
+        except asyncio.CancelledError:
+            pass
 
     def _listening_loop(self):
         if self._declared_subscriber is None:
@@ -415,14 +427,7 @@ class ZenohTopicSubscriber(Subscriber[TOPIC_MODEL | None]):
         return self._uid
 
     async def poll(self, timeout: float | None = None) -> Topic:
-        close_task = asyncio.create_task(self._service_stopped.wait())
-        poll_task = asyncio.create_task(self._poll(timeout))
-        done, pending = await asyncio.wait([close_task, poll_task], return_when=asyncio.FIRST_COMPLETED)
-        for t in pending:
-            t.cancel()
-        if close_task in done:
-            raise TopicClosedError()
-        return await poll_task
+        return await self._poll(timeout)
 
     async def _poll(self, timeout: float | None = None) -> Topic:
         try:
@@ -434,8 +439,8 @@ class ZenohTopicSubscriber(Subscriber[TOPIC_MODEL | None]):
             raise
         except asyncio.CancelledError:
             raise
-        except janus.AsyncQueueShutDown:
-            raise TopicClosedError()
+        except janus.AsyncQueueShutDown as e:
+            raise TopicClosedError() from e
 
     async def poll_model(self, timeout: float | None = None) -> TOPIC_MODEL | None:
         topic = await self.poll(timeout)

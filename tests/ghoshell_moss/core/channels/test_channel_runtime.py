@@ -22,7 +22,6 @@ async def test_channel_runtime_execution():
 
         foo_cmd = runtime.get_command("foo")
         assert foo_cmd is not None
-        assert foo_cmd.meta().chan == "test"
         task = BaseCommandTask.from_command(foo_cmd)
         runtime.push_task(task)
         await task.wait()

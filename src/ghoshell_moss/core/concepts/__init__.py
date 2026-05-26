@@ -22,7 +22,6 @@ from .command import (
     CommandTaskState,
     CommandToken,
     CommandTokenSeq,
-    CommandType,
     CommandWrapper,
     PyCommand,
     make_command_group,

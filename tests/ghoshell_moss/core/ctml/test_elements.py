@@ -53,13 +53,11 @@ class ElementTestSuite:
 def new_test_suite(*commands: Command, ignore_wrong_command: bool = True) -> ElementTestSuite:
     tasks_queue = deque()
     output = MockSpeech()
-    command_map = {'': {}}
+    commands_group = {}
+    command_map = {'': commands_group}
     for command in commands:
-        chan = command.meta().chan
-        if chan not in command_map:
-            command_map[chan] = {}
         # 假的 command map.
-        command_map[chan][command.name()] = command
+        commands_group[command.name()] = command
     content_command = make_content_command_from_speech(output)
     command_map[''][content_command.name()] = content_command
     stop_event = ThreadSafeEvent()

@@ -64,7 +64,6 @@ class ScopeOpenTask(BaseCommandTask[None]):
         self._group = group
         meta = CommandMeta(
             name=SCOPE_ENTER_COMMAND_NAME,
-            chan=group.channel,
             blocking=True,
         )
         if tag:
@@ -103,7 +102,6 @@ class ScopeCloseTask(BaseCommandTask[str]):
         self._group = group
         meta = CommandMeta(
             name=SCOPE_EXIT_COMMAND_NAME,
-            chan=group.channel,
             blocking=True,
         )
         tokens = f"</{tag}>" if tag else ""
@@ -143,7 +141,6 @@ class EmptyContentTask(BaseCommandTask[None]):
     ):
         meta = CommandMeta(
             name=CONTENT_COMMAND_NAME,
-            chan=channel,
             blocking=True,
         )
         super().__init__(

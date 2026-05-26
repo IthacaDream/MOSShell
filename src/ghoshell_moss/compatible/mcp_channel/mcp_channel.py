@@ -323,7 +323,6 @@ class MCPChannelRuntime(AbsChannelRuntime[MCPChannel]):
                 CommandMeta(
                     name=tool_name,
                     description=description or "",
-                    chan=self._name,
                     interface=interface,
                     available=True,
                     json_schema=tool.inputSchema,

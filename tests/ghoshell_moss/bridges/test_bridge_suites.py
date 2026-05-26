@@ -421,3 +421,48 @@ class TestBridgeSuite:
                 assert value == "hello"
                 value = await runtime.execute_command("tokens", kwargs=dict(tokens__=generate_tokens()))
                 assert value == 10
+
+    @pytest.mark.asyncio
+    async def test_proxy_task_cancel_propagates_to_provider(self, suite: BridgeTestSuite) -> None:
+        """验证 proxy 侧 task 被取消时，provider 侧的命令也会被取消"""
+        provider_cancelled = False
+        provider_started = asyncio.Event()
+        provider_done = asyncio.Event()
+
+        chan = PyChannel(name="provider")
+
+        @chan.build.command()
+        async def long_running() -> None:
+            nonlocal provider_cancelled
+            provider_started.set()
+            try:
+                await asyncio.sleep(1.0)  # 长时任务
+            except asyncio.CancelledError:
+                provider_cancelled = True
+                provider_done.set()
+                raise
+
+        provider, proxy = suite.create("proxy")
+        async with provider.arun(chan):
+            async with proxy.bootstrap() as runtime:
+                await runtime.wait_connected()
+                assert runtime.is_running()
+
+                # 通过 proxy 发起命令调用
+                proxy_task = runtime.create_command_task("long_running")
+                # 入栈做远程通讯.
+                runtime.push_task(proxy_task)
+                # 等待 provider 侧确认开始执行
+                await asyncio.wait_for(provider_started.wait(), timeout=2.0)
+
+                # provider 开始执行后立刻取消.
+                proxy_task.cancel()
+
+                # 等待 proxy task 结束
+                assert proxy_task.cancelled()
+
+                # 给 provider 侧一点时间处理取消事件
+                await asyncio.wait_for(provider_done.wait(), timeout=2.0)
+                assert provider_cancelled is True, (
+                    "provider 侧命令未被取消 — 取消传播失败"
+                )

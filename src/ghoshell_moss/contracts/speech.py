@@ -110,7 +110,6 @@ class SpeechStream(ABC):
         meta = CommandMeta(
             name="__speak__",
             # 默认主轨运行.
-            chan=chan,
             blocking=True,
         )
         start_synthesis = self.start_synthesis
