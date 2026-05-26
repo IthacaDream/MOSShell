@@ -519,7 +519,8 @@ class DuplexChannelContext:
             # 更新 meta map.
             new_provider_meta_map = {}
             for provider_channel_path, meta in event.metas.items():
-                meta = meta.model_copy(update={'virtual': True})
+                # the proxy's channels are all virtual and proxy
+                meta = meta.model_copy(update={'virtual': True, 'proxy': True})
                 if provider_channel_path == "":
                     meta.name = self.root_name
                 new_provider_meta_map[provider_channel_path] = meta
@@ -533,13 +534,6 @@ class DuplexChannelContext:
 
             # 直接变更当前的 meta map. 则一些原本存在的 channel, 也可能临时不存在了.
             self.provider_meta_map = new_provider_meta_map
-            root_meta = self.provider_meta_map.get('')
-            if root_meta:
-                root_meta.proxy = []
-                for path in self.provider_meta_map.keys():
-                    if path != '':
-                        root_meta.proxy.append(path)
-
             self.logger.debug("%s receive new metas from provider %s", self._log_prefix, new_provider_meta_map)
             # 更新 sync 的标记.
             if not self._sync_meta_done_event.is_set():
@@ -741,7 +735,7 @@ class DuplexChannelRuntime(AbsChannelRuntime):
     def _is_available(self) -> bool:
         return self._ctx.is_channel_available(self._provider_chan_path)
 
-    async def _consume_task_with_paths(self, paths: ChannelPaths, task: CommandTask) -> None:
+    async def _consume_compiled_task_with_paths(self, paths: ChannelPaths, task: CommandTask) -> None:
         try:
             event = await self._ctx.send_command_task(
                 task,

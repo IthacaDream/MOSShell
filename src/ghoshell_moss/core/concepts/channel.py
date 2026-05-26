@@ -58,8 +58,6 @@ __all__ = [
     "ChannelNamePattern",
 ]
 
-__description__ = "Use Tree-like structure to manage all the Commands of MOSS for AI."
-
 
 class ChannelMeta(BaseModel):
     """
@@ -76,7 +74,7 @@ class ChannelMeta(BaseModel):
     states: dict[str, str] = Field(default_factory=dict, description="The states of the channel.")
     current_state: str = Field(default="", description="The current state of the channel.")
     modules: list[str] = Field(default_factory=list, description="Permanent capability module names (for debug).")
-    proxy: list[str] = Field(default_factory=list, description="the proxy children names")
+    proxy: bool = Field(default=False, description="Whether the channel is proxy, not local one.")
 
     # about instructions / context messages
     # ModelContext is built by many messages blocks, we believe the blocks should be :
@@ -238,6 +236,7 @@ class Channel(ABC):
     它能把跨越各个进程的能力 (主要是函数), 全部通过双工通讯的办法, 提供给 AI 大模型调用.
 
     对应编程语言 Python 的 Module,  在 Shell 架构中定义了 Channel (中文: 经络)
+    Channel 实例本身应该是无副作用的, 只有在运行时通过 bootstrap 之后, 才会返回有作用的实例.
     """
 
     @abstractmethod
@@ -947,6 +946,10 @@ class ChannelProvider(ABC):
         return thread
 
     def on_proxy_event(self, callback: Callable[[Any], None]):
+        """接受 proxy 发送事件的回调"""
+        pass
+
+    def on_error(self, callback: Callable[[Exception], None]):
         pass
 
     @abstractmethod

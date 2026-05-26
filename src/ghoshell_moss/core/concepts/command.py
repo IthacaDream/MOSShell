@@ -79,8 +79,6 @@ __all__ = [
 
 RESULT = TypeVar("RESULT")
 
-__description__ = "Define the Command from python function or method which is callable during streaming for AI."
-
 
 class CommandTaskState(str, Enum):
     """
@@ -331,7 +329,10 @@ class Command(Generic[RESULT], ABC):
 
     @staticmethod
     def is_magic_command(name: str) -> bool:
-        """魔法函数默认由 channel 判断是否存在, 如何使用."""
+        """
+        魔法函数默认由 channel 判断是否存在, 如何使用.
+        非内核开发者不需要理解这个规则. 用于支持流式解释器的特殊语法.
+        """
         return len(name) >= 5 and name.startswith("__") and name.endswith("__")
 
     @abstractmethod
@@ -978,9 +979,18 @@ class CommandTask(Generic[RESULT], ABC):
     def __del__(self):
         CommandTask.instances_count -= 1
 
-    def is_magic(self) -> bool:
-        """未完成创建的魔法 command task"""
-        return Command.is_magic_command(self.meta.name) and self.func is None
+    def set_command(self, command: Command) -> None:
+        self.func = command.__call__
+        self.meta = command.meta
+        self.partial = command.partial
+
+    def is_magical(self) -> bool:
+        """未完成创建的魔法 command task. 非内核开发者不需要理解其规则. """
+        return Command.is_magic_command(self.meta.name)
+
+    def is_bare_task(self) -> bool:
+        """是否没有注入执行函数. 非内核开发者不需要理解其规则. """
+        return self.func is None
 
     def caller_name(self) -> str:
         """
@@ -997,13 +1007,14 @@ class CommandTask(Generic[RESULT], ABC):
     def compiled(self) -> bool:
         return self.partial is None or self.on_compiled_task is not None
 
-    def on_compiled(self) -> None:
+    def on_compiled(self, loop: asyncio.AbstractEventLoop = None) -> None:
         """
         约定的 command task 预先加工参数的周期.
         一个 command 只会执行一次.
         """
         if self.on_compiled_task is None and self.partial is not None:
-            self.on_compiled_task = asyncio.create_task(self.partial(*self.args, **self.kwargs))
+            loop = loop or asyncio.get_running_loop()
+            self.on_compiled_task = loop.create_task(self.partial(*self.args, **self.kwargs))
 
     @abstractmethod
     def result(self, throw: bool = True) -> Optional[RESULT]:
@@ -1594,7 +1605,7 @@ class TaskScope:
                 wait_tasks.append(task)
         if len(wait_tasks) == 0:
             if self.until == 'flow' and not self._strict:
-                # 容错逻辑.
+                # 容错逻辑. 没有传入任何命令时,
                 wait_tasks = list(self.tasks)
         if len(wait_tasks) > 0:
             await asyncio.gather(*[t.wait(throw=False) for t in wait_tasks])

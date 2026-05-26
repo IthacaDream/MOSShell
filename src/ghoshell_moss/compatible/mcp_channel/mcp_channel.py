@@ -129,7 +129,7 @@ class MCPChannelRuntime(AbsChannelRuntime[MCPChannel]):
         # 该 runtime 不依赖内部任务队列；仅等待退出。
         await self._closing_event.wait()
 
-    async def _consume_task_with_paths(self, paths: list[str], task: CommandTask) -> None:
+    async def _consume_compiled_task_with_paths(self, paths: list[str], task: CommandTask) -> None:
         # 兼容 ChannelRuntime 的任务调度：直接执行并 resolve/fail。
         if len(paths) > 0:
             task.fail(CommandErrorCode.NOT_FOUND.error(f"MCPChannel has no sub channel: {'.'.join(paths)}"))

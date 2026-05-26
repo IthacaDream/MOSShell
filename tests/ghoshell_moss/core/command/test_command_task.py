@@ -247,3 +247,23 @@ async def test_command_task_result():
     assert task.result() == "hello"
     assert task.task_result().caller is not None
 
+
+@pytest.mark.asyncio
+async def test_bare_and_magic_task():
+    async def __foo__() -> int:
+        return 123
+
+    command = PyCommand(__foo__)
+
+    task = BaseCommandTask.from_command(command)
+    assert task.is_magical()
+    task.func = None
+    assert task.is_bare_task()
+    r = await task.dry_run()
+    assert r is None
+
+    task = BaseCommandTask.from_command(command)
+    assert not task.is_bare_task()
+    assert task.is_magical()
+    r = await task.dry_run()
+    assert r is 123

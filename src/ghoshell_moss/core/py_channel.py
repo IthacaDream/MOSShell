@@ -141,7 +141,8 @@ class PyChannelBuilder(ChannelStateBuilder, ChannelState):
 
     def instruction(self, func: StringType) -> StringType:
         self._instruction_functions = func
-        self._dynamic = True
+        if callable(func):
+            self._dynamic = True
         return func
 
     async def get_instruction(self) -> str:
@@ -180,6 +181,7 @@ class PyChannelBuilder(ChannelStateBuilder, ChannelState):
             priority: int = 0,
             call_soon: bool = False,
             return_command: bool = False,
+            always_observe: bool = False,
     ) -> Callable[[CommandFunction], CommandFunction | Command]:
 
         def wrapper(func: CommandFunction) -> CommandFunction:
@@ -195,6 +197,7 @@ class PyChannelBuilder(ChannelStateBuilder, ChannelState):
                 blocking=blocking if blocking is not None else self._blocking,
                 priority=priority,
                 call_soon=call_soon,
+                always_observe=always_observe,
             )
             self.add_command(command, override=override)
             if return_command:

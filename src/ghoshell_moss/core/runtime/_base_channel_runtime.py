@@ -27,7 +27,9 @@ from ghoshell_common.contracts import LoggerItf
 from .tree import BaseChannelTree
 import logging
 
-__all__ = ["AbsChannelRuntime"]
+__all__ = [
+    "AbsChannelRuntime",
+]
 
 _ChannelId = str
 CHANNEL = TypeVar("CHANNEL", bound=Channel)
@@ -170,6 +172,14 @@ class AbsChannelRuntime(Generic[CHANNEL], ChannelRuntime, ABC):
     def push_task_with_paths(self, paths: ChannelPaths, task: CommandTask) -> None:
         if not self.is_running():
             return None
+        elif task.done():
+            # 跳过已经 done 的不要入队.
+            return None
+        # 不允许非魔法的 bare task 入队.
+        if task.is_bare_task() and not task.is_magical():
+            task.fail(CommandErrorCode.NOT_FOUND.error(f"task {task.caller_name()} is not found"))
+            return None
+
         self._on_compile_task_queue.sync_q.put_nowait((paths, task))
         return None
 
@@ -194,11 +204,11 @@ class AbsChannelRuntime(Generic[CHANNEL], ChannelRuntime, ABC):
 
     # --- on task done --- #
 
-    def _parse_task(self, task: CommandTask) -> CommandTask | None:
+    def _parse_runtime_status_for_task(self, task: CommandTask) -> CommandTask:
         if task is None:
-            return None
+            raise RuntimeError(f"received task is None")
         if task.done():
-            return None
+            return task
         elif not self.is_running():
             self.logger.error(
                 "%s failed task %s: not running",
@@ -206,7 +216,7 @@ class AbsChannelRuntime(Generic[CHANNEL], ChannelRuntime, ABC):
                 task.cid,
             )
             task.fail(CommandErrorCode.NOT_RUNNING.error(f"channel {self.name} not running"))
-            return None
+            return task
         elif not self.is_connected():
             self.logger.info(
                 "%s failed task %s: not connected",
@@ -214,7 +224,7 @@ class AbsChannelRuntime(Generic[CHANNEL], ChannelRuntime, ABC):
                 task.cid,
             )
             task.fail(CommandErrorCode.NOT_CONNECTED.error(f"channel {self.name} not connected"))
-            return None
+            return task
         elif not self.is_available():
             self.logger.info(
                 "%s failed task %s: not available",
@@ -222,22 +232,29 @@ class AbsChannelRuntime(Generic[CHANNEL], ChannelRuntime, ABC):
                 task.cid,
             )
             task.fail(CommandErrorCode.NOT_AVAILABLE.error(f"channel {self.name} not available"))
-            return None
+            return task
         return task
 
-    async def _on_task_compile_loop(self) -> None:
+    async def _compiled_task_loop(self) -> None:
         while not self._closing_event.is_set():
             try:
                 queue = self._on_compile_task_queue.async_q
                 paths, task = await queue.get()
-                task = self._parse_task(task)
+                if task is None:
+                    continue
+                task = self._parse_runtime_status_for_task(task)
                 if task is None or task.done():
                     continue
                 self._compiling_task = task
                 self._add_task_done_callback(task)
-                task.on_compiled()
+                if task is None:
+                    # the task is not registered, shall raise invalid error to it.
+                    continue
+                if not task.is_bare_task():
+                    # 只有非 bare 才执行 on compiled.
+                    task.on_compiled()
                 # prepare to send
-                await self._consume_task_with_paths(paths, task)
+                await self._consume_compiled_task_with_paths(paths, task)
                 await asyncio.sleep(0.0)
 
             except janus.AsyncQueueShutDown:
@@ -253,7 +270,7 @@ class AbsChannelRuntime(Generic[CHANNEL], ChannelRuntime, ABC):
         self.logger.info("%s compile task finished", self.log_prefix)
 
     @abstractmethod
-    async def _consume_task_with_paths(self, paths: ChannelPaths, task: CommandTask) -> None:
+    async def _consume_compiled_task_with_paths(self, paths: ChannelPaths, task: CommandTask) -> None:
         """
         push the task to the real handling loop with paths
         """
@@ -377,7 +394,7 @@ class AbsChannelRuntime(Generic[CHANNEL], ChannelRuntime, ABC):
     @contextlib.asynccontextmanager
     async def _main_loop_ctx(self):
         try:
-            self._compiling_loop_task = self._loop.create_task(self._on_task_compile_loop())
+            self._compiling_loop_task = self._loop.create_task(self._compiled_task_loop())
             self._main_loop_task = self._loop.create_task(self._main_loop())
             yield
         finally:

@@ -228,15 +228,10 @@ class AbsChannelTreeRuntime(Generic[CHANNEL], AbsChannelRuntime[CHANNEL], ABC):
             is_blocking_task = consuming.meta.blocking
             # 检查是不是子节点的任务.
             if not is_self_task:
-                self_meta = self.self_meta()
-                if len(self_meta.proxy) > 0 and Channel.join_channel_path('', *paths) in self_meta.proxy:
-                    # 仍然分配给自身.
-                    pass
-                else:
-                    # 分配给子节点.
-                    await self._dispatch_children_task(paths, consuming)
-                    consuming = None
-                    return None
+                # 分配给子节点.
+                await self._dispatch_children_task(paths, consuming)
+                consuming = None
+                return None
 
             if is_blocking_task:
                 # 只有 consume 层可以设置 blocking task. 协程安全操作.
@@ -320,8 +315,8 @@ class AbsChannelTreeRuntime(Generic[CHANNEL], AbsChannelRuntime[CHANNEL], ABC):
         运行属于自己这个 channel 的 task, 让它进入到 executing group 中.
         """
         # 由于是异步执行的, 再检查一次.
-        task = self._parse_task(task)
-        if task is None:
+        task = self._parse_runtime_status_for_task(task)
+        if task.done():
             return
         await self._add_executing_task(task)
 
@@ -472,21 +467,60 @@ class AbsChannelTreeRuntime(Generic[CHANNEL], AbsChannelRuntime[CHANNEL], ABC):
             if result is None and not owner.done():
                 owner.cancel()
 
-    async def _consume_task_with_paths(self, paths: ChannelPaths, task: CommandTask) -> None:
+    def _unwrap_self_bare_task(self, task: CommandTask) -> CommandTask:
+        # 先检查是否自身存在这个命令.
+        # 如果魔法命令是一个注册的 Command, 优先走它的实现. 比如 __content__ .
+        command = self.get_own_command(task.meta.name)
+        if command is not None:
+            # 重建 task. 如果魔法函数在这里面, 则优先在这里实例化.
+            task.set_command(command)
+            return task
+        elif not task.is_magical():
+            task.fail(CommandErrorCode.NOT_FOUND.error(f"command for {task.caller_name()} not found"))
+            return task
+
+        unwrapped_magic_task = self._unwrap_self_bare_task(task)
+        if unwrapped_magic_task is None and not task.done():
+            task.fail(CommandErrorCode.NOT_FOUND.error(f"command for {task.caller_name()} not found"))
+        return unwrapped_magic_task
+
+    def _unwrap_self_magic_task(self, task: CommandTask) -> CommandTask:
+        """
+        如果拥有魔法函数, 在这一层通过魔法函数将 task 还原出执行逻辑.
+        约定机制: 1. task 不合法, 要显式设置失败. 2. task 可容忍, 保持静默. 3. task 可改造, 返回改造后的 task
+        重写这个函数可以定义更多的魔法函数. 但是, 魔法函数实际上还是越少越好.
+        """
+        return task
+
+    def _check_new_compiled_task_scope(self, task: CommandTask) -> CommandTask | None:
+        return task
+
+    async def _consume_compiled_task_with_paths(self, paths: ChannelPaths, task: CommandTask) -> None:
         """
         基于路径将任务入栈.
         入栈是高优的同步任务.
         """
         try:
+            # 开始管道处理逻辑. 但尽量用纯函数, 不要做复杂的管道工程.
             # 是自己的, 而且是要立刻执行的任务.
-            task = self._parse_task(task)
+            task = self._parse_runtime_status_for_task(task)
+            if task.done():
+                return
+            is_self_task = len(paths) == 0
+            if is_self_task and task.is_bare_task():
+                # 自身的 bare task 提前做处理.
+                task = self._unwrap_self_bare_task(task)
+                if task.done():
+                    return
+            # 开始作用域检查, 如果检查结果是 task 应该直接关闭, 则返回 none. 返回 None 时 task 应该要被处理掉了.
+            task = self._check_new_compiled_task_scope(task)
             if task is None:
                 return
+
             task_id = task.cid
             # set pending
             task.set_state(CommandTaskState.pending.value)
             # 确认是自身的任务, 并且 call soon.
-            is_self_task = len(paths) == 0
             is_blocking_task = task.meta.blocking
             # 阻塞等待 compiled. 等得过久怎么办? 就得靠 shell clear 了.
             priority = task.meta.priority
