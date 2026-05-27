@@ -56,9 +56,11 @@ class CTMLShell(MOSShell[PrimeChannel]):
             primitives: list[str | Command] | None = None,
             meta_instruction: str | None = None,
             refresh_moss_static: bool = False,
+            capture_errors_on_exit: bool = False,
     ):
         self._name = name
         self._desc = description
+        self._capture_errors_on_exit = capture_errors_on_exit
 
         self._container = Container(name=name, parent=parent_container)
         self._container.set(MOSShell, self)
@@ -160,6 +162,7 @@ class CTMLShell(MOSShell[PrimeChannel]):
         self.logger.info("%s shell is exiting", self._log_prefix)
         await self._exit_stack.__aexit__(exc_type, exc_val, exc_tb)
         self.logger.info("%s exited", self._log_prefix)
+        return self._capture_errors_on_exit or None
 
     def _bootstrap_stacks(self) -> Iterable[Callable[[], contextlib.AbstractAsyncContextManager[None]]]:
         yield self._ioc_context_manager
@@ -178,8 +181,10 @@ class CTMLShell(MOSShell[PrimeChannel]):
                 self._container.set(LoggerItf, logger)
             self._logger = logger
 
-        yield
-        await asyncio.to_thread(self._container.shutdown)
+        try:
+            yield
+        finally:
+            await asyncio.to_thread(self._container.shutdown)
 
     @contextlib.asynccontextmanager
     async def _speech_context_manager(self):
@@ -199,8 +204,10 @@ class CTMLShell(MOSShell[PrimeChannel]):
         default_content_command = make_content_command_from_speech(self._speech)
         self.main_channel.build.add_command(default_content_command, override=False)
         await self._speech.start()
-        yield
-        await self._speech.close()
+        try:
+            yield
+        finally:
+            await self._speech.close()
 
     @contextlib.asynccontextmanager
     async def _runtime_context_manager(self):
@@ -210,9 +217,11 @@ class CTMLShell(MOSShell[PrimeChannel]):
         self._main_runtime = self._main_channel.bootstrap(self._container)
         # 开启 Runtime
         await self._main_runtime.start()
-        yield
-        # 关闭 Runtime. k
-        await self._main_runtime.close()
+        try:
+            yield
+        finally:
+            # 关闭 Runtime. k
+            await self._main_runtime.close()
 
     # --- lifetime functions --- #
 
@@ -551,8 +560,9 @@ def new_ctml_shell(
         experimental: bool = True,
         meta_instruction: str | None = None,
         primitives: list[str | Command] | None = None,
+        capture_errors_on_exit: bool = False,
 ) -> CTMLShell:
-    """语法糖, 好像不甜"""
+    """系统默认提供的 shell"""
     return CTMLShell(
         name=name,
         description=description,
@@ -562,7 +572,8 @@ def new_ctml_shell(
         logger=logger,
         experimental=experimental,
         primitives=primitives,
-        meta_instruction=meta_instruction
+        meta_instruction=meta_instruction,
+        capture_errors_on_exit=capture_errors_on_exit,
     )
 
 
@@ -571,11 +582,15 @@ async def ctml_shell_test(
         ctml: str,
         builder: Callable[[CTMLShell], None] | None = None,
         main: PrimeChannel | None = None,
+        logger: LoggerItf | None = None,
+        timeout: float | None = None,
 ) -> list[CommandTask]:
     """
-    simple method to test ctmlk
+    simple method to test ctml
     """
     shell = new_ctml_shell(main_channel=main)
+    if logger is not None:
+        shell.container.set(LoggerItf, logger)
     for channel in channels:
         shell.main_channel.import_channels(channel)
     if builder is not None:
@@ -585,6 +600,8 @@ async def ctml_shell_test(
         async with interpreter:
             interpreter.feed(ctml)
             interpreter.commit()
-            tasks = await interpreter.wait_tasks()
-            interpreter.raise_exception()
+            if timeout is not None:
+                tasks = await asyncio.wait_for(interpreter.wait_tasks(throw=True), timeout=timeout)
+            else:
+                tasks = await interpreter.wait_tasks(throw=True)
             return list(tasks.values())

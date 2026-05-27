@@ -20,7 +20,7 @@ from ghoshell_moss.core.concepts.tools import CommandAsTool
 from ghoshell_moss.core.ctml.elements import CommandTaskElementContext
 from ghoshell_moss.core.ctml.versions import get_moss_ctml_meta_instruction
 from ghoshell_moss.core.ctml.token_parser import CTML2CommandTokenParser, AttrWithTypeSuffixParser, ctml_default_parsers
-from ghoshell_moss.core.ctml.v1_0.prompts import make_static_messages, make_dynamic_messages, make_interfaces
+from ghoshell_moss.core.ctml.v1_0.prompts import make_static_messages, make_dynamic_messages
 from ghoshell_moss.core.helpers.asyncio_utils import ThreadSafeEvent
 from ghoshell_moss.message import Message
 import queue
@@ -37,6 +37,7 @@ _Description = str
 _Interface = str
 
 InterpreterIdKey: CommandTaskContextKey = 'interpreter_id'
+
 
 class CTMLInterpreter(Interpreter):
     instances_count: ClassVar[int] = 0
@@ -454,14 +455,10 @@ class CTMLInterpreter(Interpreter):
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         if exc_val is not None:
-            if isinstance(exc_val, asyncio.CancelledError):
-                await self.close(cancel_executing=True)
-                return True
-            if not isinstance(exc_val, InterpretError):
-                self._logger.exception("Interpreter quit on exception %s", exc_val)
-                await self.close(cancel_executing=True)
-                return None
-        await self.close(cancel_executing=False)
+            capture = isinstance(exc_val, asyncio.CancelledError)
+            await self.close(cancel_executing=True)
+            return capture or None
+        await self.close(cancel_executing=self._clear_after_exit if self._clear_after_exit is not None else True)
         return None
 
     def exception(self) -> Optional[Exception]:
@@ -571,9 +568,10 @@ class CTMLInterpreter(Interpreter):
             self,
             timeout: float | None = None,
             *,
+            throw: bool = True,
             return_when: str = asyncio.ALL_COMPLETED,
-            throw: bool = False,
             clear_undone: bool = True,
+            throw_task_error: bool = False,
     ) -> dict[str, CommandTask]:
         # 先等待到解释器结束.
         timeleft = Timeleft(timeout or 0.0)
@@ -605,7 +603,7 @@ class CTMLInterpreter(Interpreter):
             for t in pending:
                 t.cancel()
 
-            if throw:
+            if throw_task_error:
                 for task in tasks.values():
                     if exp := task.exception():
                         # 根据结果判断是否抛出异常.

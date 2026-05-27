@@ -102,11 +102,13 @@ async def test_ctml_empty_content_not_run():
     """
     验证空的字符串不会触发 content 调用.
     """
+    from ghoshell_moss.contracts import get_console_logger, LoggerItf
     a_chan = new_channel(name="a")
     results = []
 
     @a_chan.build.command()
-    async def cmd_a(): results.append("a")
+    async def cmd_a():
+        results.append("a")
 
     # a 嵌套 b，b 内部调用自己的命令，b 结束后回到 a 调用 a 的命令
     # 保留很多空行.
@@ -116,7 +118,13 @@ async def test_ctml_empty_content_not_run():
                 
         </_>
         """
-    tasks = await ctml_shell_test(a_chan, ctml=ctml)
+    time_err = None
+    try:
+        tasks = await ctml_shell_test(a_chan, ctml=ctml, timeout=0.5)
+    except asyncio.TimeoutError as e:
+        time_err = e
+    assert time_err is None
+
     assert len(tasks) == 3
     # 加入有意义的字符, 就会多一个 content 函数.
     ctml = """
@@ -125,7 +133,7 @@ async def test_ctml_empty_content_not_run():
                 hello
             </_>
             """
-    tasks = await ctml_shell_test(a_chan, ctml=ctml)
+    tasks = await ctml_shell_test(a_chan, ctml=ctml, timeout=0.5)
     assert len(tasks) == 4
     # 前后都一样.
     ctml = """
@@ -135,7 +143,7 @@ async def test_ctml_empty_content_not_run():
                     world
                 </_>
                 """
-    tasks = await ctml_shell_test(a_chan, ctml=ctml)
+    tasks = await ctml_shell_test(a_chan, ctml=ctml, timeout=0.5)
     assert len(tasks) == 5
 
 
@@ -147,10 +155,12 @@ async def test_ctml_nested_scope_override():
     results = []
 
     @a_chan.build.command()
-    async def cmd_a(): results.append("a")
+    async def cmd_a():
+        results.append("a")
 
     @b_chan.build.command()
-    async def cmd_b(): results.append("b")
+    async def cmd_b():
+        results.append("b")
 
     # a 嵌套 b，b 内部调用自己的命令，b 结束后回到 a 调用 a 的命令
     ctml = """
@@ -161,8 +171,13 @@ async def test_ctml_nested_scope_override():
         <cmd_a />
     </_>
     """
-    with pytest.raises(InterpretError):
+    err = None
+    try:
         await ctml_shell_test(a_chan, b_chan, ctml=ctml)
+    except Exception as e:
+        err = e
+    assert err is not None
+    assert isinstance(err, InterpretError)
 
 
 # --- 以下是 Gemini 3 写的单测, 发现 channel=name 语法有歧义, 仍改为命名空间定义作用域 --- #

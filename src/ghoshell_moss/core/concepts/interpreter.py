@@ -7,7 +7,7 @@ import time
 from abc import ABC, abstractmethod
 from typing import Optional, Callable, Iterable, AsyncIterable
 from typing_extensions import Self
-from ghoshell_moss.core.concepts.errors import CommandErrorCode
+from ghoshell_moss.core.concepts.errors import CommandErrorCode, InterpretError
 from ghoshell_moss.core.concepts.command import CommandTask, CommandToken
 from ghoshell_moss.core.concepts.channel import ChannelFullPath, ChannelMeta
 from ghoshell_moss.core.concepts.tools import CommandAsTool
@@ -597,13 +597,15 @@ class Interpreter(ABC):
             timeout: float | None = None,
             *,
             return_when: str = asyncio.ALL_COMPLETED,
-            throw: bool = False,
+            throw: bool = True,
+            throw_task_error: bool = False,
             clear_undone: bool = True,
     ) -> dict[str, CommandTask]:
         """
-        阻塞等待所有生成的 task, 并且按 return when 的规则返回.
+        阻塞等待所有生成的 task, 并且按 return when 的规则返回. 通常用于调试.
         :param timeout: 设置等待的超时时间.
-        :param throw: 如果 task 运行遇到异常了, 是否对外抛出.
+        :param throw: 是否要抛出异常? 还是只返回中断时的 tasks.
+        :param throw_task_error: 如果 task 运行遇到异常了, 是否对外抛出.
         :param return_when: 退出 wait execution done 的时机.
         :param clear_undone: 退出这个函数时, 是否要设置未完成的 Task 为 Cleared
         """

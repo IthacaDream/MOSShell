@@ -2,6 +2,7 @@ import pytest
 from ghoshell_moss.core.ctml.shell import new_ctml_shell
 from ghoshell_moss.core.duplex.thread_channel import create_thread_bridge
 from ghoshell_moss.core import PyChannel
+import asyncio
 
 
 @pytest.mark.asyncio
@@ -68,10 +69,6 @@ async def test_shell_with_virtual_sub_depth_channel():
             await shell.refresh_metas()
             assert len(shell.channel_metas()) == 4
 
-            # cmd = shell.runtime.get_command('proxy.virtual_sub:foo')
-            # assert cmd is not None
-            # assert await cmd() == 123
-
             async with shell.interpreter_in_ctx() as i:
                 i.feed("<proxy.virtual_sub:foo />")
                 i.commit()
@@ -126,6 +123,33 @@ async def test_shell_proxy_delta_calls_in_double_proxy():
 
 
 @pytest.mark.asyncio
+async def test_shell_proxy_channel_with_other_magic_command():
+    provider_main = PyChannel(name="provider")
+    provider, proxy = create_thread_bridge('proxy')
+
+    got = ''
+
+    @provider_main.build.command()
+    async def __hello__():
+        nonlocal got
+        got = "world"
+        return got
+
+    shell = new_ctml_shell()
+    shell.main_channel.import_channels(proxy)
+
+    async with provider.arun(provider_main):
+        async with shell:
+            await shell.wait_connected("proxy")
+            # 魔术方法不对外暴露即可.
+            for msg in shell.dynamic_messages():
+                assert "__hello__" not in msg.to_content_string()
+
+            assert "__hello__" not in shell.static_messages()
+            assert "__hello__" not in shell.meta_instruction()
+
+
+@pytest.mark.asyncio
 async def test_shell_proxy_channel_with_magic_delta_calls():
     provider_main = PyChannel(name="provider")
     provider, proxy = create_thread_bridge('proxy')
@@ -133,7 +157,7 @@ async def test_shell_proxy_channel_with_magic_delta_calls():
     got = ''
 
     @provider_main.build.command()
-    async def __chunks__(chunks__):
+    async def __magic__(chunks__):
         nonlocal got
         async for c in chunks__:
             got += c
@@ -143,31 +167,15 @@ async def test_shell_proxy_channel_with_magic_delta_calls():
     )
     shell.main_channel.import_channels(proxy)
 
-    errors = []
-
-    def report(err):
-        errors.append(err)
-
-    provider.on_error(report)
-
     async with provider.arun(provider_main):
         async with shell:
             await shell.wait_connected("proxy")
+            assert "proxy" in shell.commands()
             async with shell.interpreter_in_ctx() as i:
-                i.feed("<proxy:__chunks__>hello world</proxy:__chunks__>")
+                i.feed("<proxy:__magic__>hello world</proxy:__magic__>")
                 i.commit()
-                try:
-                    await i.wait_compiled()
-                except Exception as e:
-                    print(e)
-                tasks = i.compiled_tasks()
-                for task in tasks.values():
-                    assert task.meta.available
-                assert len(tasks) == 1
-                await shell.clear()
-                interpretation = await i.wait_stopped()
-                assert len(interpretation.failed_tasks) == 0
-    assert len(errors) == 0
+                await i.wait_tasks()
+    assert got == 'hello world'
 
 
 @pytest.mark.asyncio
@@ -213,3 +221,104 @@ async def test_shell_proxy_channel_with_delta_calls():
                 interpretation = await i.wait_stopped()
                 assert len(interpretation.failed_tasks) == 0
     assert len(errors) == 0
+
+
+@pytest.mark.asyncio
+async def test_shell_proxy_channel_with_remote_content_command():
+    provider_main = PyChannel(name="provider")
+    provider, proxy = create_thread_bridge('proxy')
+
+    got = ''
+
+    @provider_main.build.content_command
+    async def chunks(chunks__):
+        nonlocal got
+        async for c in chunks__:
+            got += c
+
+    shell = new_ctml_shell()
+    shell.main_channel.import_channels(proxy)
+    async with provider.arun(provider_main):
+        async with shell:
+            await shell.wait_connected("proxy")
+            await shell.refresh_metas()
+            metas = shell.channel_metas()
+            assert 'proxy' in metas
+            async with shell.interpreter_in_ctx() as i:
+                i.feed("<proxy:__content__>hello world</proxy:__content__>")
+                i.commit()
+                await i.wait_tasks()
+    assert got == 'hello world'
+
+
+@pytest.mark.asyncio
+async def test_shell_proxy_channel_with_content_command_that_not_exists():
+    provider_main = PyChannel(name="provider")
+    provider, proxy = create_thread_bridge('proxy')
+
+    shell = new_ctml_shell()
+    shell.main_channel.import_channels(proxy)
+
+    errors = []
+
+    def print_error(err):
+        errors.append(err)
+
+    provider.on_error(print_error)
+    async with provider.arun(provider_main):
+        async with shell:
+            await shell.wait_connected("proxy")
+            await shell.refresh_metas()
+            metas = shell.channel_metas()
+            assert 'proxy' in list(metas.keys())
+            async with shell.interpreter_in_ctx() as i:
+                i.feed("<proxy:__content__>hello world</proxy:__content__>")
+                i.commit()
+                tasks = await i.wait_tasks(timeout=2, throw_task_error=True)
+                for task in tasks.values():
+                    assert task.exception() is None
+                i.raise_exception()
+
+    assert len(errors) == 0
+
+
+@pytest.mark.asyncio
+async def test_shell_proxy_channel_with_content_command_by_scope():
+    provider_main = PyChannel(name="provider")
+    provider, proxy = create_thread_bridge('proxy')
+
+    shell = new_ctml_shell()
+    shell.main_channel.import_channels(proxy)
+
+    errors = []
+
+    got = ''
+
+    @provider_main.build.content_command
+    async def chunks(chunks__):
+        try:
+            nonlocal got
+            async for c in chunks__:
+                got += c
+        except asyncio.CancelledError:
+            got = 'canceled'
+
+    def print_error(err):
+        errors.append(err)
+
+    provider.on_error(print_error)
+    async with provider.arun(provider_main):
+        async with shell:
+            await shell.wait_connected("proxy")
+            await shell.refresh_metas()
+            metas = shell.channel_metas()
+            assert 'proxy' in metas
+            async with shell.interpreter_in_ctx() as i:
+                i.feed("<_ channel='proxy'>hello world</_>")
+                i.commit()
+                tasks = await i.wait_tasks(timeout=10)
+                assert len(tasks) == 3
+                i.raise_exception()
+
+    assert len(errors) == 0
+    assert got == 'hello world'

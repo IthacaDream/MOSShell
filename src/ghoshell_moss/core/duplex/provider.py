@@ -25,6 +25,8 @@ from ghoshell_moss.core.helpers.stream import (
 from .connection import Connection, ConnectionClosedError, ConnectionNotAvailable
 from .protocol import (
     ChannelEvent,
+    ChannelEventModel,
+    ChannelEventSerializedError,
     ChannelMetaUpdateEvent,
     ClearEvent,
     CommandCallEvent,
@@ -51,7 +53,12 @@ ProxyEventCallback = Callable[[ChannelEvent], None]
 
 
 class ProviderTopicService(QueueBasedTopicService):
-    """专门为 provider 准备的 topic."""
+    """
+    专门为 provider 准备的 topic.
+
+    当 topic service 本身未定义时, provider 通过协议来解决点对点 topic 广播. 但不是正规的做法.
+    如果想要正确的组网通讯, 仍需要提供协议范围内的 topic service.
+    """
 
     def __init__(
             self,
@@ -199,8 +206,8 @@ class DuplexChannelProvider(ChannelProvider):
         finally:
             try:
                 await self._connection.close()
-            except Exception as exc:
-                self.logger.exception("%s close connection failed: %s", self._log_prefix, exc)
+            except (ConnectionClosedError, ConnectionNotAvailable):
+                pass
 
     @contextlib.asynccontextmanager
     async def _bootstrap_main_loop_stack(self) -> AsyncIterator[None]:
@@ -216,8 +223,6 @@ class DuplexChannelProvider(ChannelProvider):
                 await self._main_loop_task
             except asyncio.CancelledError:
                 pass
-            except Exception as exc:
-                self.logger.exception("%s close main loop task failed: %s", self._log_prefix, exc)
 
     @contextlib.asynccontextmanager
     async def arun_channel_runtime(self, runtime: ChannelRuntime):
@@ -271,10 +276,10 @@ class DuplexChannelProvider(ChannelProvider):
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            self.logger.exception("%s close channel task failed: %s", self._log_prefix, exc)
+            self.logger.exception("%s close channel provider on exception: %s", self._log_prefix, exc)
             raise exc
         except KeyboardInterrupt:
-            self.logger.info("%s stop channel task on keyboardInterrupt", self._log_prefix)
+            self.logger.info("%s stop channel provider on keyboardInterrupt", self._log_prefix)
             raise
         finally:
             self._closed_event.set()
@@ -368,6 +373,7 @@ class DuplexChannelProvider(ChannelProvider):
                 # 提供当前正在监听的事件.
                 listening_topics=listening_topics,
             ).to_channel_event()
+            # 这里如果抛出异常, 就不会走到 connection creating event set
             await self._send_event_to_proxy(event)
             self._connection_creating_event.set()
         except asyncio.CancelledError:
@@ -485,7 +491,7 @@ class DuplexChannelProvider(ChannelProvider):
                     errcode=-1,
                     errmsg=f"provider error: {e}",
                 )
-                await self._send_event_to_proxy(provider_error.to_channel_event())
+                await self._send_event_model_to_proxy(provider_error)
 
     async def _handle_single_event(self, event: ChannelEvent) -> None:
         """做单个事件的异常管理, 理论上不要抛出任何异常."""
@@ -565,6 +571,13 @@ class DuplexChannelProvider(ChannelProvider):
             self.logger.exception("%s Clear channel failed: %s", self._log_prefix, e)
             raise e
 
+    async def _send_event_model_to_proxy(self, model: ChannelEventModel, connection_id: str = '') -> None:
+        try:
+            await self._send_event_to_proxy(model.to_channel_event(), connection_id)
+        except ChannelEventSerializedError as e:
+            self._logger.exception("%s send event model %s failed %s", self._log_prefix, model, e)
+            self._report_duplex_runtime_error(e)
+
     async def _send_event_to_proxy(self, event: ChannelEvent, connection_id: str = "") -> None:
         """做好事件发送的异常管理."""
         try:
@@ -599,7 +612,7 @@ class DuplexChannelProvider(ChannelProvider):
                 metas=metas.copy(),
                 root_chan=self._channel.name(),
             )
-            await self._send_event_to_proxy(response.to_channel_event())
+            await self._send_event_model_to_proxy(response)
         except asyncio.CancelledError:
             pass
 
@@ -632,7 +645,7 @@ class DuplexChannelProvider(ChannelProvider):
         if command:
             if not command.is_available():
                 response = call_event.not_available(f"Command {unique_name} not available in provider")
-                await self._send_event_to_proxy(response.to_channel_event())
+                await self._send_event_model_to_proxy(response)
                 return
             task = BaseCommandTask(
                 chan=call_event.chan,
@@ -650,7 +663,7 @@ class DuplexChannelProvider(ChannelProvider):
             task = BaseCommandTask(
                 chan=call_event.chan,
                 meta=CommandMeta(name=call_event.name),
-                func=command.__call__ if command else None,
+                func=None,
                 tokens=call_event.tokens,
                 args=call_event.args,
                 kwargs=call_event.kwargs,
@@ -660,7 +673,7 @@ class DuplexChannelProvider(ChannelProvider):
             )
         else:
             response = call_event.not_available(f"Command {unique_name} not found at provider")
-            await self._send_event_to_proxy(response.to_channel_event())
+            await self._send_event_model_to_proxy(response)
             return
 
         # 真正执行这个 task.
@@ -682,7 +695,7 @@ class DuplexChannelProvider(ChannelProvider):
                 task.cancel()
             result = task.task_result().serializable_copy() if task.success() else None
             response = call_event.done(result, task.errcode, task.errmsg)
-            await self._send_event_to_proxy(response.to_channel_event())
+            await self._send_event_model_to_proxy(response)
 
     async def _add_running_task(self, task: CommandTask) -> None:
         await self._running_command_tasks_lock.acquire()

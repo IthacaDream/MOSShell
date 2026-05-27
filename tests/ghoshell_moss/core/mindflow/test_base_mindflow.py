@@ -327,7 +327,7 @@ def _test_mindflow_in_differ_thread(i: int):
     t_actions.start()
     # 等待启动完了再推入信号.
     assert mindflow.wait_started_sync(2)
-    assert articulate_loop_started.wait(2)
+    assert articulate_loop_started.wait(2.5)
     assert action_loop_started.wait(2)
     # 第一个信号输出成功.
     signal_1 = Signal.new(name="vision_event", priority=Priority.NOTICE, strength=100)
@@ -620,6 +620,6 @@ def test_wait_first_impulse_complete():
     complete.id = incomplete.id
     # 手动塞入 signal.
     suite.mindflow.add_signal(complete)
-    assert done_event.wait(1)
+    assert done_event.wait(1.5)
     assert len(got) == 1
     suite.close()

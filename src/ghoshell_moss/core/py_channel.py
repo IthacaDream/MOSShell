@@ -23,7 +23,6 @@ from PIL.Image import Image
 from ghoshell_moss.core.concepts.command import Command, PyCommand, CommandWrapper, CommandUniqueName
 from ghoshell_moss.core.blueprint.states_channel import ChannelStateBuilder, ChannelState, StatefulChannel, PrimeChannel
 from ghoshell_moss.core.blueprint.channel_builder import (
-    Builder,
     CommandFunction,
     MessageFunction,
     MessageType,

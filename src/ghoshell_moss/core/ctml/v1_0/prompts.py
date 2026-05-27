@@ -1,7 +1,8 @@
 from typing import Dict
 from ghoshell_moss.message import Message
 from ghoshell_moss.core.concepts.channel import ChannelMeta, ChannelFullPath, Channel
-from .constants import MOSS_DYNAMIC, MOSS_STATIC, MAIN_CHANNEL_NAME
+from ghoshell_moss.core.concepts.command import Command
+from .constants import MOSS_DYNAMIC, MOSS_STATIC, MAIN_CHANNEL_NAME, CONTENT_COMMAND_NAME
 import datetime
 import dateutil
 
@@ -26,10 +27,13 @@ def make_interfaces(channel_meta: ChannelMeta, *, dynamic: bool = True, sustain:
     for cmd_meta in commands:
         if not cmd_meta.available:
             continue
-        if cmd_meta.dynamic and not dynamic:
+        elif cmd_meta.dynamic and not dynamic:
             # 排除掉非动态的 command meta.
             continue
-        if not cmd_meta.dynamic and not sustain:
+        elif not cmd_meta.dynamic and not sustain:
+            continue
+        # 除了 CONTENT Command 外, 所有的魔术方法都隐藏描述. 但是提供实现.
+        elif Command.is_magic_command(cmd_meta.name) and cmd_meta.name != CONTENT_COMMAND_NAME:
             continue
 
         available_commands += 1

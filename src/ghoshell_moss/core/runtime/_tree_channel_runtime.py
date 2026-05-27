@@ -179,7 +179,6 @@ class AbsChannelTreeRuntime(Generic[CHANNEL], AbsChannelRuntime[CHANNEL], ABC):
             self.logger.info("%s Finished executing loop", self.log_prefix)
 
     async def _dispatch_children_task(self, paths: ChannelPaths, task: CommandTask) -> None:
-        await asyncio.sleep(0)
         if task.done():
             return
         child_name = paths[0]
@@ -478,7 +477,7 @@ class AbsChannelTreeRuntime(Generic[CHANNEL], AbsChannelRuntime[CHANNEL], ABC):
             task.fail(CommandErrorCode.NOT_FOUND.error(f"command for {task.caller_name()} not found"))
             return task
 
-        unwrapped_magic_task = self._unwrap_self_bare_task(task)
+        unwrapped_magic_task = self._unwrap_self_magic_task(task)
         if unwrapped_magic_task is None and not task.done():
             task.fail(CommandErrorCode.NOT_FOUND.error(f"command for {task.caller_name()} not found"))
         return unwrapped_magic_task

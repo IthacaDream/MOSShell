@@ -680,3 +680,34 @@ async def test_sync_command_cancelable():
     # 凡是用 Sync 函数, 没有办法进行中断.
     await asyncio.sleep(0.015)
     assert len(data) == 1
+
+
+@pytest.mark.asyncio
+async def test_with_statement():
+    class Foo:
+
+        def __init__(self, capture: bool):
+            self.capture = capture
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            return self.capture or None
+
+    a = []
+    try:
+        async with Foo(True) as foo:
+            raise ValueError()
+        # 被拦截了, 可以正常执行.
+        a.append(1)
+    except ValueError:
+        pass
+    assert len(a) == 1
+    try:
+        async with Foo(False) as foo:
+            raise ValueError()
+    except ValueError:
+        # 没被拦截
+        a.append(1)
+    # assert len(a) == 2

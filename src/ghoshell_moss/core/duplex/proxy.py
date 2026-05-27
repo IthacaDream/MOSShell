@@ -43,7 +43,8 @@ from .protocol import (
     ProxyPubTopicEvent,
     ProviderSubTopicEvent,
     ProviderPubTopicEvent,
-    ProviderErrorEvent,
+    ProviderErrorEvent, ChannelEventModel,
+    ChannelEventSerializedError,
 )
 from ghoshell_moss.core.topic import TopicService
 
@@ -166,9 +167,18 @@ class DuplexChannelContext:
             if self.is_idle():
                 break
 
+    async def send_event_model_to_provider(self, model: ChannelEventModel, throw: bool = True) -> None:
+        try:
+            event = model.to_channel_event()
+            await self.send_event_to_provider(event, throw=throw)
+        except ChannelEventSerializedError as err:
+            self._logger.error(
+                "%s serialize channel model %s failed: %s", self._log_prefix, model, err
+            )
+
     async def send_event_to_provider(self, event: ChannelEvent, throw: bool = True) -> None:
         if self.stop_event.is_set():
-            self.logger.warning("Channel %s connection is stopped or not available", self.root_name)
+            self.logger.warning("%s connection is stopped or not available", self._log_prefix)
             if throw:
                 raise ConnectionClosedError(f"Channel {self.root_name} Connection is stopped with {event}")
             return
@@ -358,7 +368,7 @@ class DuplexChannelContext:
                     if not is_reconnected:
                         # 发送初始化连接.  proxy 一定要发送至少第一次, 因为 provider
                         is_reconnected = True
-                        await self.send_event_to_provider(ReconnectSessionEvent().to_channel_event())
+                        await self.send_event_model_to_provider(ReconnectSessionEvent())
                         continue
 
                 # 等待一个事件.
@@ -389,7 +399,7 @@ class DuplexChannelContext:
                     await self._create_topic_subscribers_for_provider(create_connection)
                     # 标记创建连接成功.
                     event = SessionCreatedEvent(connection_id=self.connection_id)
-                    await self.send_event_to_provider(event.to_channel_event())
+                    await self.send_event_model_to_provider(event)
                     continue
                 elif update_meta := ChannelMetaUpdateEvent.from_channel_event(event):
                     # 如果是 provider 发送了更新状态的结果, 则更新连接状态.
@@ -474,7 +484,7 @@ class DuplexChannelContext:
                     if topic.meta.local:
                         continue
                     event = ProxyPubTopicEvent(topic=topic, connection_id=self.connection_id)
-                    await self.send_event_to_provider(event.to_channel_event())
+                    await self.send_event_model_to_provider(event)
 
         self._subscribe_topic_tasks[topic_name] = asyncio.create_task(_subscribe_topic(topic_name))
 
@@ -509,8 +519,8 @@ class DuplexChannelContext:
         if not self._sync_meta_started_event.is_set():
             self._sync_meta_started_event.set()
             self._sync_meta_done_event.clear()
-            sync_event = SyncChannelMetasEvent(connection_id=self.connection_id).to_channel_event()
-            await self.send_event_to_provider(sync_event, throw=False)
+            sync_event = SyncChannelMetasEvent(connection_id=self.connection_id)
+            await self.send_event_model_to_provider(sync_event, throw=False)
 
     async def _handle_update_channel_meta(self, event: ChannelMetaUpdateEvent) -> None:
         """更新 metas 信息."""
@@ -562,7 +572,7 @@ class DuplexChannelContext:
                         connection_id=self.connection_id,
                         command_token=delta.model_dump(),
                     )
-                    await self.send_event_to_provider(event.to_channel_event())
+                    await self.send_event_model_to_provider(event, throw=True)
                 elif isinstance(delta, str):
                     event = CommandDeltaEvent(
                         command_id=cid,
@@ -576,7 +586,7 @@ class DuplexChannelContext:
             pass
         except Exception as exc:
             event = CommandCancelEvent(chan=task.chan, connection_id=self.connection_id, command_id=cid)
-            await self.send_event_to_provider(event.to_channel_event())
+            await self.send_event_model_to_provider(event, throw=True)
             self.logger.exception("%s failed to send delta args %s", self._log_prefix, exc)
             raise
 
@@ -614,7 +624,9 @@ class DuplexChannelContext:
                 kwargs=dict(task.kwargs),
                 tokens=task.tokens if task else "",
                 context=task.context if task else {},
+                parent_command_id=task.parent_cid,
                 call_id=task.call_id if task else "",
+                delta_arg=task.meta.delta_arg,
             )
             # 添加新的 task.
             await self.send_event_to_provider(event.to_channel_event(), throw=True)
@@ -624,6 +636,11 @@ class DuplexChannelContext:
             return event
         except asyncio.CancelledError:
             task.cancel()
+            raise
+        #  任何异常, 包括序列化异常.
+        except ChannelEventSerializedError as e:
+            self.logger.exception("%s failed to send command task %s", self._log_prefix, e)
+            task.fail("Command args can not be transported")
             raise
         except Exception as exc:
             self.logger.exception(exc)
@@ -638,9 +655,9 @@ class DuplexChannelContext:
             # 判断 task 还在 pending_provider_command_tasks 中, 意味着下游任务还未结束.
             if task.cid in self._pending_provider_command_tasks and self.is_channel_available(task.chan):
                 if exp := task.exception():
-                    await self.send_event_to_provider(event.cancel().to_channel_event(), throw=False)
+                    await self.send_event_model_to_provider(event.cancel(), throw=False)
                 elif task.cancelled():
-                    await self.send_event_to_provider(event.cancel().to_channel_event(), throw=False)
+                    await self.send_event_model_to_provider(event.cancel(), throw=False)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -742,7 +759,9 @@ class DuplexChannelRuntime(AbsChannelRuntime):
                 provider_side_chan_path=Channel.join_channel_path('', *paths),
             )
         except Exception as e:
-            task.fail(e)
+            # 补齐一次异常冗余.
+            if not task.done():
+                task.fail(e)
             raise
         _ = asyncio.create_task(self._ctx.expect_task_done(event, task))
 
@@ -863,7 +882,7 @@ class DuplexChannelRuntime(AbsChannelRuntime):
                 connection_id=self._ctx.connection_id,
                 chan=self._provider_chan_path,
             )
-            await self._ctx.send_event_to_provider(event.to_channel_event(), throw=True)
+            await self._ctx.send_event_model_to_provider(event, throw=True)
         except Exception as e:
             self.logger.exception(e)
 

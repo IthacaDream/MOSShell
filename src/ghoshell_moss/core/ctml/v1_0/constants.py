@@ -1,3 +1,5 @@
+from ghoshell_moss.core.blueprint.channel_builder import __content__
+
 __all__ = [
     'POSITION_ARGS_KEY', 'SCOPE_SHORTCUT', 'SCOPE_CHANNEL_NAME_KEY', 'CALL_ID_RESERVE_KEY', 'SCOPE_COMMAND_NAME',
     'CONTENT_COMMAND_NAME',
@@ -14,7 +16,7 @@ SCOPE_SHORTCUT = '_'
 SCOPE_COMMAND_NAME = '__scope__'
 SCOPE_ENTER_COMMAND_NAME = '__enter__'
 SCOPE_EXIT_COMMAND_NAME = '__exit__'
-CONTENT_COMMAND_NAME = '__content__'
+CONTENT_COMMAND_NAME = __content__.__name__
 CALL_ID_RESERVE_KEY = '_cid'
 SCOPE_CHANNEL_NAME_KEY = 'channel'
 

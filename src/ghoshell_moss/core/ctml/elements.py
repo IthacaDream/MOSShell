@@ -26,6 +26,7 @@ from ghoshell_moss.core.concepts.interpreter import (
 from ghoshell_moss.core.concepts.channel import ChannelCtx
 from ghoshell_moss.contracts.speech import Speech, SpeechStream
 from ghoshell_moss.core.helpers.stream import create_sender_and_receiver, ItemT, ThreadSafeStreamSender
+from ghoshell_moss.core.blueprint.channel_builder import __content__
 from ghoshell_moss.core.ctml.v1_0.constants import (
     CONTENT_COMMAND_NAME, SCOPE_COMMAND_NAME,
     SCOPE_SHORTCUT, SCOPE_ENTER_COMMAND_NAME, SCOPE_EXIT_COMMAND_NAME,
@@ -53,6 +54,8 @@ async def invalid_command():
 
 
 invalid_command = PyCommand(invalid_command)
+
+content_command = PyCommand(__content__)
 
 
 class ScopeOpenTask(BaseCommandTask[None]):
@@ -86,6 +89,7 @@ class ScopeOpenTask(BaseCommandTask[None]):
             tokens=tokens,
             args=[],
             kwargs={},
+            timeout=group.timeout,
         )
 
     async def start_scope(self):
@@ -139,27 +143,18 @@ class EmptyContentTask(BaseCommandTask[None]):
             chunks__: AsyncIterator[str],
             call_id: str | int | None = None,
     ):
-        meta = CommandMeta(
-            name=CONTENT_COMMAND_NAME,
-            blocking=True,
-        )
+        meta = content_command.meta()
         super().__init__(
             chan=channel,
             meta=meta,
             partial=None,
-            func=self.__content__,
+            func=None,
             tokens='',
             args=[],
             cid=cid,
             call_id=call_id,
-            kwargs={'chunks__': chunks__},
+            kwargs={meta.delta_arg: chunks__},
         )
-
-    @staticmethod
-    async def __content__(chunks__: AsyncIterator[str]) -> tuple[list, dict]:
-        async for chunk in chunks__:
-            pass
-        return [], {}
 
 
 class CommandTaskElementContext:
@@ -318,6 +313,9 @@ class BaseCommandTokenParserElement(CommandTokenParser, ABC):
         if task is not None:
             # 添加 children tasks
             self.inner_tasks.append(task)
+            # 注册包含关系.
+            if self.current_task is not None:
+                task.parent_cid = self.current_task.cid
             if self.scope:
                 self.scope.add(task)
 
@@ -439,6 +437,9 @@ class BaseCommandTokenParserElement(CommandTokenParser, ABC):
         """
         基于 start token 创建一个子节点. 策略树模式.
         """
+        if self.current_task and not token.chan.startswith(self.current_task.chan):
+            unique_name = Command.make_unique_name(token.chan, token.name)
+            raise InterpretError(f"Invalid command {unique_name} called inside channel {self.current_task.chan}")
         if token.seq != CommandTokenSeq.START.value:
             self.ctx.logger.error(
                 "%s create new child but receive token which is not start: %s",
@@ -469,12 +470,18 @@ class BaseCommandTokenParserElement(CommandTokenParser, ABC):
                 depth=self.depth + 1,
             )
         elif command is None:
+            allow_empty_command = False
             if self.ctx.ignore_wrong_command:
                 self.ctx.logger.warning(
                     "%s ignore wrong command %s, create empty one",
                     self._log_prefix,
                     token,
                 )
+                allow_empty_command = True
+            elif Command.is_magic_command(token.name):
+                allow_empty_command = True
+
+            if allow_empty_command:
                 child = CommandWithoutDeltaArgElement(
                     name=Command.make_unique_name(token.chan, token.name),
                     parent_add_inner_task=self._add_inner_task,
@@ -641,7 +648,6 @@ class BaseCommandTokenParserElement(CommandTokenParser, ABC):
         del self._current_stream
         del self.inner_tasks
         del self.current_task
-
 
 
 class CommandWithoutDeltaArgElement(BaseCommandTokenParserElement):

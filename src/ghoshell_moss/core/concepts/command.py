@@ -962,8 +962,10 @@ class CommandTask(Generic[RESULT], ABC):
             context: dict[CommandTaskContextKey, Any] | None = None,
             call_id: str | int | None = None,
             timeout: float | None = None,
+            parent_cid: str | None = None,
     ) -> None:
         self.chan = chan
+        # command id
         self.cid: str = cid or uuid()
         self.tokens: str = tokens
         self.args: list = list(args)
@@ -977,6 +979,7 @@ class CommandTask(Generic[RESULT], ABC):
         self.context = context or {}
         self.errcode: int = 0
         self.errmsg: Optional[str] = None
+        self.parent_cid = parent_cid
         if timeout is not None and timeout < 0:
             raise ValueError(f"timeout {timeout} is invalid")
         self.timeout: float | None = timeout or meta.timeout or None
@@ -1276,6 +1279,7 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
             call_id: str | int | None = None,
             partial: CommandPartial | None = None,
             timeout: float | None = None,
+            parent_cid: str | None = None,
     ) -> None:
         super().__init__(
             chan=chan,
@@ -1289,6 +1293,7 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
             call_id=call_id,
             partial=partial,
             timeout=timeout,
+            parent_cid=parent_cid,
         )
         self.__result: Optional[RESULT] = None
         self.__done_event: ThreadSafeEvent = ThreadSafeEvent()

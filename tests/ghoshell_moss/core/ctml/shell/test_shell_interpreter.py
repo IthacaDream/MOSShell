@@ -112,36 +112,55 @@ async def test_run_not_exists_command():
                 <sleep duration:float="0.1"/>
             """)
             interpreter.commit()
-            tasks = await interpreter.wait_tasks()
-            for task in tasks:
-                print(task)
             with pytest.raises(InterpretError):
-                interpreter.raise_exception()
+                tasks = await interpreter.wait_tasks(throw=True)
 
             interpretation = interpreter.interpretation()
         assert len(interpretation.exception) > 0
 
 
 @pytest.mark.asyncio
-async def test_interpreter_parse_error():
-    """
-    测试 wait_idle 与其他原语的配合
-    """
+async def test_interpreter_raise_exception_bubbles_interpret_error():
+    """验证 raise_exception() 确实会冒泡 InterpretError，而不是被吞掉或抛出错误类型。"""
     shell = new_ctml_shell()
     async with shell:
         async with await shell.interpreter() as interpreter:
-            interpretation = interpreter.interpretation()
-            # 复杂场景：启动后台任务，sleep，然后 wait_idle
-            interpreter.feed("""
-                <bg:background_work/>
-                <sleep duration:floa
-            """)
+            # 故意喂不存在的命令，制造解析错误
+            interpreter.feed("<nonexistent:cmd />")
             interpreter.commit()
-            tasks = await interpreter.wait_tasks()
-            with pytest.raises(Exception):
-                interpreter.raise_exception()
-
+            # wait_tasks(throw=True) 内部调用 raise_exception()
+            with pytest.raises(InterpretError):
+                await interpreter.wait_tasks(throw=True)
+            # 二次确认: interpretation 记录了异常
+            interpretation = interpreter.interpretation()
+        assert interpretation.exception is not None
         assert len(interpretation.exception) > 0
+
+
+@pytest.mark.asyncio
+async def test_exception_bubbles_through_shell_not_swallowed():
+    """验证非 CancelledError 的异常会穿透 shell 全链路，不被任何层吞掉。"""
+    shell = new_ctml_shell()
+    try:
+        async with shell:
+            raise ValueError("must bubble up")
+    except ValueError:
+        pass  # 预期行为
+    else:
+        pytest.fail("ValueError was swallowed — shell __aexit__ 吞掉了不该吞的异常")
+
+
+@pytest.mark.asyncio
+async def test_cancelled_error_bubbles_through_shell():
+    """验证 CancelledError 在 shell 层不吞（interpreter 层才吞），shell __aexit__ 只负责清理。"""
+    shell = new_ctml_shell()
+    try:
+        async with shell:
+            raise asyncio.CancelledError()
+    except asyncio.CancelledError:
+        pass  # 预期: shell 不吞 CancelledError，透传给调用者
+    else:
+        pytest.fail("CancelledError was swallowed by shell")
 
 
 @pytest.mark.asyncio
