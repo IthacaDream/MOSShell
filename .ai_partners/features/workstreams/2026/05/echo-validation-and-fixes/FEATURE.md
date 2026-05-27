@@ -3,10 +3,11 @@ title: Echo Ghost Validation & Fixes
 status: completed
 priority: P0
 created: 2026-05-23
-updated: 2026-05-25T23:30
+updated: 2026-05-27T17:00
 depends: [first-ghost-prototype]
 description: >-
   echo ghost human validation 中发现的 bug 修复。
+  包含跨进程 context_messages 图片序列化丢失的完整修复。
 ---
 
 # Echo Ghost Validation & Fixes
@@ -336,6 +337,83 @@ manifests_main = next(
 - `src/ghoshell_moss/message/contents/abcd.py` — TypedDict → typing_extensions
 - `src/ghoshell_moss_contrib/channels/slide_studio.py` — f-string 修复
 - `tests/` — 上述 4 个测试文件
+
+## 跨进程 context_messages 图片序列化丢失（2026-05-27, fixed）
+
+### 问题
+
+`.moss_ws/apps` 下的 channel 通过 `context_messages` 返回 PIL Image，经过 proxy/provider (zenoh) 协议跨进程传输后，proxy 侧收到的 context 中 image content 为空。
+
+### 根因
+
+四个 bug 叠加导致图片在序列化链路中消失：
+
+**Bug 1 — `Message.wrap_content()` 漏调 `.to_content()`**（`message.py:359-360`）
+
+`Base64Image.from_pil_image(item)` 返回的是 Pydantic BaseModel 实例，不是 `Content` TypedDict。直接放入 `contents` list 后，序列化时 `model_dump_json()` 无法正确识别 TypedDict 结构，`type` 和 `source` 键丢失。
+
+**Bug 2 — `Message.content_as_string()` 假设 `type` 键一定存在**（`message.py:487-493`）
+
+`content.get('type')` 未做防御，图片 Content 序列化失败后 `type` 缺失，导致 TUI 渲染时崩溃。
+
+**Bug 3 — `PyChannelBuilder._wrap_messages()` 丢弃累积的非 Message 对象**（`py_channel.py:131`）
+
+静态方法中 `result.append(msg)` 应为 `result.append(last)`。连续的非 Message raw items（如 PIL Image + str）被累积到 `last` Message 中，但遇到下一个 Message 时错误地 append 了当前 Message 而非累积的 `last`，导致前面累积的内容被丢弃。
+
+**Bug 4（主因）— `ChannelEventModel.to_channel_event()` 的 `exclude_unset=True`**（`protocol.py:62`）
+
+Pydantic 通过 `model_fields_set` 追踪字段是否被"显式设置"。`Message.with_content()` 内部使用 `self.contents.append()`（原地修改），不触发 `__setattr__`，Pydantic 认为 `contents` 字段 "unset"。`exclude_unset=True` 导致 `model_dump_json()` 静默丢弃 `contents`——这是跨进程传输后图片丢失的**根本原因**。
+
+单独测试 `Message.model_dump_json()` 能保留 contents 是因为没有 `exclude_unset`；但 `ChannelMetaUpdateEvent` → `ChannelMeta` → `Message` 的嵌套序列化经过 `to_channel_event()` 时 `exclude_unset=True` 被递归应用，contents 全部丢失。
+
+最小复现：
+```python
+from pydantic import BaseModel, Field
+class Demo(BaseModel):
+    items: list[str] = Field(default_factory=list)
+d = Demo()
+d.items.append('hello')
+d.model_dump_json(exclude_unset=True)  # → {} — items 丢失
+```
+
+### 方案
+
+| # | 文件 | 修复 |
+|---|------|------|
+| 1 | `message.py:360` | `Base64Image.from_pil_image(item)` → `.to_content()` |
+| 2 | `message.py:488-497` | `content['type']` → `content.get('type', 'unknown')`，图片类型展示 `media_type` 和 `base64_size` |
+| 3 | `py_channel.py:131` | `result.append(msg)` → `result.append(last)` |
+| 4 | `protocol.py:62` | 删除 `exclude_unset=True`；整个代码库中 `default_factory=list` + 原地 `.append()` 的模式太普遍，不应逐个修改 |
+
+### 单测覆盖
+
+新增测试文件 `tests/ghoshell_moss/core/ctml/shell/test_shell_image.py`（10 个用例）：
+
+| 测试 | 覆盖场景 |
+|------|---------|
+| `test_shell_image_baseline` | shell 命令直接返回 PIL Image |
+| `test_shell_image_return_bytes` | shell 命令返回图片 bytes |
+| `test_shell_image_in_sub_channel` | 子 channel 中的 image 命令 |
+| `test_shell_image_with_args` | 参数化图片生成 |
+| `test_context_messages_with_pil_image` | channel context_messages 返回 PIL Image（本地） |
+| `test_shell_context_messages_with_image` | shell 级 context_messages + refresh_metas |
+| `test_context_messages_with_image_and_text` | 混合 image + text 的 context_messages |
+| `test_context_messages_image_survives_serialization` | Message → JSON → dict → Message 往返 |
+| `test_image_content_survives_message_roundtrip` | wrap_content → Message → JSON → from_content 全链路 |
+| `test_context_messages_image_through_bridge` | **关键**：通过 thread bridge（同 `to_channel_event`/`from_channel_event` 序列化路径）的全链路集成测试 |
+
+### 为什么之前的单测没发现
+
+本地 PyChannel 测试不跨进程序列化，`ChannelMeta` 在进程内以 Python 对象传递，不经过 `to_channel_event()` → `model_dump_json(exclude_unset=True)` 路径。只有 app 部署通过 zenoh bridge 跨进程时才触发。
+
+Thread bridge（`create_thread_bridge`）虽然用 in-process Queue，但事件数据经过相同的 `model_dump_json()` / `json.loads()` 序列化/反序列化——因此 `test_context_messages_image_through_bridge` 能复现真实 zenoh 场景的 bug。
+
+### 位置
+
+- `src/ghoshell_moss/message/message.py` — wrap_content, content_as_string
+- `src/ghoshell_moss/core/py_channel.py` — _wrap_messages static method
+- `src/ghoshell_moss/core/duplex/protocol.py` — to_channel_event
+- `tests/ghoshell_moss/core/ctml/shell/test_shell_image.py` — 新增
 
 ## 复苏指引
 

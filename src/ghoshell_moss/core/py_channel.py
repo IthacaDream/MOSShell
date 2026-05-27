@@ -128,7 +128,7 @@ class PyChannelBuilder(ChannelStateBuilder, ChannelState):
         for msg in messages:
             if isinstance(msg, Message):
                 if last is not None:
-                    result.append(msg)
+                    result.append(last)
                 last = msg
             else:
                 if last is not None:

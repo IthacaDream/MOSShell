@@ -59,7 +59,6 @@ class ChannelEventModel(BaseModel, ABC):
     def to_channel_event(self) -> ChannelEvent:
         data = self.model_dump_json(
             exclude_none=True,
-            exclude_unset=True,
             exclude_defaults=True,
             exclude={"event_type", "connection_id", "event_id"},
             ensure_ascii=False,
