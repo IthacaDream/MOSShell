@@ -8,6 +8,7 @@ from PIL import Image
 from typing import Union, Callable, Coroutine, Any, Optional, TypeVar, AsyncIterable
 from typing_extensions import Self
 
+from ghoshell_moss.core import ChannelRuntime
 from ghoshell_moss.message import Message
 from ghoshell_moss.core.concepts.command import Command, Observe, ObserveError
 from ghoshell_moss.core.concepts.channel import Channel
@@ -24,7 +25,6 @@ __all__ = [
     "new_channel", "new_command",
     "CommandUtil",
     "Observe", "ObserveError",
-    "__content__",
 ]
 
 """
@@ -231,15 +231,6 @@ def new_command(
     )
 
 
-# special kind of content function
-async def __content__(chunks__) -> None | str:
-    # 默认的内容函数, 唯一允许对外暴露的魔术方法.
-    # 其它的魔术方法默认不会对模型暴露, 想要暴露应该用非魔术方法.
-    # 默认没有描述, 通过 builder.content_command 方式注册时可以添加描述.
-    # 返回值默认不显示, 或者可以返回一些必要的提示讯息, 取决于具体实现.
-    pass
-
-
 class Builder(ABC):
     """
     用来动态构建一个 Channel 的通用接口.
@@ -310,13 +301,13 @@ class Builder(ABC):
         """
         register a special function for channel's content method.
         """
-        name = __content__.__name__
+        name = ChannelRuntime.__content__.__name__
         return self.command(
             name=name,
             # 允许覆盖说明.
             doc=doc,
             # use __content__ as interface, override the docstring if need.
-            interface=__content__,
+            interface=ChannelRuntime.__content__,
             override=override,
             return_command=True,
         )(func)

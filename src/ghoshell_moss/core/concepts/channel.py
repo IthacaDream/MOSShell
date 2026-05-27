@@ -13,7 +13,7 @@ from typing import (
     Optional,
     Annotated,
     Callable,
-    Coroutine,
+    Coroutine, Literal,
 )
 
 from ghoshell_container import INSTANCE, IoCContainer, get_container
@@ -528,14 +528,60 @@ class ChannelRuntime(ABC):
         """
         pass
 
-    @abstractmethod
     def push_task(self, *tasks: CommandTask) -> None:
         """
         将 task 推入 channel runtime 的执行栈.
+
+        *** 是 ChannelRuntime 有序执行 Task 的唯一合法入口 ***
         """
+        # 通过显式定义, 展示 CommandTask 体系处理的基本逻辑.
+        is_running = self.is_running()
+        is_connected = self.is_connected()
+        is_available = self.is_available()
         for task in tasks:
+            if task.done():
+                continue
+            elif not is_running:
+                task.fail(CommandErrorCode.NOT_RUNNING.error('Channel Runtime not running'))
+                continue
+            elif not is_connected:
+                task.fail(CommandErrorCode.NOT_CONNECTED.error('Channel Runtime not connected'))
+                continue
+            elif not is_available:
+                task.fail(CommandErrorCode.NOT_AVAILABLE.error('Channel Runtime not available'))
+                continue
+            # 对空函数做预处理, 允许传入 caller 本身.
+            if task.is_bare_task() and task.chan == self.channel_path():
+                if command := self.get_own_command(task.meta.name):
+                    task.set_command(command)
+                elif task.is_magical():
+                    task = self.unwrap_self_magic_task(task)
+                else:
+                    task.fail(CommandErrorCode.NOT_FOUND.error(f'Command {task.caller_name()} not found'))
+            if task is None or task.done():
+                continue
             paths = Channel.split_channel_path_to_names(task.chan)
+            # 真正入执行栈.
             self.push_task_with_paths(paths, task)
+
+    def unwrap_self_magic_task(self, task: CommandTask) -> CommandTask:
+        """
+        基于约定的隐藏协议实现魔法命令的隐藏定义.
+
+        通常和 System Prompt 配合, 不走 Command 体系. 保留复杂逻辑 hack 的可能性.
+        """
+        if not task.is_bare_task():
+            return task
+        command_name = task.meta.name
+        # 使用约定的魔法函数.
+        if command_name == self.__content__.__name__:
+            task.func = self.__content__
+        elif command_name == self.__scope_enter__.__name__:
+            task.func = self.__scope_enter__
+        elif command_name == self.__scope_exit__.__name__:
+            task.func = self.__scope_exit__
+        # 默认魔法函数继续传递.
+        return task
 
     @abstractmethod
     def push_task_with_paths(self, paths: ChannelPaths, task: CommandTask) -> None:
@@ -562,6 +608,7 @@ class ChannelRuntime(ABC):
     async def execute_task(self, task: CommandTask) -> None:
         """
         simple way to execute task in runtime without queue logic.
+        提示底层逻辑如何传入 ChannelCtx.
         """
         if not self.is_running():
             task.fail(CommandErrorCode.NOT_RUNNING.error(f"Channel {self.name} is not running"))
@@ -614,7 +661,8 @@ class ChannelRuntime(ABC):
             timeout: float | None = None,
     ) -> Awaitable:
         """
-        执行命令并且阻塞等待拿到结果.
+        执行命令并且阻塞等待拿到结果. 通常用于调试.
+        正确的路径是走 push task 做阻塞.
         """
         task = self.create_command_task(name, args=args, kwargs=kwargs)
         if timeout is not None:
@@ -708,11 +756,33 @@ class ChannelRuntime(ABC):
         """
         await self.tree.wait_channel_children_idle(self.channel)
 
-    def channel_path(self) -> ChannelFullPath:
+    def channel_path(self) -> ChannelFullPath | None:
         """
-        return the channel path in the tree
+        return the channel path in the tree, or None means not registered yet (which is an unnormal issue)
         """
-        return self.tree.get_channel_path(self.channel.id()) or self.channel.name()
+        return self.tree.get_channel_path(self.channel.id()) or None
+
+    # --- default magic methods, 为后来的胶水层图灵完备语法做准备 --- #
+
+    @staticmethod
+    async def __content__(chunks__) -> None | str:
+        # 所有的 ChannelRuntime 均允许时序插入多端文本的 Command, 作为流式输入的基准函数.
+        # 当 __content__ 魔法 Command 不存在时, ChannelRuntime 会用空函数兜底. 这里是空函数的标准形式.
+        # 定义在 Channel Runtime 上提示这是系统级约定.
+        async for chunk in chunks__:
+            pass
+        return None
+
+    async def __scope_enter__(
+            self,
+            *,
+            timeout: float | None = None,
+            until: Literal['flow', 'any', 'all'] = 'flow',
+    ) -> None:
+        return None
+
+    async def __scope_exit__(self) -> None:
+        return None
 
 
 class ChannelTree(ABC):
@@ -807,6 +877,7 @@ class ChannelTree(ABC):
 
     @abstractmethod
     def get_channel_path(self, channel_id: str) -> ChannelFullPath | None:
+        """从全局中重新定位当前 channel 的绝对路径."""
         pass
 
     async def clear(self, runtime: ChannelRuntime) -> None:

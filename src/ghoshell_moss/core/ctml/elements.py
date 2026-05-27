@@ -23,10 +23,9 @@ from ghoshell_moss.core.concepts.interpreter import (
     CommandTaskCallback,
     CommandTokenParser,
 )
-from ghoshell_moss.core.concepts.channel import ChannelCtx
+from ghoshell_moss.core.concepts.channel import ChannelCtx, ChannelRuntime
 from ghoshell_moss.contracts.speech import Speech, SpeechStream
 from ghoshell_moss.core.helpers.stream import create_sender_and_receiver, ItemT, ThreadSafeStreamSender
-from ghoshell_moss.core.blueprint.channel_builder import __content__
 from ghoshell_moss.core.ctml.v1_0.constants import (
     CONTENT_COMMAND_NAME, SCOPE_COMMAND_NAME,
     SCOPE_SHORTCUT, SCOPE_ENTER_COMMAND_NAME, SCOPE_EXIT_COMMAND_NAME,
@@ -55,7 +54,7 @@ async def invalid_command():
 
 invalid_command = PyCommand(invalid_command)
 
-content_command = PyCommand(__content__)
+content_command = PyCommand(ChannelRuntime.__content__)
 
 
 class ScopeOpenTask(BaseCommandTask[None]):

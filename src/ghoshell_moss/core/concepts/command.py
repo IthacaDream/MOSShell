@@ -338,6 +338,7 @@ class Command(Generic[RESULT], ABC):
         魔法函数默认由 channel 判断是否存在, 如何使用.
         非内核开发者不需要理解这个规则. 用于支持流式解释器的特殊语法.
         """
+        # todo: command name pattern match
         return len(name) >= 5 and name.startswith("__") and name.endswith("__")
 
     @abstractmethod
