@@ -1,13 +1,14 @@
 ---
-title: CTML 命令装饰器 — @nonblocking
-status: in-progress
-priority: P2
 created: 2026-05-26
-updated: 2026-05-26
 depends: []
-milestone:
-description: >-
-  CTML interface 中 # not blocking 注释改为 @nonblocking 装饰器, 提示词新增命令装饰器节, priority 暂不暴露给模型.
+description: 'CTML interface 中 # not blocking 注释改为 @nonblocking 装饰器, 提示词新增命令装饰器节,
+  priority 暂不暴露给模型.'
+milestone: null
+priority: P2
+status: completed
+status_note: code landed in 0ddebd3, forgot to close
+title: CTML 命令装饰器 — @nonblocking
+updated: '2026-05-28'
 ---
 
 # CTML 命令装饰器 — @nonblocking

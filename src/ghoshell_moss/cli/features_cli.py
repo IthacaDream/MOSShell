@@ -378,3 +378,59 @@ def init_cmd(
     fd = init_features(str(root))
     print_success(f"Features templates synced to: {fd}")
     print_info("Template files overwritten; existing workstreams left untouched.")
+
+
+# ---------------------------------------------------------------------------
+# check
+# ---------------------------------------------------------------------------
+
+_TERMINAL_STATUSES = {"completed", "abandoned"}
+
+
+@features_app.command("check", short_help="List unfinished workstreams — pre-commit reminder.")
+def check_cmd(
+    features_dir: Optional[Path] = typer.Option(
+        None, "--dir", "-d",
+        help="Path to .ai_partners/features/ directory. Defaults to current project.",
+    ),
+):
+    """
+    List workstreams that are NOT in a terminal state (completed/abandoned).
+
+    Intended as a non-blocking pre-commit hook — always exits 0.
+    If you're committing code for any listed feature, run:
+
+        moss features set-status <name> completed
+
+    before committing.
+    """
+    fd = _resolve_dir(features_dir)
+    features = list_features(str(fd))
+
+    unfinished = [f for f in features if f.get("status") not in _TERMINAL_STATUSES]
+    if not unfinished:
+        return
+
+    # Group by status
+    grouped: dict[str, list[dict]] = {}
+    for f in unfinished:
+        stat = f.get("status", "?")
+        grouped.setdefault(stat, []).append(f)
+
+    echo("")
+    print_warning("Unfinished workstreams — if committing code for any, set status first:")
+    echo("")
+
+    for stat in sorted(grouped.keys()):
+        items = grouped[stat]
+        label = f"{stat} ({len(items)})"
+        echo(f"  {label}:")
+        for f in items:
+            name = f.get("_feature_dir", "?")
+            pri = f.get("priority", "?")
+            title = f.get("title", name)
+            echo(f"    {name:<36s} {pri}  {title}")
+        echo("")
+
+    echo("  moss features set-status <name> completed")
+    echo("")
