@@ -376,3 +376,113 @@ async def test_shell_proxy_channel_with_scope_call():
                         print(repr(exp))
                 i.raise_exception()
             assert len(got) == 4
+
+
+@pytest.mark.asyncio
+async def test_remote_scope_timeout_cancels_proxy_command():
+    """远程 scope timeout — proxy 侧下发超时作用域，provider 侧命令被取消"""
+    provider_main = PyChannel(name="provider")
+    provider, proxy = create_thread_bridge('proxy')
+
+    cancelled = False
+
+    @provider_main.build.command()
+    async def slow_work():
+        nonlocal cancelled
+        try:
+            await asyncio.sleep(1.0)
+        except asyncio.CancelledError:
+            cancelled = True
+            raise
+
+    shell = new_ctml_shell()
+    shell.main_channel.import_channels(proxy)
+
+    async with provider.arun(provider_main):
+        async with shell:
+            await shell.wait_connected("proxy")
+            async with shell.interpreter_in_ctx() as i:
+                # timeout 极短，slow_work 来不及完成
+                i.feed("<_ channel='proxy' timeout='0.01'><slow_work /></_>")
+                i.commit()
+                await i.wait_tasks(timeout=2)
+            await shell.clear()
+
+    assert cancelled is True
+
+
+@pytest.mark.asyncio
+async def test_remote_scope_until_any_cancels_slower_task():
+    """远程 scope until='any' — 快命令先完成，慢命令被 scope 取消"""
+    provider_main = PyChannel(name="provider")
+    provider, proxy = create_thread_bridge('proxy')
+
+    fast_done = False
+    slow_completed = False
+
+    @provider_main.build.command()
+    async def fast():
+        nonlocal fast_done
+        await asyncio.sleep(0.01)
+        fast_done = True
+
+    @provider_main.build.command()
+    async def slow():
+        nonlocal slow_completed
+        # 长时任务 — 在 until='any' 下应该被 scope 取消，不会跑完
+        await asyncio.sleep(1.0)
+        slow_completed = True
+
+    shell = new_ctml_shell()
+    shell.main_channel.import_channels(proxy)
+
+    async with provider.arun(provider_main):
+        async with shell:
+            await shell.wait_connected("proxy")
+            async with shell.interpreter_in_ctx() as i:
+                i.feed("<_ channel='proxy' until='any'><fast /><slow /></_>")
+                i.commit()
+                tasks = await i.wait_tasks(timeout=2)
+                i.raise_exception()
+            await shell.clear()
+
+    assert fast_done is True
+    # slow 被 scope 标记取消，不会完成
+    assert slow_completed is False
+
+
+@pytest.mark.asyncio
+async def test_remote_two_proxy_channels_parallel():
+    """两个 proxy channel 并行执行 — a 和 b 的命令互不阻塞"""
+    provider_a = PyChannel(name="pa")
+    provider_b = PyChannel(name="pb")
+    p_a, proxy_a = create_thread_bridge('proxy_a')
+    p_b, proxy_b = create_thread_bridge('proxy_b')
+
+    order = []
+
+    @provider_a.build.command()
+    async def cmd_a():
+        await asyncio.sleep(0.03)
+        order.append('a')
+
+    @provider_b.build.command()
+    async def cmd_b():
+        await asyncio.sleep(0.01)
+        order.append('b')
+
+    shell = new_ctml_shell()
+    shell.main_channel.import_channels(proxy_a)
+    shell.main_channel.import_channels(proxy_b)
+
+    async with p_a.arun(provider_a):
+        async with p_b.arun(provider_b):
+            async with shell:
+                await shell.wait_connected("proxy_a", "proxy_b")
+                async with shell.interpreter_in_ctx() as i:
+                    i.feed("<proxy_a:cmd_a /><proxy_b:cmd_b />")
+                    i.commit()
+                    await i.wait_tasks(timeout=2)
+                await shell.clear()
+
+    assert order == ['b', 'a']
