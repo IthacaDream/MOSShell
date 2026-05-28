@@ -64,6 +64,7 @@ class HostAppStore(AppStore):
         self._circus_process: Optional[subprocess.Popen] = None
         # self._client: Optional[AsyncCircusClient] = None
         self._polling_task: Optional[asyncio.Task] = None
+        self._call_lock = asyncio.Lock()
 
         self._endpoint: str = ""
         self._pubsub_endpoint: str = ""
@@ -259,26 +260,34 @@ class HostAppStore(AppStore):
                 **rotation_config,
             }
             r1 = None
+            started_in_add = False
             if app_fullname not in self._managed_apps_with_fullname:
                 existing = await self._call_circus({"command": "list"})
                 existing_watchers = existing.get("watchers", [])
                 if app.address not in existing_watchers:
+                    # add 时传 start: true，watcher.start() 直接启动进程，
+                    # 绕过 arbiter.start_watchers() 的全局锁，支持并行 bringup
+                    params['start'] = True
                     r1 = await self._call_circus({"command": "add", "properties": params})
-                    if r1['status'] == "error":
+                    if r1.get('status') == "error":
                         self._logger.error(
                             "%s failed to add watcher %s: %s",
                             self._log_prefix, app_fullname, r1,
                         )
                         raise CommandErrorCode.VALUE_ERROR.error(f"failed to start {app_fullname}")
+                    started_in_add = True
 
             self._managed_apps_with_fullname.add(app_fullname)
-            r2 = await self._call_circus({"command": "start", "name": app.address})
-            if r2['status'] == "error":
-                self._logger.error(
-                    "%s failed to start app %s on error: %s",
-                    self._log_prefix, app_fullname, r2,
-                )
-                raise CommandErrorCode.VALUE_ERROR.error(f"failed to start {app_fullname} cause system error")
+            if not started_in_add:
+                r2 = await self._call_circus({"command": "start", "name": app.address})
+                if r2.get('status') == "error":
+                    self._logger.error(
+                        "%s failed to start app %s on error: %s",
+                        self._log_prefix, app_fullname, r2,
+                    )
+                    raise CommandErrorCode.VALUE_ERROR.error(f"failed to start {app_fullname} cause system error")
+            else:
+                r2 = r1
             self._logger.info("%s start app %s: %s, %s", self._log_prefix, app_fullname, r1, r2)
 
             self._set_app_state(app_fullname, AppState.STARTING)
@@ -325,8 +334,9 @@ class HostAppStore(AppStore):
         """在后台线程执行同步的 ZMQ 调用，彻底隔离 Tornado/uvloop 冲突"""
         if not self._client:
             return {}
-        # 抛入 asyncio 的默认线程池运行，完美兼容 uvloop
-        return await asyncio.to_thread(self._client.call, command)
+        # ZMQ socket 不是线程安全的，用锁保证同一时间只有一个协程操作 socket
+        async with self._call_lock:
+            return await asyncio.to_thread(self._client.call, command)
 
     async def __aenter__(self) -> Self:
         if not self._runnable: raise RuntimeError('AppStore is not runnable')
