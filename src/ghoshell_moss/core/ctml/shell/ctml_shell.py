@@ -35,7 +35,8 @@ from ghoshell_moss.core.ctml.v1_0.prompts import make_static_messages, make_dyna
 from ghoshell_moss.core.ctml.shell.ctml_main import create_ctml_main_chan, default_primitive_map
 from ghoshell_moss.core.helpers import ThreadSafeEvent, ThreadSafeFuture
 from ghoshell_moss.core.speech.mock import MockSpeech
-from ghoshell_moss.contracts.speech import Speech, TTSSpeech, make_content_command_from_speech
+from ghoshell_moss.core.speech.speech_module import build_content_command
+from ghoshell_moss.contracts.speech import Speech
 from collections import deque
 import time
 
@@ -186,18 +187,19 @@ class CTMLShell(MOSShell[PrimeChannel]):
         """
         启动关闭音频模块.
         """
-        if self._speech is None:
+        if self._speech:
+            self._container.set(Speech, self._speech)
+        else:
             speech = self._container.get(Speech)
             if speech is None:
                 speech = MockSpeech()
                 self._container.set(Speech, speech)
             self._speech = speech
-        # 注册 tts 的 command.
-        if isinstance(self._speech, TTSSpeech):
-            for command in self._speech.commands():
-                self.main_channel.build.add_command(command, override=False)
-        default_content_command = make_content_command_from_speech(self._speech)
-        self.main_channel.build.add_command(default_content_command, override=False)
+
+        # 注册 __content__ 内核命令（shell 始终拥有说话能力）
+        content_cmd = build_content_command(self._speech)
+        self.main_channel.build.add_command(content_cmd, override=False)
+
         await self._speech.start()
         yield
         await self._speech.close()
