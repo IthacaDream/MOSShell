@@ -259,6 +259,7 @@ async def test_ctml_flow_cancels_long_running_child():
 
     # ctml 默认是 until="flow"
     ctml = "<_ channel='a'><a.b:slow_cmd/><fast_cmd/></_>"
+    print("+++++++++++++++ rerun")
     tasks = await ctml_shell_test(a.import_channels((b, "b")), ctml=ctml)
 
     # 结果应该是 b 被 cancel 了，因为 a 的直接序列 (fast_cmd) 跑完了
@@ -361,7 +362,7 @@ async def test_ctml_nested_any_all_recursion():
 
     @a.build.command()
     async def trigger():
-        await asyncio.sleep(0.01)  # 快速触发
+        await asyncio.sleep(0.03)  # 快速触发
 
     ctml = """
     <_ channel='a' until='any'>
@@ -372,7 +373,7 @@ async def test_ctml_nested_any_all_recursion():
         </_>
     </_>
     """
-    await ctml_shell_test(a, ctml=ctml)
+    await ctml_shell_test(a, ctml=ctml, timeout=1)
     # trigger 完成导致外部 any 结束，内部 all 应该被整体撤销，包含它的 2 个 waiter
     assert done_count == 0
 
@@ -419,7 +420,7 @@ async def test_ctml_none_strict_features_of_until_flow_with_none_self_command():
     @a.build.command()
     async def foo():
         # 让 foo 不会比 __content__ 更快执行完.
-        await asyncio.sleep(0.01)
+        await asyncio.sleep(0.02)
         done.append('foo')
 
     ctml = """
@@ -569,7 +570,8 @@ async def test_ctml_scope_timeout():
         <_ timeout="0.1">
             <timer:long_task/>
         </_>
-        """
+        """,
+        timeout=1,
     )
     # 超时会导致作用域内的任务被取消，所以 long_task 会抛出 CancelledError
     has_long = False

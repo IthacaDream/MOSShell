@@ -132,8 +132,9 @@ class CommandErrorCode(IntEnum):
 
     # --- 命令执行不可接受的异常 --- #
     # 对于 AI 而言必须要立刻感知的致命异常.
-    FATAL = 500
+    CRITICAL_ERROR = 500
     UNKNOWN_ERROR = 505
+    FATAL = 600
 
     def error(self, message: str) -> CommandError:
         at_line = get_caller_info(2)

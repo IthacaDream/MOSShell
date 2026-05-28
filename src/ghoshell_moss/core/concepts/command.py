@@ -30,6 +30,7 @@ from typing import (
     ClassVar,
     Protocol,
     AsyncIterator, Callable, Coroutine, AsyncIterable, TypeAlias,
+    Tuple,
 )
 from jsonargparse import ArgumentParser as JsonArgumentParser
 from argparse import ArgumentParser
@@ -1314,7 +1315,8 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
         return self.__result
 
     def add_done_callback(self, fn: Callable[[CommandTask], None]):
-        self.__done_callbacks.add(fn)
+        if not self.__done_event.is_set():
+            self.__done_callbacks.add(fn)
 
     def remove_done_callback(self, fn: Callable[[CommandTask], None]):
         self.__done_callbacks.discard(fn)

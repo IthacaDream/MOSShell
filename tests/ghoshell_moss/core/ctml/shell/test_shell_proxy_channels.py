@@ -276,7 +276,7 @@ async def test_shell_proxy_channel_with_content_command_that_not_exists():
                 i.commit()
                 tasks = await i.wait_tasks(timeout=2, throw_task_error=True)
                 for task in tasks.values():
-                    assert task.exception() is None
+                    assert task.exception() is None, "++++++ the task is:" + task.caller_name()
                 i.raise_exception()
 
     assert len(errors) == 0
@@ -322,3 +322,57 @@ async def test_shell_proxy_channel_with_content_command_by_scope():
 
     assert len(errors) == 0
     assert got == 'hello world'
+
+
+@pytest.mark.asyncio
+async def test_shell_proxy_channel_with_scope_call():
+    provider_main = PyChannel(name="provider")
+    provider, proxy = create_thread_bridge('proxy')
+
+    got = []
+
+    @provider_main.build.command()
+    async def foo():
+        got.append(1)
+        await asyncio.sleep(0.1)
+        return "hello"
+
+    shell = new_ctml_shell()
+    shell.main_channel.import_channels(proxy)
+
+    async with provider.arun(provider_main):
+        async with shell:
+            await shell.wait_connected("proxy")
+            assert provider.runtime.is_running()
+            assert shell.runtime.is_running()
+            proxy_runtime = shell.runtime.fetch_sub_runtime('proxy')
+            assert proxy_runtime.is_running()
+
+            assert len(got) == 0
+            async with shell.interpreter_in_ctx() as i:
+                i.feed("<_ channel='proxy' until='any'><foo /><foo /><foo /></_>")
+                i.commit()
+                tasks = await i.wait_tasks(timeout=1)
+                i.raise_exception()
+            assert len(got) == 1
+            await shell.clear()
+
+            got.clear()
+            async with shell.interpreter_in_ctx() as i:
+                i.feed("<_ channel='proxy' until='all'><foo /><foo /><foo /></_>")
+                i.commit()
+                tasks = await i.wait_tasks(timeout=1)
+                i.raise_exception()
+            assert len(got) == 3
+            await shell.clear()
+
+            got.clear()
+            async with shell.interpreter_in_ctx() as i:
+                i.feed("<_ channel='proxy' until='all'> <_><foo /></_> <foo />  <_><foo /></_>  </_> <proxy:foo />")
+                i.commit()
+                tasks = await i.wait_tasks(timeout=1)
+                for task in tasks.values():
+                    if exp := task.exception():
+                        print(repr(exp))
+                i.raise_exception()
+            assert len(got) == 4

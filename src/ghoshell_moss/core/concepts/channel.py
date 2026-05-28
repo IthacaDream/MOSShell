@@ -44,7 +44,6 @@ from dateutil import tz
 __all__ = [
     "Channel",
     "TaskDoneCallback",
-    "RefreshMetaCallback",
     "ChannelRuntime",
     "ChannelTree",
     "ChannelFullPath",
@@ -53,9 +52,10 @@ __all__ = [
     "ChannelProvider",
     "ChannelProxy",
     "ChannelCtx",
-    "ChannelInterface",
     "ChannelName",
     "ChannelNamePattern",
+    # scope 语法
+    "ChannelScope", "ChannelScopeType", "ChannelScopeDefaultType",
 ]
 
 
@@ -141,7 +141,8 @@ ChannelName = Annotated[str, Field(pattern=ChannelNamePattern)]
 
 class ChannelCtx:
     """
-    在 Channel 的运行过程中, 方便一个 Command 或者 Lifecycle Function 可以拿到调用它的 Runtime.
+    在 Channel 的运行过程的 Command 或者 Lifecycle Function 可以使用的模块.
+    通过 contextvars Context 来传递相关上下文.
     """
 
     def __init__(
@@ -250,7 +251,7 @@ class Channel(ABC):
     @abstractmethod
     def id(self) -> str:
         """
-        Channel 实例也只能用 id 来判断唯一性.
+        Channel 实例用 id 来判断唯一性, 会与 Runtime 绑定.
         """
         pass
 
@@ -290,11 +291,61 @@ class Channel(ABC):
         pass
 
 
-ChannelInterface = dict[ChannelFullPath, ChannelMeta]
-""" 用于描述一个 Channel 能够提供给 AI 的所有能力. """
+TaskDoneCallback = Callable[[CommandTask], None]
 
-TaskDoneCallback = Callable[[CommandTask], None] | Callable[[CommandTask], Coroutine[None, None, None]]
-RefreshMetaCallback = Callable[[ChannelInterface], None] | Callable[[ChannelInterface], Coroutine[None, None, None]]
+ChannelScopeType = Literal['flow', 'all', 'any']
+ChannelScopeDefaultType = 'flow'
+
+
+class ChannelScope(ABC):
+    """
+    Channel 作用域语法.
+    用来管理同组作用域下所有的 CommandTask 生命周期.
+    """
+
+    @property
+    @abstractmethod
+    def scope_id(self) -> str:
+        """作用域的唯一id, 通常就是 task.cid """
+        pass
+
+    @abstractmethod
+    def add_task(self, task: CommandTask) -> CommandTask:
+        """将一个 task 绑定到作用域. 作用域关闭时, 所有添加的 task 都会被关闭."""
+        pass
+
+    @abstractmethod
+    def commit(self, task: CommandTask) -> CommandTask:
+        """结束作用域的注册. 之后绑定到这个 scope 上的任务都会失败."""
+        pass
+
+    @abstractmethod
+    def is_commited(self) -> bool:
+        pass
+
+    @abstractmethod
+    def is_closed(self) -> bool:
+        pass
+
+    @abstractmethod
+    async def tick(
+            self,
+            *,
+            until: ChannelScopeType,
+            timeout: float | None = None,
+    ) -> None:
+        """开始作用域的计时逻辑"""
+        pass
+
+    @abstractmethod
+    async def wait_close(self) -> str | None:
+        """等待作用域正常结束"""
+        pass
+
+    @abstractmethod
+    def close(self, reason: str = '') -> None:
+        """主动关闭作用域"""
+        pass
 
 
 class ChannelRuntime(ABC):
@@ -528,43 +579,117 @@ class ChannelRuntime(ABC):
         """
         pass
 
+    @abstractmethod
+    def open_scope(
+            self,
+            task: CommandTask,
+    ) -> None:
+        """开启一个作用域. 返回处理后的 CommandTask. """
+        pass
+
+    @abstractmethod
+    def get_active_scope(self, scope_id: str | None, pop: bool) -> ChannelScope | None:
+        """获取作用域. scope_id 为None 的话返回最后一个 """
+        pass
+
+    @abstractmethod
+    def commit_scope(self, task: CommandTask) -> None:
+        """结束一个作用域的注册."""
+        pass
+
     def push_task(self, *tasks: CommandTask) -> None:
         """
-        将 task 推入 channel runtime 的执行栈.
-
-        *** 是 ChannelRuntime 有序执行 Task 的唯一合法入口 ***
+        将当前 ChannelRuntime 视作根节点, 将 task 推入 channel runtime 的执行栈.
+        根节点唯一入口. 包含根节点自身特殊逻辑.
+        这个函数的副作用, 不接受无序 tasks.
         """
         # 通过显式定义, 展示 CommandTask 体系处理的基本逻辑.
         is_running = self.is_running()
-        is_connected = self.is_connected()
-        is_available = self.is_available()
         for task in tasks:
-            if task.done():
-                continue
-            elif not is_running:
+            if not is_running:
                 task.fail(CommandErrorCode.NOT_RUNNING.error('Channel Runtime not running'))
                 continue
-            elif not is_connected:
-                task.fail(CommandErrorCode.NOT_CONNECTED.error('Channel Runtime not connected'))
-                continue
-            elif not is_available:
-                task.fail(CommandErrorCode.NOT_AVAILABLE.error('Channel Runtime not available'))
-                continue
-            # 对空函数做预处理, 允许传入 caller 本身.
-            if task.is_bare_task() and task.chan == self.channel_path():
-                if command := self.get_own_command(task.meta.name):
-                    task.set_command(command)
-                elif task.is_magical():
-                    task = self.unwrap_self_magic_task(task)
+            # 作用域语法检查. 只有将 channel runtime 作为根路径使用时才会触发检查.
+            # 对于一个 Channel 树的入口而言, 有责任创建作用域体系. 同一个进程内只有一个入口要管理整体作用域.
+            # 跨进程通讯 (ChannelProxy) 的远程根节点入口会根据已有的标记完成重建.
+            command_name = task.meta.name
+            # ChannelRuntime 作用域语法.
+            if command_name == self.__scope_enter__.__name__:
+                # 开启一个新的作用域. 作用域关闭的话, 这个新作用域和它的所有task 都会关闭.
+                # 使用 task id 作为作用域标记. 给后续节点做染色.
+                # scope 体系是一个父子依赖的 stack, 父 scope 关闭时也会关闭子 stack.
+                task.func = self.__scope_enter__
+                self.open_scope(task)
+            elif command_name == self.__scope_exit__.__name__:
+                task.func = self.__scope_exit__
+                self.commit_scope(task)
+            elif task.scope_id:
+                # task 如果已经约定了 scope id, 则应该要检查 scope 是否存在. 也就是是否被前序 task 创建了.
+                if scope := self.get_active_scope(None, False):
+                    # task 的 scope_id 无法对齐时.
+                    if scope.scope_id != task.scope_id:
+                        task.cancel("Scope not found")
+                        continue
+                    task = scope.add_task(task)
                 else:
-                    task.fail(CommandErrorCode.NOT_FOUND.error(f'Command {task.caller_name()} not found'))
-            if task is None or task.done():
+                    # 如果声明了作用域, 但没有发现的话, task 恒定被关闭.
+                    task.cancel("Scope not found.")
+            elif last := self.get_active_scope(None, False):
+                # 做标记.
+                last.add_task(task)
+                task.scope_id = last.scope_id
+            else:
+                # 无任何作用域信息时, 和默认规则保持完全一致.
+                pass
+            # 作用域语法可能直接开启, 或关闭了 task 生命周期.
+            if task.done():
                 continue
             paths = Channel.split_channel_path_to_names(task.chan)
             # 真正入执行栈.
             self.push_task_with_paths(paths, task)
 
-    def unwrap_self_magic_task(self, task: CommandTask) -> CommandTask:
+    def push_task_with_paths(self, paths: ChannelPaths, task: CommandTask) -> None:
+        """
+        将一个 Task 推入到执行栈中.
+        *** 是 ChannelRuntime 有序执行 Task 的唯一合法入口 ***
+        :param paths: task 对于当前 ChannelRuntime 的相对路径, 为空表示为当前 ChannelRuntime.
+        :param task: command task
+        """
+        if task.done():
+            # 跳过已经 done 的不要入队.
+            return
+        if not self.is_connected():
+            task.fail(CommandErrorCode.NOT_CONNECTED.error('Channel Runtime not connected'))
+            return
+        elif not self.is_available():
+            task.fail(CommandErrorCode.NOT_AVAILABLE.error('Channel Runtime not available'))
+            return
+        # 对空函数做预处理, 允许传入 caller 本身.
+        is_self_task = len(paths) == 0
+        if is_self_task and task.is_bare_task():
+            # 对 bare task 做预处理.
+            if command := self.get_own_command(task.meta.name):
+                # 优先用真实的 command, 包括魔法 command 来不足.
+                task.set_command(command)
+            elif task.is_magical():
+                task = self.partial_bare_magical_task(task)
+            else:
+                task.fail(CommandErrorCode.NOT_FOUND.error(f'Command {task.caller_name()} not found'))
+                return
+        if task.done():
+            return
+        # 最终入队. 保证入队后有序消费.
+        self._enqueue_task_with_paths(paths, task)
+
+    @abstractmethod
+    def _enqueue_task_with_paths(self, paths: ChannelPaths, task: CommandTask) -> None:
+        """
+        将相对路径的 task 入队.
+        不应直接调用.
+        """
+        pass
+
+    def partial_bare_magical_task(self, task: CommandTask) -> CommandTask:
         """
         基于约定的隐藏协议实现魔法命令的隐藏定义.
 
@@ -576,19 +701,8 @@ class ChannelRuntime(ABC):
         # 使用约定的魔法函数.
         if command_name == self.__content__.__name__:
             task.func = self.__content__
-        elif command_name == self.__scope_enter__.__name__:
-            task.func = self.__scope_enter__
-        elif command_name == self.__scope_exit__.__name__:
-            task.func = self.__scope_exit__
         # 默认魔法函数继续传递.
         return task
-
-    @abstractmethod
-    def push_task_with_paths(self, paths: ChannelPaths, task: CommandTask) -> None:
-        """
-        将一个 Task 推入到执行栈中. 阻塞到完成入栈为止.
-        """
-        pass
 
     @abstractmethod
     def on_task_done(self, callback: TaskDoneCallback) -> None:
@@ -765,22 +879,46 @@ class ChannelRuntime(ABC):
     # --- default magic methods, 为后来的胶水层图灵完备语法做准备 --- #
 
     @staticmethod
-    async def __content__(chunks__ = None) -> None | str:
+    async def __content__(chunks__=None) -> None | str:
         # 所有的 ChannelRuntime 均允许时序插入多端文本的 Command, 作为流式输入的基准函数.
         # 当 __content__ 魔法 Command 不存在时, ChannelRuntime 会用空函数兜底. 这里是空函数的标准形式.
         # 定义在 Channel Runtime 上提示这是系统级约定.
         return None
 
-    @staticmethod
     async def __scope_enter__(
+            self,
             *,
             timeout: float | None = None,
-            until: Literal['flow', 'any', 'all'] = 'flow',
+            until: ChannelScopeType = 'flow',
     ) -> None:
-        return None
+        """
+        scope enter command
+        """
+        # 当 scope enter task 执行的时候, 正式开始为 Scope 计时.
+        # scope 中所有 task 的交织关系是在 "编译器" 确定的, 正式运行则在 command 执行时计算.
+        task = ChannelCtx.task()
+        if task is None:
+            return
+        if not task.scope_id:
+            return
+        scope = self.get_active_scope(task.scope_id, False)
+        if scope is not None:
+            await scope.tick(timeout=timeout, until=until)
+        return
 
-    @staticmethod
-    async def __scope_exit__(self) -> None:
+    async def __scope_exit__(self) -> str | None:
+        task = ChannelCtx.task()
+        if task is None:
+            return None
+        if not task.scope_id:
+            return None
+        scope = self.get_active_scope(task.scope_id, True)
+        if scope is not None:
+            try:
+                return await scope.wait_close()
+            finally:
+                if not scope.is_closed():
+                    scope.close()
         return None
 
 

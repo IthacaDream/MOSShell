@@ -6,7 +6,6 @@ from .channel import (
     ChannelPaths,
     ChannelProvider,
     ChannelCtx,
-    ChannelInterface,
 )
 from .command import (
     RESULT,

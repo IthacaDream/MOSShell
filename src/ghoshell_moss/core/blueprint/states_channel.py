@@ -61,7 +61,8 @@ class ChannelState(ABC):
     """
     Channel 的运行时状态, 用来快速构建一个 StateChannel.
 
-    运行过程中要使用 IoC 容器, 可以通过 channel_builder.CommandUtil.get_contract 获取
+    运行过程中要使用 IoC 容器, 可以通过 bootstrap 函数被调用时获取并持有依赖
+    或者 channel_builder.CommandUtil.get_contract 在每个 command 和生命周期函数被调用时获取.
     """
 
     @abstractmethod
@@ -85,12 +86,12 @@ class ChannelState(ABC):
         """
         pass
 
-    @abstractmethod
     def is_dynamic(self) -> bool:
         """
         if the state is dynamic, need to refresh each time.
         """
-        pass
+        # 既然是有状态的 Channel, 默认是动态的.
+        return True
 
     async def get_instruction(self) -> str:
         """
@@ -145,6 +146,7 @@ class ChannelState(ABC):
     def bootstrap(self, container: IoCContainer) -> None:
         """
         register something to the container. or get some contracts from it.
+        函数会被 ChannelRuntime 实例化后调用.
         """
         return
 
@@ -290,3 +292,26 @@ def new_main_channel(description: str = "") -> PrimeChannel:
     """
     from ghoshell_moss.core.py_channel import PyChannel
     return PyChannel(name="__main__", description=description, blocking=True)
+
+
+# ---- 面向对象使用思路示范 ---- #
+
+class ChannelStateFactory(ChannelState, ABC):
+    """
+    如何从 State 类定义开始, 获取一个运行时可以生成 Channel 的 ChannelFactory 对象.
+
+    这不是一个必要的抽象, 仅仅展示如何面向对象的, 以 ChannelState 的思路来定义一个 Channel.
+
+    """
+
+    @classmethod
+    @abstractmethod
+    def new(cls, container: IoCContainer) -> Self:
+        """从 ioc 容器中可以实例化一个 State. 这个函数可以是 object method / class method"""
+        pass
+
+    @classmethod
+    def factory(cls, container: IoCContainer) -> Channel:
+        """factory 函数本身就是一个 channel factory, 所以可以被其它 channel import. """
+        state = cls.new(container)
+        return new_channel_from_state(state)

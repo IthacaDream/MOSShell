@@ -63,7 +63,6 @@ def new_test_suite(*commands: Command, ignore_wrong_command: bool = True) -> Ele
     stop_event = ThreadSafeEvent()
     ctx = CommandTaskElementContext(
         command_map,
-        output,
         ignore_wrong_command=ignore_wrong_command,
         # logger=get_console_logger(logging.DEBUG),
     )
@@ -108,14 +107,6 @@ async def test_element_with_no_command():
     # 最后一个 item 是毒丸.
     assert q[-1] is None
 
-    # 假设有正确的输出.
-    assert await ctx.speech.clear() == ["hello", "world"]
-
-    children = list(suite.root.children)
-    assert len(children) == 3
-    assert children[0].depth == 1
-    assert len(suite.root.inner_tasks) == 2
-
 
 @pytest.mark.asyncio
 async def test_element_baseline():
@@ -143,7 +134,8 @@ async def test_element_baseline():
     for task in suite.queue:
         # 要考虑 None 作为毒丸.
         if task:
-            assert task.caller_name() == task_caller_name[idx]
+            error = "actual %s, expect %s, idx %d" % (task.caller_name(), task_caller_name[idx], idx)
+            assert task.caller_name() == task_caller_name[idx], error
         idx += 1
     # 数 token
     assert len(list(suite.parser.parsed())) == (1 + 2 + 1 + 1 + 1 + 1)

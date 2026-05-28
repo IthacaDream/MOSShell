@@ -21,7 +21,6 @@ async def test_interpreter_baseline():
         kind="",
         commands=make_command_group('', PyCommand(foo)),
         stream_id="test",
-        speech=MockSpeech(),
         callback=queue.append,
         # logger=logger,
     )
@@ -58,7 +57,6 @@ async def test_interpreter_cancel():
         kind="",
         commands=make_command_group("", PyCommand(foo)),
         stream_id="test",
-        speech=MockSpeech(),
         callback=queue.append,
     )
 

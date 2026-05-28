@@ -329,7 +329,15 @@ class BaseChannelTree(ChannelTree, ChannelTreeContext):
         if channel_id in self._runtimes:
             return None
         # 创建新的 runtime.
-        runtime = channel.bootstrap(self._container)
+        try:
+            # 初始化 channel 对应的 runtime
+            runtime = channel.bootstrap(self._container)
+        except Exception as e:
+            self.logger.exception("%r bootstrap channel %s exception: %s", self, path, e)
+            return None
+        if runtime is None:
+            # 如果 channel 无法生成 runtime.
+            return asyncio.create_task(_noop())
         self._runtimes[channel_id] = runtime
         node = ChannelRuntimeNode(channel_id, path, self._loop, logger=self._logger)
         # 注册 node 节点.

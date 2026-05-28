@@ -29,6 +29,7 @@ from ghoshell_moss.core.runtime import AbsChannelRuntime
 R = TypeVar("R")  # 泛型结果类型
 
 
+# todo: 用 ChannelState 方式重构.
 class MCPChannel(Channel):
     """对接MCP服务的Channel"""
 

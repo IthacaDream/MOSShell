@@ -1,6 +1,7 @@
 import asyncio
 from abc import ABC, abstractmethod
-from typing import Any, TypeVar, Generic
+from typing import Any, TypeVar, Generic, Literal, Callable
+import threading
 
 from ghoshell_container import IoCContainer
 
@@ -13,6 +14,7 @@ from ghoshell_moss.core.concepts.channel import (
     ChannelCtx,
     Channel,
     ChannelPaths,
+    ChannelRuntime,
 )
 from ghoshell_moss.core.concepts.errors import CommandErrorCode
 from ghoshell_common.contracts import LoggerItf
@@ -206,7 +208,6 @@ class AbsChannelTreeRuntime(Generic[CHANNEL], AbsChannelRuntime[CHANNEL], ABC):
         consuming = None
         try:
             # consuming 过程中让出一次.
-            await asyncio.sleep(0)
             # 阻塞任务存在的时候, 必须等到阻塞任务完成, 或者它被取消.
             # 这里不做优先级检查, 因为入队时做过了.
             if self._executing_blocking_task is not None and not self._executing_blocking_task.done():
@@ -215,6 +216,7 @@ class AbsChannelTreeRuntime(Generic[CHANNEL], AbsChannelRuntime[CHANNEL], ABC):
                 # 只有 consuming 环节可以控制 executing blocking task
                 self._executing_blocking_task = None
 
+            is_self_task = len(paths) == 0
             try:
                 consuming = self._pending_tasks.pop(task_id)
             except KeyError:
@@ -223,7 +225,6 @@ class AbsChannelTreeRuntime(Generic[CHANNEL], AbsChannelRuntime[CHANNEL], ABC):
                 consuming = None
                 return None
 
-            is_self_task = len(paths) == 0
             is_blocking_task = consuming.meta.blocking
             # 检查是不是子节点的任务.
             if not is_self_task:
@@ -237,6 +238,7 @@ class AbsChannelTreeRuntime(Generic[CHANNEL], AbsChannelRuntime[CHANNEL], ABC):
                 self._executing_blocking_task = consuming
             # 执行自己的任务. 但并不阻塞.
             await self._clear_idle_task()
+
             await self._execute_self_task_none_block(consuming)
             consuming = None
 
@@ -565,6 +567,7 @@ class AbsChannelTreeRuntime(Generic[CHANNEL], AbsChannelRuntime[CHANNEL], ABC):
                 for t in executing_tasks.values():
                     if not t.done():
                         t.fail(clear_err)
+
         except Exception as e:
             self.logger.exception("%s clear self failed: %s", self.log_prefix, e)
             raise

@@ -1,3 +1,6 @@
+"""
+how to build a channel
+"""
 # # Blueprint
 # about how to build channel for MOSShell.
 # the path of this module is ghoshell_moss.core.blueprint.channel_builder
@@ -6,6 +9,8 @@ from abc import ABC, abstractmethod
 
 from PIL import Image
 from typing import Union, Callable, Coroutine, Any, Optional, TypeVar, AsyncIterable
+
+from ghoshell_container import IoCContainer
 from typing_extensions import Self
 
 from ghoshell_moss.core import ChannelRuntime
@@ -16,7 +21,7 @@ from ghoshell_moss.core.blueprint.mindflow import Signal
 import asyncio
 
 __all__ = [
-    "Channel",
+    "Channel", "ChannelFactory",
     "CommandFunction", "MessageFunction", "StringType", "LifecycleFunction",
     "Message",
     "MessageType",
@@ -25,11 +30,12 @@ __all__ = [
     "new_channel", "new_command",
     "CommandUtil",
     "Observe", "ObserveError",
+
+    # 作为示例用的实现风格.
+    "ChannelInterface", "ChannelCreator",
 ]
 
-"""
-how to build a channel
-"""
+ChannelFactory = Callable[[IoCContainer], Channel | None]
 
 CommandFunction = Union[Callable[..., Coroutine], Callable[..., Any]]
 """
@@ -463,13 +469,14 @@ class Builder(ABC):
     @abstractmethod
     def with_binding(self, contract: type[INSTANCE], instance: INSTANCE) -> Self:
         """
-        注册一个依赖, 在 Channel 实例化时完成注入, 不会污染其它 channel. 可以通过 CommandCtx.get_contract 获取.
+        注册一个依赖, 在 Channel 实例化时注入 IoC 容器.
+       可以通过 CommandCtx.get_contract 获取.
         依赖注入完全是可选的, 可以通过模块实例化/全局工厂等替代.
         """
         pass
 
     @abstractmethod
-    def with_factory(
+    def with_contract_factory(
             self,
             contract: type[INSTANCE],
             factory: Callable[[...], INSTANCE],
@@ -478,12 +485,16 @@ class Builder(ABC):
             override: bool = False,
     ) -> Self:
         """
-        注册一个依赖的工厂方法. 这个工厂方法如果有入参, 会被 IoC 容器自动注入执行.
+        注册一个依赖的工厂方法.
+        这个工厂方法当 Channel 实例化 Runtime 时, 会把 contract 的工厂函数注册到 IoC 容器.
         """
         pass
 
     @abstractmethod
-    def import_channels(self, *children: Channel | tuple[Channel, _ChannelName]) -> Self:
+    def import_channels(
+            self,
+            *children: Channel | ChannelFactory | tuple[Channel | ChannelFactory, _ChannelName],
+    ) -> Self:
         """
         add sustain channels to the channel.
         """
@@ -495,7 +506,10 @@ class MutableChannel(Channel, ABC):
     一个约定, 用来描述拥有动态构建能力的 Channel.
     """
 
-    def import_channels(self, *children: Channel | tuple[Channel, _ChannelName]) -> Self:
+    def import_channels(
+            self,
+            *children: Channel | ChannelFactory | tuple[Channel | ChannelFactory, _ChannelName],
+    ) -> Self:
         """
         添加子 Channel 到当前 Channel. 形成树状关系.
         效果可以比较 python 的 import module as name
@@ -526,36 +540,15 @@ class MutableChannel(Channel, ABC):
         pass
 
 
-class ChannelInterfaceExample(ABC):
-    """
-    一个 Channel 开发的范式的例子.
-    通过独立的抽象类, 定义了若干个函数, 而这些函数通过 build 注册了依赖关系.
-    这样, 可以把设计一个 Channel, 与实现它分成两个明确的步骤. 设计本身是独立的.
-    """
-
-    @abstractmethod
-    async def example_command(self) -> str:
-        """
-        docstring
-        """
-        pass
-
-    @abstractmethod
-    def as_channel(self, name: str, description: str) -> Channel:
-        channel = new_channel(name=name, description=description)
-        # 注册自身的 command.
-        channel.build.command(interface=ChannelInterfaceExample.example_command)(self.example_command)
-        return channel
-
-
-def new_channel(name: str, description: str = "") -> MutableChannel:
+def new_channel(name: str, description: str = "", uid: str | None = None) -> MutableChannel:
     """
     Create a new Mutable/Stateful Channel object with builder.
     Able to define all kinds of channels.
     Use this tool to build your own channel object.
     """
     from ghoshell_moss.core.py_channel import PyChannel
-    return PyChannel(name=name, description=description)
+    # if uid is None, auto generate uuid for it.
+    return PyChannel(name=name, description=description, uid=uid)
 
 
 async def provide_channel_as_app(channel: Channel) -> None:
@@ -572,3 +565,80 @@ async def provide_channel_as_app(channel: Channel) -> None:
     # 则应该阅读 Matrix 抽象.
     async with _matrix as m:
         await m.provide_channel(channel)
+
+
+class ChannelCreator(ABC):
+    """
+    示例, 如果不用 new_channel 等面向组合风格创建 Channel
+    仍然可以用这种面向对象的风格来创建.
+    """
+
+    @classmethod
+    @abstractmethod
+    def factory(cls, container: IoCContainer) -> Channel:
+        """创建 channel 的函数本身可以注册到 channel. """
+        pass
+
+
+class ChannelInterface(ChannelCreator, ABC):
+    """
+    面向对象更激进的 Channel 实现风格.
+    不仅定义 factory, 还提前定义好函数.
+    """
+
+    @classmethod
+    @abstractmethod
+    def new(cls, container: IoCContainer) -> Self:
+        """确保可以在 ioc 中实例化自己. """
+        pass
+
+    @abstractmethod
+    def as_channel(self) -> Channel:
+        """实例化后的自己, 可以生产 channel 对象."""
+        pass
+
+    @classmethod
+    def factory(cls, container: IoCContainer) -> Channel:
+        self_instance = cls.new(container)
+        return self_instance.as_channel()
+
+
+if __name__ == "__build_channel_by_channel_interface_example__":
+    # 通过 ChannelCreator 的风格创建面向对象的抽象/实现的方式.
+    main = new_channel(name="__main__")
+
+
+    class FooInterface(ChannelInterface):
+
+        @abstractmethod
+        async def foo(self) -> str:
+            pass
+
+        @classmethod
+        @abstractmethod
+        def new(cls, container: IoCContainer) -> Self:
+            pass
+
+        def as_channel(self) -> Channel:
+            channel = new_channel(name="foo")
+            channel.build.command(
+                interface=FooInterface.foo,
+            )(self.foo)
+            return channel
+
+
+    class FooImpl(FooInterface):
+
+        def __init__(self, c: IoCContainer):
+            self.c = c
+
+        async def foo(self) -> str:
+            return self.c.name
+
+        @classmethod
+        def new(cls, container: IoCContainer) -> Self:
+            return cls(container)
+
+
+    # 直接将工厂方法注入到通道中.
+    main.import_channels(FooImpl.factory)

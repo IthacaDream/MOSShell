@@ -340,7 +340,6 @@ class CTMLShell(MOSShell[PrimeChannel]):
             interrupted=interrupted_interpretation,
             undone_tasks=undone_tasks,
             commands=commands,
-            speech=self._speech,
             stream_id=stream_id or unique_id(),
             callback=callback,
             logger=self.logger,

@@ -756,10 +756,11 @@ class DuplexChannelRuntime(AbsChannelRuntime):
         try:
             event = await self._ctx.send_command_task(
                 task,
+                # 在远程位置上的 channel path.
                 provider_side_chan_path=Channel.join_channel_path('', *paths),
             )
         except Exception as e:
-            # 补齐一次异常冗余.
+            # 补齐一次异常冗余检测.
             if not task.done():
                 task.fail(e)
             raise

@@ -8,7 +8,7 @@ from ghoshell_common.helpers import Timeleft
 from ghoshell_moss.message import unique_id
 from ghoshell_moss.core.concepts.channel import ChannelFullPath, ChannelMeta
 from ghoshell_moss.core.concepts.command import Command, CommandTask, CommandToken, CommandTaskContextKey
-from ghoshell_moss.core.concepts.errors import CommandErrorCode, InterpretError, CommandError
+from ghoshell_moss.core.concepts.errors import CommandErrorCode, InterpretError
 from ghoshell_moss.core.concepts.interpreter import (
     CommandTaskCallback,
     CommandTokenParser,
@@ -50,7 +50,6 @@ class CTMLInterpreter(Interpreter):
             interrupted: Interpretation | None = None,
             undone_tasks: list[CommandTask] | None = None,
             commands: dict[ChannelFullPath, dict[str, Command]],
-            speech: Speech,
             stream_id: Optional[str] = None,
             callback: Optional[CommandTaskCallback] = None,
             root_tag: str = "ctml",
@@ -68,7 +67,6 @@ class CTMLInterpreter(Interpreter):
     ):
         """
         :param commands: 所有 interpreter 可以使用的命令. key 是 channel path, value 是这个 channel 可以用的 commands.
-        :param speech: 用来发送所有模型非 command 输出的内容.
         :param stream_id: 让 interpreter 有一个唯一的 id.
         :param callback: command task callback
         :param root_tag: 决定生成 command token 的起始和结尾标记. 通常没有功能性.
@@ -122,7 +120,6 @@ class CTMLInterpreter(Interpreter):
         self._ignore_wrong_command = ignore_wrong_command
 
         # output related
-        self._speech = speech
         self._outputted: Optional[list[str]] = None
         # 用线程安全队列就可以. 考虑到队列可能不是在同一个 loop 里添加
         self._loop: Optional[asyncio.AbstractEventLoop] = None
@@ -358,7 +355,6 @@ class CTMLInterpreter(Interpreter):
     def command_token_parser(self) -> CommandTokenParser:
         ctx = CommandTaskElementContext(
             channel_commands=self._channel_command_map,
-            speech=self._speech,
             logger=self._logger,
             ignore_wrong_command=self._ignore_wrong_command,
         )
@@ -392,7 +388,7 @@ class CTMLInterpreter(Interpreter):
             pass
         except Exception as exc:
             self._logger.exception("%s Interpret failed: %s", self._log_prefix, exc)
-            raise
+            raise exc
         finally:
             self._logger.info("%s text token parser loop stopped", self._log_prefix)
             self._receive_command_token(None)
@@ -549,7 +545,7 @@ class CTMLInterpreter(Interpreter):
             if timeout_task in done:
                 raise asyncio.TimeoutError("Timed out while waiting for parser to finish")
             if throw and self._parsing_exception:
-                raise self._parsing_exception
+                raise InterpretError.from_error(self._parsing_exception)
         except asyncio.CancelledError:
             self._logger.info("wait parser done is cancelled")
             pass
@@ -608,9 +604,9 @@ class CTMLInterpreter(Interpreter):
 
             if throw_task_error:
                 for task in tasks.values():
-                    if exp := task.exception():
+                    if task.is_critical_failed():
                         # 根据结果判断是否抛出异常.
-                        raise CommandError.from_error(exp)
+                        raise InterpretError(f"task {task.caller_name()} critical failed: {task.exception()}")
 
             # 返回所有的 tasks.
             return tasks
@@ -653,6 +649,5 @@ class CTMLInterpreter(Interpreter):
         self._on_task_created_callbacks.clear()
         self._managing_tasks.clear()
         self._compiled_tasks.clear()
-        self._speech = None
         if self._outputted:
             self._outputted.clear()

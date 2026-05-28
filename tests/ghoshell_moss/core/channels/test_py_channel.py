@@ -532,6 +532,7 @@ async def test_py_channel_call_soon_command():
         return
 
     async with main.bootstrap() as runtime:
+        assert runtime.is_running()
         _foo = runtime.create_command_task("foo")
         _bar = runtime.create_command_task("bar")
         runtime.push_task(_foo)
@@ -539,7 +540,7 @@ async def test_py_channel_call_soon_command():
         await asyncio.sleep(0.1)
         runtime.push_task(_bar)
         await _bar
-        assert exec_log == ["cancelled"]
+        assert exec_log == ["cancelled"], _bar.done_at
 
 
 @pytest.mark.asyncio
@@ -760,3 +761,32 @@ async def test_py_channel_run_task_with_timeout():
             err = e
     assert err is not None
     assert err.code == CommandErrorCode.TIMEOUT.value
+
+
+@pytest.mark.asyncio
+async def test_py_channel_none_block_commands():
+    main = PyChannel(name="channel")
+
+    data = []
+
+    @main.build.command(blocking=False)
+    async def foo() -> int:
+        await asyncio.sleep(0.05)
+        data.append(1)
+        return 1
+
+    task_done = asyncio.Event()
+
+    def on_task_done(t) -> None:
+        task_done.set()
+
+    async with main.bootstrap() as runtime:
+        runtime.on_task_done(on_task_done)
+        for i in range(10):
+            t = runtime.create_command_task('foo')
+            runtime.push_task(t)
+        # 所有的 task 都应该入队执行完了. 这仍是一个性能敏感测试, 不过有 0.5s buffer. 几乎一定能完成.
+        await asyncio.sleep(0.1)
+        assert task_done.is_set()
+        assert runtime.is_idle()
+        assert len(data) == 10

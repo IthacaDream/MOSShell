@@ -28,6 +28,7 @@ from ghoshell_moss.core.blueprint.channel_builder import (
     MessageType,
     LifecycleFunction,
     StringType,
+    ChannelFactory,
 )
 from ghoshell_moss.core.blueprint.states_channel import ChannelModule
 import re
@@ -52,7 +53,8 @@ class PyChannelBuilder(ChannelStateBuilder, ChannelState):
 
         self._context_messages_functions: list[MessageFunction] = []
         self._instruction_functions: StringType | None = None
-        self._sustain_children: dict[str, Channel] = {}
+        self._sustain_children: dict[str, Channel | ChannelFactory] = {}
+        self._sustain_children_factories: list[Callable] = []
         self._virtual_children: dict[str, Channel] = {}
         self._providers: list[tuple[Provider, bool]] = []
 
@@ -215,7 +217,7 @@ class PyChannelBuilder(ChannelStateBuilder, ChannelState):
         if name in self._virtual_children:
             self._virtual_children.pop(name)
 
-    def with_factory(
+    def with_contract_factory(
             self,
             contract: type[INSTANCE],
             factory: Callable[[...], INSTANCE],
@@ -231,6 +233,9 @@ class PyChannelBuilder(ChannelStateBuilder, ChannelState):
         for value in children:
             if isinstance(value, tuple):
                 channel, name = value
+            elif callable(value):
+                self._sustain_children_factories.append(value)
+                continue
             else:
                 channel = value
                 name = channel.name()
@@ -307,6 +312,30 @@ class PyChannelBuilder(ChannelStateBuilder, ChannelState):
             for provider, override in self._providers:
                 if override or not container.bound(provider.contract(), recursively=True):
                     container.register(provider)
+        # 支持 ChannelFactory 的实现方式.
+        channel_from_factory = {}
+        for name, channel in self._sustain_children.items():
+            if callable(channel):
+                # create channel.
+                channel_from_factory[name] = channel(container)
+        for channel_factory in self._sustain_children_factories:
+            channel = channel_factory(container)
+            if isinstance(channel, Channel):
+                channel_from_factory[channel.name()] = channel
+
+        if channel_from_factory:
+            # 反向更新.
+            self._sustain_children.update(channel_from_factory)
+        validated_sustain_children = {}
+        for name, channel in self._sustain_children.items():
+            if isinstance(channel, Channel):
+                validated_sustain_children[name] = channel
+
+        # 保证没有错误行为.
+        self._sustain_children = validated_sustain_children
+
+    def to_channel(self, uid: str | None = None) -> Channel:
+        return BaseStateChannel(self, uid=uid)
 
 
 class BaseStateChannel(StatefulChannel):
@@ -359,6 +388,7 @@ class BaseStateChannel(StatefulChannel):
         return self._main.description()
 
     def bootstrap(self, container: Optional[IoCContainer] = None) -> "ChannelRuntime":
+        # 所有 state 的启动都是在 StateChannelRuntime 中.
         return StateChannelRuntime(self, container=container)
 
 
@@ -741,6 +771,11 @@ class StateChannelRuntime(AbsChannelTreeRuntime[StatefulChannel]):
         await self._main_state.on_close()
 
     def prepare_container(self, container: IoCContainer) -> IoCContainer:
+        # 只有这一个地方是 state 调用 bootstrap 的地方.
+        # main state 调用 bootstrap.
         self._main_state.bootstrap(container)
+        for state in self._dynamic_states.values():
+            # 保证所有的状态的 bootstrap 都被调用了.
+            state.bootstrap(container)
         container = super().prepare_container(container)
         return container
