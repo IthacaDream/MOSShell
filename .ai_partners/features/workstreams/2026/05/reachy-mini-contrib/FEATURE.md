@@ -1,14 +1,13 @@
 ---
-title: Reachy Mini Contrib — 基础运控/视觉集成
-status: in-progress
-priority: P2
 created: 2026-05-28
-updated: 2026-05-28-3
 depends: []
-milestone:
-description: >-
-  将 Reachy Mini 机器人的基础运控、视觉能力集成到 ghoshell_moss_contrib，
-  作为 MOSS 开源项目开箱即用的能力。目标是在 .moss_ws 中作为 app 直接运行。
+description: 将 Reachy Mini 机器人的基础运控、视觉能力集成到 ghoshell_moss_contrib， 作为 MOSS 开源项目开箱即用的能力。目标是在
+  .moss_ws 中作为 app 直接运行。
+milestone: null
+priority: P2
+status: completed
+title: Reachy Mini Contrib — 基础运控/视觉集成
+updated: '2026-05-28'
 ---
 
 # Reachy Mini Contrib
