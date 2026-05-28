@@ -16,7 +16,7 @@ __all__ = [
 class CTMLMainChannel(PyChannel):
     """
     ctml 的主 channel。当前默认实现。
-    新代码推荐使用 ``new_main_channel()`` 获得更干净的空 channel。
+    新代码推荐使用 ``new_shell_main_channel()`` 获得更干净的空 channel。
     """
 
     pass
@@ -51,7 +51,7 @@ def inject_system_primitives(main: PrimeChannel, *, extended: bool = False) -> N
 
     用法::
 
-        main = new_main_channel()
+        main = new_shell_main_channel()
         inject_system_primitives(main)
         inject_system_primitives(main, extended=True)  # 含实验性原语
     """
@@ -79,7 +79,7 @@ def create_ctml_main_chan(
     """
     创建带默认原语的 main channel。当前默认实现。
 
-    新代码推荐使用 ``new_main_channel()`` + ``inject_system_primitives()``，
+    新代码推荐使用 ``new_shell_main_channel()`` + ``inject_system_primitives()``，
     获得更显式的控制。
     """
     chan = CTMLMainChannel(

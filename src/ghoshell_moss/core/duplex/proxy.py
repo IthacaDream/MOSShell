@@ -2,7 +2,7 @@ import asyncio
 import logging
 from typing import Any, Optional, Callable, Coroutine, AsyncIterable
 
-from ghoshell_common.contracts import LoggerItf
+from ghoshell_moss.contracts import LoggerItf
 from ghoshell_moss.message import unique_id
 from ghoshell_container import Container, IoCContainer
 

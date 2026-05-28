@@ -1,7 +1,7 @@
 import asyncio
 import pathlib
 
-from ghoshell_common.contracts import LoggerItf, Workspace
+from ghoshell_moss.contracts import LoggerItf, Workspace
 from ghoshell_container import Container
 
 from ghoshell_moss.core.ctml.shell import new_ctml_shell

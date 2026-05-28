@@ -8,7 +8,7 @@ from .duplex import (
     DuplexChannelProxy,
 )
 from .duplex.protocol import *
-from .py_channel import PyChannel, StateChannelRuntime, PyChannelBuilder
+from .py_channel import PyChannel, StatefulChannelRuntime, PyChannelBuilder
 from .ctml.shell import CTMLShell, create_ctml_main_chan, new_ctml_shell
 from .ctml.interpreter import CTMLInterpreter
 from .blueprint import *

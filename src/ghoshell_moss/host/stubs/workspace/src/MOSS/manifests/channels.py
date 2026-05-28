@@ -11,12 +11,12 @@
 #     然后继续 inject_system_primitives(main, extended=True) 或 import_channels 等。
 #     MergedManifests 合并时 mode 的 __main__ 完全覆盖全局 (K5)。
 
-from ghoshell_moss import new_main_channel
+from ghoshell_moss import new_shell_main_channel
 from ghoshell_moss.core.ctml.shell.ctml_main import inject_system_primitives
 from ghoshell_moss.core.speech import SpeechChannelModule
 from ghoshell_moss.host.app_store_channel import AppStoreChannel
 
-main = new_main_channel(description="Default MOSS main channel with app store")
+main = new_shell_main_channel(description="Default MOSS main channel with app store")
 
 # -- 系统原语 --------------------------------------------------
 inject_system_primitives(main)

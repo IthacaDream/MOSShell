@@ -1,4 +1,4 @@
-from ghoshell_common.contracts import LoggerItf
+from ghoshell_moss.contracts import LoggerItf
 
 from ghoshell_moss_contrib.prototypes.ros2_robot.abcd import (
     MOSSRobotManager,

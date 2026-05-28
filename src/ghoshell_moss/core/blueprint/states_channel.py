@@ -13,8 +13,9 @@ from PIL.Image import Image
 __all__ = [
     'ChannelState', 'ChannelStateBuilder', 'StatefulChannel',
     'new_state_builder', 'new_channel_from_state', 'new_stateful_channel',
-    'PrimeChannel', 'new_prime_channel', 'new_main_channel',
+    'PrimeChannel', 'new_prime_channel', 'new_shell_main_channel',
     'ChannelModule',
+    'new_default_shell_main_channel',
 ]
 
 """
@@ -22,7 +23,6 @@ how to build a stateful channel
 """
 
 
-@runtime_checkable
 class ChannelModule(Protocol):
     """
     生命周期感知的模块化能力单元。
@@ -235,10 +235,14 @@ class StatefulChannel(Channel, ABC):
         pass
 
     @abstractmethod
-    def with_state(self, state: ChannelState, alias: str | None = None) -> Self:
+    def with_state(self, state: ChannelState, alias: str | None = None, is_default: bool = False) -> Self:
         """
         register a named substate to the channel.
         """
+        pass
+
+    @abstractmethod
+    def default_state_name(self) -> str:
         pass
 
 
@@ -290,7 +294,7 @@ def new_prime_channel(name: str, description: str = "") -> PrimeChannel:
     return PyChannel(name=name, description=description)
 
 
-def new_main_channel(description: str = "") -> PrimeChannel:
+def new_shell_main_channel(description: str = "") -> PrimeChannel:
     """
     创建 CTML shell 的主 channel (__main__)。
 
@@ -299,7 +303,33 @@ def new_main_channel(description: str = "") -> PrimeChannel:
     可继续 import_channels / with_state / with_module 组合。
     """
     from ghoshell_moss.core.py_channel import PyChannel
+    description = description or "MOSS main channel"
     return PyChannel(name="__main__", description=description, blocking=True)
+
+
+def new_default_shell_main_channel(
+        description: str = "",
+) -> PrimeChannel:
+    """
+    创建一个标准的, 默认的 shell main channel.
+    提示如何组建 Shell Main Channel.
+    """
+    from ghoshell_moss.core.ctml.shell.ctml_main import inject_system_primitives
+    from ghoshell_moss.core.speech import SpeechChannelModule
+    from ghoshell_moss.host.app_store_channel import AppStoreChannel
+
+    main = new_shell_main_channel(description=description)
+
+    # -- 系统原语 --------------------------------------------------
+    inject_system_primitives(main, extended=True)
+
+    # -- App Store ---------------------------------------------------
+    main.import_channels(AppStoreChannel(name='apps'))
+
+    # -- Speech --------------------------------------------------
+    main.with_module(SpeechChannelModule())
+
+    return main
 
 
 # ---- 面向对象使用思路示范 ---- #

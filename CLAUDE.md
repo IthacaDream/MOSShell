@@ -297,9 +297,12 @@ Channel 使用的高阶知识:
 3. 由人类引导、AI 编码的提交，标题末尾标注 `coding by <模型名>`，例如：
    - `fix: resolve channel teardown race coding by deepseek-v4`
 
-4. 平台信息写在提交正文末尾：`via claude code` 或 `via gemini cli`。
+4. 由人类设计并实现、AI review 的提交，标题末尾标注 `review by <模型名>`，例如：
+   - `refactor: add default state to StatefulChannel review by deepseek-v4-pro`
 
-5. 不添加 `Co-Authored-By`、虚构邮件地址等信息。模仿人类协作的自然方式。
+5. 平台信息写在提交正文末尾：`via claude code` 或 `via gemini cli`。
+
+6. 不添加 `Co-Authored-By`、虚构邮件地址等信息。模仿人类协作的自然方式。
 
 # 你的角色与任务
 

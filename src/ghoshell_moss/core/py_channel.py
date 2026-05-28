@@ -33,7 +33,7 @@ from ghoshell_moss.core.blueprint.channel_builder import (
 from ghoshell_moss.core.blueprint.states_channel import ChannelModule
 import re
 
-__all__ = ["PyChannel", "StateChannelRuntime", "PyChannelBuilder", "BaseStateChannel"]
+__all__ = ["PyChannel", "StatefulChannelRuntime", "PyChannelBuilder", "BaseStateChannel"]
 
 _ChannelNamePattern = re.compile(ChannelNamePattern)
 _ChannelName = str
@@ -344,6 +344,7 @@ class BaseStateChannel(StatefulChannel):
         self._uid = uid or unique_id()
         self._main: ChannelState = main
         self._states: dict[str, ChannelState] = {}
+        self._default_state_name: str = ''
         self._modules: dict[str, ChannelModule] = {}
 
     def main_state(self) -> ChannelState:
@@ -357,11 +358,16 @@ class BaseStateChannel(StatefulChannel):
     def states(self) -> dict[str, ChannelState]:
         return self._states
 
-    def with_state(self, state: ChannelState, alias: str | None = None) -> Self:
+    def with_state(self, state: ChannelState, alias: str | None = None, is_default: bool = False) -> Self:
         """注册为可切换的模式。同一时刻只有一个 state 激活，通过 switch_state() 切换。"""
         name = alias or state.name()
         self._states[name] = state
+        if is_default:
+            self._default_state_name = name
         return self
+
+    def default_state_name(self) -> str:
+        return self._default_state_name
 
     def with_module(self, module: ChannelModule) -> Self:
         """注册为永久能力模块。所有 module 同时激活、累积叠加 — 与 with_state() 的排他切换正交。"""
@@ -388,8 +394,8 @@ class BaseStateChannel(StatefulChannel):
         return self._main.description()
 
     def bootstrap(self, container: Optional[IoCContainer] = None) -> "ChannelRuntime":
-        # 所有 state 的启动都是在 StateChannelRuntime 中.
-        return StateChannelRuntime(self, container=container)
+        # 所有 state 的启动都是在 StatefulChannelRuntime 中.
+        return StatefulChannelRuntime(self, container=container)
 
 
 class PyChannel(BaseStateChannel, PrimeChannel):
@@ -435,7 +441,7 @@ class PyChannel(BaseStateChannel, PrimeChannel):
         return child
 
 
-class StateChannelRuntime(AbsChannelTreeRuntime[StatefulChannel]):
+class StatefulChannelRuntime(AbsChannelTreeRuntime[StatefulChannel]):
     """
     实现标准的, 支持各种 State 的 ChannelRuntime.
     """
@@ -453,8 +459,15 @@ class StateChannelRuntime(AbsChannelTreeRuntime[StatefulChannel]):
         self._current_state: ChannelState | None = None
         self._current_state_name: str | None = None
         self._current_state_running_task: asyncio.Task | None = None
-        self._switch_state_command = PyCommand(self.switch_state)
-        self._stop_current_command = PyCommand(self.stop_current_state)
+        self._default_state_name: str = channel.default_state_name()
+        self._switch_state_command = PyCommand(
+            self.switch_state,
+            available=lambda: len(self._dynamic_states) > 0,
+        )
+        self._stop_current_command = PyCommand(
+            self.stop_current_state,
+            available=lambda: self._current_state_name is not None and self._current_state_name != self._default_state_name,
+        )
         self._on_startup_instruction: str = ''
         super().__init__(
             channel=channel,
@@ -496,7 +509,7 @@ class StateChannelRuntime(AbsChannelTreeRuntime[StatefulChannel]):
 
     async def stop_current_state(self) -> str:
         """
-        stop current running state.
+        stop current running state and return to default.
         """
         try:
             if self._current_state_running_task is not None and not self._current_state_running_task.done():
@@ -759,8 +772,10 @@ class StateChannelRuntime(AbsChannelTreeRuntime[StatefulChannel]):
             if hasattr(module, 'on_startup'):
                 await module.on_startup()
 
-        if '' in self._dynamic_states:
-            await self.switch_state('')
+        default = self.channel.default_state_name()
+        # start the default state.
+        if default in self._dynamic_states:
+            await self.switch_state(default)
 
     async def on_close(self) -> None:
         # 先关闭 current_state，再关闭 module，最后关闭 main。

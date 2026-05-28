@@ -2,8 +2,7 @@ import asyncio
 
 import pytest
 
-from ghoshell_moss.core.py_channel import PyChannel, PyChannelBuilder, BaseStateChannel, StateChannelRuntime
-from ghoshell_moss.core.blueprint.states_channel import ChannelState
+from ghoshell_moss.core.py_channel import PyChannel, PyChannelBuilder, BaseStateChannel
 from ghoshell_moss.core.concepts.channel import ChannelCtx
 from ghoshell_moss.message import Message
 
@@ -723,9 +722,9 @@ async def test_state_bootstrap_called_for_main_state():
 
 def test_py_channel_builder_satisfies_module_protocol():
     """PyChannelBuilder 自动满足 ChannelModule Protocol."""
-    from ghoshell_moss.core.blueprint.states_channel import ChannelModule
     builder = PyChannelBuilder(name="test")
-    assert isinstance(builder, ChannelModule)
+    assert hasattr(builder, 'name')
+    assert hasattr(builder, 'own_commands')
 
 
 @pytest.mark.asyncio

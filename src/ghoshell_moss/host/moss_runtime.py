@@ -12,7 +12,7 @@ from ghoshell_moss.core.blueprint.app import AppStore
 from ghoshell_moss.core.blueprint.matrix import Matrix
 from ghoshell_moss.core.helpers import ThreadSafeEvent
 from ghoshell_moss.core.ctml import new_ctml_shell
-from ghoshell_moss.core.blueprint.states_channel import new_main_channel
+from ghoshell_moss.core.blueprint.states_channel import new_shell_main_channel
 from ghoshell_moss.contracts import Workspace
 from .app_store import HostAppStore
 from .matrix import MatrixImpl
@@ -68,7 +68,7 @@ class MossRuntimeImpl(MossRuntime):
             None,
         )
         if manifests_main is None:
-            manifests_main = new_main_channel(
+            manifests_main = new_shell_main_channel(
                 description=f"Default main channel for {self._description or self._name}"
             )
         self._ctml_shell = new_ctml_shell(

@@ -3,7 +3,7 @@ import asyncio
 # action_client_node.py
 import rclpy
 from control_msgs.action import FollowJointTrajectory
-from ghoshell_common.contracts import LoggerItf
+from ghoshell_moss.contracts import LoggerItf
 from rclpy.action import ActionClient
 from rclpy.node import Node
 from trajectory_msgs.msg import JointTrajectoryPoint

@@ -12,9 +12,10 @@ Entry-point pattern (see CLI for working examples)::
 
 # -- IoC Container -----------------------------------------------------------
 from ghoshell_container import (
+    Provider,
     Bootstrapper,
     IoCContainer,
-    Provider,
+    provide,
 )
 
 # -- Core Concepts -----------------------------------------------------------
@@ -32,8 +33,11 @@ from ghoshell_moss.message.message import Addition, Message
 # -- Channel Builders --------------------------------------------------------
 from ghoshell_moss.core.blueprint.channel_builder import new_channel
 from ghoshell_moss.core.blueprint.states_channel import (
+    # 创建 main channel
+    new_shell_main_channel,
+    new_default_shell_main_channel,
+
     new_channel_from_state,
-    new_main_channel,
     new_prime_channel,
     new_state_builder,
     new_stateful_channel,
