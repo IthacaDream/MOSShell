@@ -120,4 +120,5 @@ dev = [
     "uvicorn>=0.37.0",
     "mdformat>=1.0.0",
     "mdformat-gfm>=1.0.0",
+    "pre-commit>=4.6.0",
 ]
