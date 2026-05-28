@@ -227,6 +227,14 @@ class StatefulChannel(Channel, ABC):
         return {}
 
     @abstractmethod
+    def with_module(self, module: ChannelModule) -> Self:
+        """
+        register a permanent capability module to the channel.
+        unlike with_state(), modules are cumulative — all active simultaneously.
+        """
+        pass
+
+    @abstractmethod
     def with_state(self, state: ChannelState, alias: str | None = None) -> Self:
         """
         register a named substate to the channel.

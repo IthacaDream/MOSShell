@@ -1,11 +1,11 @@
-import json
 from typing import Optional
 
 from ghoshell_container import IoCContainer
 
 from ghoshell_moss.contracts.speech import Speech, TTSSpeech, TTS, StreamAudioPlayer
 from ghoshell_moss.core import PyChannel, Channel, ChannelRuntime, ChannelCtx
-from ghoshell_moss.core.speech import BaseTTSSpeech
+
+from ghoshell_moss.core.speech import BaseTTSSpeech, SpeechChannelModule
 from ghoshell_moss.message import unique_id
 
 __all__ = ["SpeechChannel", "TTSSpeechChannel"]
@@ -61,10 +61,9 @@ class SpeechChannel(Channel):
         channel.build.startup(self._speech.start)
         channel.build.close(self._speech.close)
 
-        if isinstance(self._speech, TTSSpeech):
-            # 注册 tts 原生 command
-            for command in self._speech.commands():
-                channel.build.add_command(command)
+        channel.with_module(
+            SpeechChannelModule(register_content=True)
+        )
 
         return channel.bootstrap(container=container)
 

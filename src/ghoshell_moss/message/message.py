@@ -354,7 +354,7 @@ class Message(BaseModel, WithAdditional):
         elif isinstance(item, ContentModel):
             _content = item.to_content()
         elif isinstance(item, Image.Image):
-            _content = Base64Image.from_pil_image(item)
+            _content = Base64Image.from_pil_image(item).to_content()
         elif isinstance(item, BaseModel):
             serialized = item.model_dump_json(indent=0, ensure_ascii=False, exclude_none=False)
             _content = Text.new_content(serialized)
@@ -485,9 +485,13 @@ class Message(BaseModel, WithAdditional):
         """以 string 为主的 content 显示. """
         if 'text' in content:
             return content['text'] or ''
-        else:
-            content_type = content['type']
-            return f'<content type="{content_type}"/>'
+        content_type = content.get('type', 'unknown')
+        source = content.get('source', {}) or {}
+        if content_type == 'image' and source:
+            media = source.get('media_type', '?')
+            data_len = len(source.get('data', '') or '')
+            return f'<content type="image" media_type="{media}" base64_size="{data_len}"/>'
+        return f'<content type="{content_type}"/>'
 
     def to_content_string(self) -> str:
         blocks = []

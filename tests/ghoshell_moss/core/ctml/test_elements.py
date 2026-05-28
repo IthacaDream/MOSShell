@@ -10,11 +10,11 @@ from ghoshell_moss.core.ctml.elements import CommandTaskElementContext, RootComm
 from ghoshell_moss.core.ctml.token_parser import CTML2CommandTokenParser
 from ghoshell_moss.core.helpers import ThreadSafeEvent
 from ghoshell_moss.core.speech.mock import MockSpeech
-from ghoshell_moss.contracts.speech import make_content_command_from_speech
 from ghoshell_moss.core.ctml.v1_0.constants import (
     CONTENT_COMMAND_NAME, SCOPE_COMMAND_NAME,
     SCOPE_ENTER_COMMAND_NAME, SCOPE_EXIT_COMMAND_NAME,
 )
+from ghoshell_moss.core.speech.speech_module import build_content_command
 
 
 @dataclass
@@ -58,7 +58,7 @@ def new_test_suite(*commands: Command, ignore_wrong_command: bool = True) -> Ele
     for command in commands:
         # 假的 command map.
         commands_group[command.name()] = command
-    content_command = make_content_command_from_speech(output)
+    content_command = build_content_command(output)
     command_map[''][content_command.name()] = content_command
     stop_event = ThreadSafeEvent()
     ctx = CommandTaskElementContext(
