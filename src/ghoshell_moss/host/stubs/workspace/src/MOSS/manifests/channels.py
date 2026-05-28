@@ -13,6 +13,7 @@
 
 from ghoshell_moss import new_main_channel
 from ghoshell_moss.core.ctml.shell.ctml_main import inject_system_primitives
+from ghoshell_moss.core.speech import SpeechChannelModule
 from ghoshell_moss.host.app_store_channel import AppStoreChannel
 
 main = new_main_channel(description="Default MOSS main channel with app store")
@@ -22,3 +23,6 @@ inject_system_primitives(main)
 
 # -- App Store ---------------------------------------------------
 main.import_channels(AppStoreChannel(name='apps'))
+
+# -- Speech --------------------------------------------------
+main.with_module(SpeechChannelModule())

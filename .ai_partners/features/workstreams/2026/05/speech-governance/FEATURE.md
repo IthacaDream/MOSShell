@@ -3,7 +3,7 @@ title: Speech Governance — 解耦、多后端、容错降级
 status: in-progress
 priority: P2
 created: 2026-05-25
-updated: 2026-05-26
+updated: 2026-05-27
 depends: []
 milestone:
 description: >-
@@ -30,7 +30,7 @@ description: >-
 ## Design Index
 
 - 基准抽象: `src/ghoshell_moss/contracts/speech.py` (Speech, SpeechStream, StreamAudioPlayer, TTS, TTSBatch, TTSSpeech)
-- 当前实现: `src/ghoshell_moss/core/speech/` (mock, stream_tts_speech, player/*, volcengine_tts/*)
+- 当前实现: `src/ghoshell_moss/core/speech/` (mock, stream_tts_speech, player/*, volcengine_tts/*, speech_module)
 - Shell 耦合点: `src/ghoshell_moss/core/ctml/shell/ctml_shell.py:_speech_context_manager`
 - TTS provider: `src/ghoshell_moss/host/providers/tts_service_provider.py`
 - 依赖声明: `src/ghoshell_moss/depends.py`
@@ -69,116 +69,81 @@ description: >-
 | `host/stubs/workspace/src/MOSS/manifests/configs.py` | 引用 AudioPlayerConfig |
 | `tests/ghoshell_moss/speech/test_miniaudio_player.py` | **新文件** — 10 个单元测试 |
 
-**Player 选型结论**:
-- **miniaudio**: 零系统依赖（libvorbis/libopus/libmp3 内置），纯 wheel 安装，跨平台一致，解码+播放一体
-- **PyAudio**: 降级为可选，通过 `audio` extras 安装，config 切换 backend 即可使用
-- **PulseAudio**: Linux only，保持现状
+### Phase 1: 解耦 — DONE (2026-05-28)
+
+**核心设计**：两层模型。
+
+```
+Speech (基础抽象)              TTSSpeech (高级扩展)
+──────────────                ──────────────────
+• 纯文本/音频输出              • 继承 Speech
+• __content__ 内核命令         • say / set_voice 等命令
+• Shell 自带                   • SpeechChannelModule 按需挂载
+• MockSpeech 兜底              • 需要 TTS provider
+```
+
+**职责划分**:
+
+```
+Shell (_speech_context_manager)          SpeechChannelModule
+────────────────────────────────        ─────────────────────
+• 解析 speech → 注入容器                • register_content=False (默认)
+• build_content_command() → __content__ • 仅 isinstance(speech, TTSSpeech)
+• start / close 生命周期                  时注册 say
+                                        • MockSpeech → 空命令集，无副作用
+```
+
+Shell 始终拥有 `__content__` 内核命令——无论 speech 是 MockSpeech 还是 TTSSpeech。`SpeechChannelModule` 负责发现 TTSSpeech 并挂载高级语音命令（say），没有 TTSSpeech 时静默为空。
+
+**Bootstrap 顺序保证正确性**:
+```
+_ioc_context_manager       → container bootstrap
+_speech_context_manager    → speech 注入容器 + 注册 __content__ + start
+_runtime_context_manager   → module.on_startup() 从容器取 speech → 注册 say
+```
+
+**完成内容**:
+
+1. 新建 `core/speech/speech_module.py`：
+   - `build_content_command(speech) -> Command` — 纯函数，构建 `__content__` 内核命令，供 Shell 使用
+   - `SpeechChannelModule(register_content=False)` — `ChannelModule`，`on_startup` 时从容器获取 Speech；仅当 `isinstance(speech, TTSSpeech)` 时注册 `say`；可选注册 `__content__`（供独立 speech channel 使用）
+   - `_SpeechCommandFactory` — 内部工厂，`build_content_command()` + `build_say_command()` 两个 public 方法
+
+2. 删除 `contracts/speech.py` 中的 `make_content_command_from_speech()` 和 `TTSSpeech.commands()`；TTSSpeech 退化为纯 ABC
+
+3. `CTMLShell.__init__` 恢复 `speech` 参数：`self._speech: Speech = speech`
+
+4. `_speech_context_manager`：
+   - 解析 speech（参数 > 容器 > MockSpeech），注入容器
+   - 调用 `build_content_command()` 注册 `__content__` 内核命令
+   - 启停生命周期：`start()` → `yield` → `close()`
+
+5. `StatefulChannel` 新增 `with_module()` 抽象方法（`states_channel.py`）
+
+6. `speech_channel.py` 改用 `channel.with_module(SpeechChannelModule(register_content=True))`
+
+7. `manifests/channels.py` 加入 `main.with_module(SpeechChannelModule())`，主机路径自动发现 TTSSpeech 时注册 say
+
+**变更文件**:
+| 文件 | 变更 |
+|------|------|
+| `contracts/speech.py` | 删除 `make_content_command_from_speech()` 和 `TTSSpeech.commands()`；TTSSpeech 退化为纯 ABC |
+| `core/speech/speech_module.py` | **新文件** — `build_content_command` + `SpeechChannelModule` + `_SpeechCommandFactory` |
+| `core/speech/__init__.py` | 导出 `SpeechChannelModule`, `build_content_command` |
+| `core/ctml/shell/ctml_shell.py` | 恢复 `speech` 参数；`_speech_context_manager` 注入+注册content+启停 |
+| `channels/speech_channel.py` | `inject_speech_commands` → `channel.with_module(SpeechChannelModule(register_content=True))` |
+| `core/blueprint/states_channel.py` | `StatefulChannel` 新增 `with_module()` 抽象方法 |
+| `host/providers/speech_service_provider.py` | `singleton()` 改为 `True` |
+| `host/stubs/workspace/src/MOSS/manifests/channels.py` | 加入 `main.with_module(SpeechChannelModule())` |
+| `tests/.../test_shell_speech.py` | 测试 `new_ctml_shell(speech=speech)` 简洁写法，无需 module |
+| `tests/.../test_wait_primitive.py` | 同上 |
+| `tests/.../test_elements.py` | `make_content_command_from_speech` → `build_content_command` |
 
 ### 剩余 Phase
 
 ```
-Phase 2 ✅ → D6 (docstring 示例) → Phase 1 (解耦) → Phase 3 (多 provider) → Phase 4 (降级)
+Phase 2 ✅ → Phase 1 ✅ → D6 (docstring 示例) → Phase 3 (多 provider) → Phase 4 (降级)
 ```
-
-## 调研结论 (2026-05-25)
-
-### 问题 1: Speech → Command 的权责泄漏
-
-**现状**：
-
-`CTMLShell._speech_context_manager()` 的逻辑：
-
-```python
-# 1. 从 IoC 容器获取 Speech 实例
-speech = self._container.get(Speech)
-
-# 2. 如果是 TTSSpeech，注册其 commands 到 main channel
-if isinstance(self._speech, TTSSpeech):
-    for command in self._speech.commands():
-        self.main_channel.build.add_command(command, override=False)
-
-# 3. 生成 __content__ command
-default_content_command = make_content_command_from_speech(self._speech)
-self.main_channel.build.add_command(default_content_command, override=False)
-```
-
-问题链：
-- `TTSSpeech.commands()` 返回 `list[Command]` — Speech 知道了 shell 调度模型
-- `make_content_command_from_speech()` 在 contracts 层定义，同样耦合 Command
-- CTMLShell 假设 speech 必然以 command 方式集成，无法支持非 command 的 speech 交互
-
-**解耦方向**：Speech 不再直接生成 Command。Speech channel module 以独立 channel 形态存在，通过 manifests 被发现并注册到 shell。Channel 的 `@channel.build.command()` 装饰器自然完成 "方法 → Command" 的转换，这是 channel 层的职责，不是 speech 层。
-
-参考 `zenoh-fractal` 中 `FractalHub.as_channel()` 的模式——能力提供方只暴露自身抽象，由 channel builder 完成到 shell 的桥接。
-
-### 问题 2: Player 选型 — RESOLVED (Phase 2 完成)
-
-**当前状态**：
-- `BaseAudioStreamPlayer` — 基于线程 + queue 的抽象基类，含 scipy resample。设计 OK。
-- `MiniAudioStreamPlayer` — **新默认**，基于 miniaudio，零系统依赖。
-- `PyAudioStreamPlayer` — 降级为可选，通过 `ghoshell_moss[audio]` 安装。
-- `PulseAudioStreamPlayer` — Linux only，保持可选。
-
-### 问题 3: 国际 TTS API 集成
-
-**当前状态**：
-- `VolcengineTTS` — 火山引擎双向流式 TTS，WebSocket 协议，自身实现了一套 binary protocol (`protocol.py`)
-- `TTSServiceProvider` — 工厂模式，但 `use` 字段是 literal，无法扩展
-
-**候选 provider**：
-
-| Provider | 协议 | 流式 | 中文 | 备注 |
-|----------|------|------|------|------|
-| Volcengine (当前) | WebSocket binary | Yes | 原生 | 国内首选 |
-| **OpenAI TTS** | HTTP SSE / streaming | Yes | 尚可 | 国际最通用 |
-| **ElevenLabs** | WebSocket | Yes | 一般 | 音色最丰富 |
-| **Azure Speech** | WebSocket | Yes | 好 | 企业级 |
-| **edge-tts** (免费) | WebSocket | Yes | 好 | 无需 API key |
-
-**集成策略**：
-- 每个 provider 实现 `TTS` 抽象，放在 `core/speech/` 下独立模块
-- `TTSServiceProvider.use` 从 `Literal` 改为 `str`，支持运行时选择
-- 依赖声明：每个 provider 的依赖通过 `depends.py` 中的新函数声明（如 `depend_openai_tts()`），对应 pyproject.toml 的 optional dependency group
-- 环境变量：`.env.example` 增加各 provider 的凭证模板
-
-**不需要做的**：不实现统一的 "TTS provider protocol" 抽象层。`TTS` ABC 已经是统一接口，每个 provider 直接实现它即可。provider 之间的差异（鉴权方式、音频格式、音色体系）由各自的 Config 和 `TTSInfo` 承载。
-
-### 问题 4: 自动容错降级
-
-**降级链路设计**：
-
-```
-TTS API (网络) → 失败 → 本地离线 TTS (如 edge-tts) → 失败 → MockSpeech (纯文本 buffer)
-                                ↓
-Player (miniaudio) → 失败 → 系统默认播放器 → 失败 → MockSpeech (无音频输出)
-```
-
-**实现要点**：
-- `TTSServiceProvider` 支持配置 provider 优先级列表（非单个 use）
-- Speech 启动时做 health check（如 1s 内能拿到音频即认为可用）
-- 降级是自动且静默的，只在 logger 中记录
-- MockSpeech 不需要改动——它已经是完美的最终兜底
-
-### 问题 5: Session Logos Stream 与 Speech 的集成
-
-**现状**：`Session` 提供 `pub_logos()` / `get_logos()` 跨进程流式协议。logos 的语义是 "模型生产的流式思想"（CTML），但底层机制是通用的有序字节流 pub/sub。
-
-**与 speech 的关系**：speech channel module 在初始化时可以：
-1. 订阅 logos stream 获取模型输出文本
-2. 在自己的进程中执行 TTS + 播放
-3. 将 speech 状态（播放中/完成/错误）通过 output protocol 反馈
-
-这样 speech 可以作为独立 app cell 运行在单独进程中，通过 zenoh session 通讯。但这**不是第一版的 scope**——第一版先完成 speech 的解耦和 player/provider 治理，跨进程 speech 作为未来迭代方向。
-
-### 问题 6: AI 模型构造 JSON 参数的认知冲突 (2026-05-25)
-
-**现象**：模型在调用 `say` 命令时，`voice: dict` 参数需要传递 JSON 字符串，但模型总是用 CTML 的原生 key-value 属性语法来写，导致参数解析失败。
-
-**根因**：CTML 的属性语法天然是**扁平的 key-value**（如 `<say speed="1.0" pitch="high">`），而 `voice: dict` 要求模型在属性值内部嵌套 JSON 字符串（如 `<say voice:dict="{'speed': 1.0}">`）。模型已经在用 XML 属性表达结构了，突然要求它在属性值内部再塞一个序列化结构，它在两种语法之间切换时容易出错。CTML 的 `:dict` 类型后缀机制虽然存在，但模型不容易自然地想到"先把 dict 序列化成 JSON 字符串，再塞进属性值"。
-
-**本质**：这不是模型能力问题，而是 **"flat syntax for nested data" 的认知 dissonance**。CTML interface 设计原则应该是：凡是模型要通过 CTML 调用的命令，参数应尽量是标量类型（str/int/float/bool）或流式参数（chunks__/text__/ctml__），避免 dict/list 这类需要二次序列化的复杂类型。当无法避免 dict 参数时，必须在 docstring 中提供显式的 CTML 调用示例。
-
-**当前缓解策略（方案 C）**：强化 command docstring 中的 CTML 示例。在 `say_doc()` 和类似涉及 dict 参数的命令中，显式展示 JSON 字符串的正确写法，让模型有明确的 copy-paste 模板。远期考虑拆分命令（方案 A：`set_voice` + `say` 分离），从根本上消除嵌套 dict 参数。
 
 ## Key Decisions
 
@@ -198,6 +163,36 @@ Player (miniaudio) → 失败 → 系统默认播放器 → 失败 → MockSpeec
 - 与 `BaseAudioStreamPlayer` 的三个抽象方法完全兼容
 - PyAudio 历史上安装失败是 MOSS 试用者的第一道门槛
 
+### D1: 两层模型 — Shell 拥有 content，Module 挂载 say (P0) — DONE (2026-05-28)
+
+**决策**: 区分 `Speech` 和 `TTSSpeech` 两层。Shell 只依赖 `Speech` 抽象，拥有 `__content__` 内核命令。`SpeechChannelModule` 发现 `TTSSpeech` 后挂载 `say` 等高级命令。
+
+**设计原则**:
+- Shell（`_speech_context_manager`）：解析 speech → 注入容器 → `build_content_command()` 注册 `__content__` → 启停生命周期
+- `__content__` 是内核命令，与 `wait`、`observe` 同级，Shell 始终拥有（MockSpeech 兜底）
+- `SpeechChannelModule(register_content=False)`：仅在 `isinstance(speech, TTSSpeech)` 时注册 `say`；没有 TTSSpeech 时无副作用
+- `register_content=True` 选项供独立 speech channel（如 `SpeechChannel`）使用
+- `build_content_command(speech) -> Command` 是唯一的 content 构建入口
+
+**Bootstrap 顺序保证**:
+```
+ioc_context_manager     → container.bootstrap()
+speech_context_manager  → speech 注入容器 + 注册 __content__ + speech.start()
+runtime_context_manager → module.on_startup() 从容器拿 speech → 注册 say
+```
+
+模块启动时 speech 已就绪、已在容器中。
+
+**Why**: Shell 理解"能说话"是自身的基础能力，不需要 module 告诉它。但"怎么用 TTS 高级特性说话"是 TTSSpeech 层的知识。这种分离让 MockSpeech 和 TTSSpeech 各就其位：不传 speech → MockSpeech 也能说话；传了 TTSSpeech + module → 拥有完整语音能力。
+
+**测试行为**:
+| 场景 | `__content__` | `say` |
+|------|:--:|:--:|
+| `new_ctml_shell()` 不传 speech | MockSpeech 兜底 | 无 |
+| `new_ctml_shell(speech=MockSpeech())` | 有 | 无 |
+| `new_ctml_shell(speech=MockSpeech())` + `with_module(SpeechChannelModule())` | 有 | 无（MockSpeech 非 TTSSpeech） |
+| `new_ctml_shell(speech=tts_speech)` + `with_module(SpeechChannelModule())` | 有 | 有 |
+
 ### D6: 强化 CTML docstring 中的 JSON 参数示例 (P1)
 
 **决策**: 对涉及 `dict`/`list` 等复杂类型参数的命令，在 docstring 中显式提供 CTML 调用示例，展示 JSON 字符串的正确构造方式。不改变接口签名，不改变 CTML 解析规则。
@@ -211,21 +206,6 @@ Player (miniaudio) → 失败 → 系统默认播放器 → 失败 → MockSpeec
 **Why**: 改动最小，立即生效。模型对 docstring 中的示例有很强的跟随能力，好的示例可以显著降低出错率。长期看，如果某个 dict 参数频繁出错，再考虑拆分命令（方案 A）。
 
 **非目标**: 不改 CTML 语法，不加新的 parser 约定。不强制所有命令都避免 dict 参数。
-
-### D1: Speech 不再生成 Command，转为 Channel Module (P0)
-
-**决策**: 删除 `contracts/speech.py` 中的 `make_content_command_from_speech()`，删除 `TTSSpeech.commands()`。Speech channel module 以独立 channel 形态存在，通过 `@channel.build.command()` 装饰器暴露能力给 shell。
-
-**受影响文件**:
-- `contracts/speech.py` — 删除 `make_content_command_from_speech` 和 `TTSSpeech.commands()`
-- `core/ctml/shell/ctml_shell.py` — `_speech_context_manager` 不再注入 commands
-- `core/speech/stream_tts_speech.py` — `BaseTTSSpeech` 不再继承 `TTSSpeech`（改为直接继承 `Speech`），或 `TTSSpeech` ABC 瘦身
-
-**不动**:
-- `Speech`, `SpeechStream`, `StreamAudioPlayer`, `TTS`, `TTSBatch` 抽象——这些是纯粹的 speech 域抽象，不含 command 耦合
-- `MockSpeech` — 测试用，不需要 command 能力
-
-**Why**: zenoh fractal 改造后，channel 可以通过 manifests 被自动发现。Speech 的能力（say, set_voice, use_tone 等）通过 channel 的 command 装饰器暴露，责任在 channel builder 而不是 speech 自身。
 
 ### D3: TTS provider 用 str + registry 替代 Literal (P1)
 
@@ -280,16 +260,20 @@ class FallbackSpeech(Speech):
 
 ## Implementation Plan
 
-### Phase 1: 解耦 (P0)
+### Phase 1: 解耦 (P0) — ✅ DONE (2026-05-27)
 
-| # | 任务 | 影响文件 |
-|---|------|----------|
-| 1.1 | 删除 `make_content_command_from_speech()` | `contracts/speech.py` |
-| 1.2 | 删除 `TTSSpeech.commands()` 方法 | `contracts/speech.py` |
-| 1.3 | 删除 `TTSSpeech` ABC？还是瘦身？TBD | `contracts/speech.py` |
-| 1.4 | 重构 `CTMLShell._speech_context_manager()` — 不再注入 commands | `core/ctml/shell/ctml_shell.py` |
-| 1.5 | 创建 speech channel module（`core/speech/speech_channel.py` 或在 host manifests 中定义）| 新文件 |
-| 1.6 | 确保 `make_content_command_from_speech` 的等价功能通过 channel command 提供 | speech channel module |
+| # | 任务 | 影响文件 | 状态 |
+|---|------|----------|------|
+| 1.1 | 删除 `make_content_command_from_speech()` 和 `TTSSpeech.commands()` | `contracts/speech.py` | ✅ |
+| 1.2 | 创建 `speech_module.py`（build_content_command + SpeechChannelModule） | `core/speech/speech_module.py` | ✅ |
+| 1.3 | `CTMLShell.__init__` 恢复 `speech` 参数 | `ctml_shell.py` | ✅ |
+| 1.4 | `_speech_context_manager` 注入 + 注册 __content__ + 启停 | `ctml_shell.py` | ✅ |
+| 1.5 | `new_ctml_shell()` 恢复 `speech` 参数 | `ctml_shell.py` | ✅ |
+| 1.6 | `StatefulChannel` 新增 `with_module()` 抽象 | `states_channel.py` | ✅ |
+| 1.7 | `speech_channel.py` 改用 `channel.with_module(SpeechChannelModule(register_content=True))` | `channels/speech_channel.py` | ✅ |
+| 1.8 | `manifests/channels.py` 加入 `main.with_module(SpeechChannelModule())` | `manifests/channels.py` | ✅ |
+| 1.9 | `singleton()` 改为 `True` | `speech_service_provider.py` | ✅ |
+| 1.10 | 测试适配（简洁写法，无需 module） | `test_shell_speech.py`, `test_wait_primitive.py`, `test_elements.py` | ✅ |
 
 ### Phase 2: Player 轻量化 (P1) — ✅ DONE (2026-05-26)
 
@@ -332,14 +316,16 @@ class FallbackSpeech(Speech):
 
 | 改动 | 影响范围 |
 |------|----------|
-| ~~PyAudio → miniaudio 默认~~ | ✅ 已实施。miniaudio 核心依赖，PyAudio audio extras 可选。`AudioPlayerConfig.backend` 可切换 |
-| 删除 `make_content_command_from_speech()` | 仅 `ctml_shell.py` 中 `_speech_context_manager` 调用方，测试 |
-| 删除 `TTSSpeech.commands()` | 同上 |
+| PyAudio → miniaudio 默认 | ✅ 已实施。miniaudio 核心依赖，PyAudio audio extras 可选。`AudioPlayerConfig.backend` 可切换 |
+| 删除 `make_content_command_from_speech()` | `test_elements.py`（改用 `build_content_command`） |
+| 删除 `TTSSpeech.commands()` | 调用方改用 `SpeechChannelModule` 或 `build_content_command` |
 | `CTMLShell._speech_context_manager` 重构 | 核心启动路径，需要全量回归 |
 | 新增 `MiniAudioStreamPlayer` | ✅ 纯新增，不影响现有 player |
-| `TTSServiceProvider.use` 类型变更 | 配置文件格式小幅调整 |
-| 新增 TTS providers | 纯新增 |
-| `FallbackSpeech` | 纯新增 |
+| 新增 `speech_module.py` | 纯新增 |
+| `StatefulChannel.with_module()` | 纯新增抽象方法 |
+| `TTSServiceProvider.use` 类型变更 | 配置文件格式小幅调整（Phase 3） |
+| 新增 TTS providers | 纯新增（Phase 3） |
+| `FallbackSpeech` | 纯新增（Phase 4） |
 
 **不动**: `Speech`, `SpeechStream`, `StreamAudioPlayer`, `TTS`, `TTSBatch` 抽象。`MockSpeech`。`BaseAudioStreamPlayer`。VolcengineTTS 核心逻辑。
 
