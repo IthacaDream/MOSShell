@@ -11,9 +11,3 @@ repos:
       always_run: true
       verbose: true
 
-    - id: mdformat
-      name: mdformat
-      description: "Run 'mdformat' for Markdown formatting"
-      entry: uv run --dev mdformat
-      language: system
-      types: [markdown]

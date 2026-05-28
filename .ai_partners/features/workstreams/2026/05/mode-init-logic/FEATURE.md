@@ -1,13 +1,13 @@
 ---
-title: Mode Init Logic
-status: draft
-priority: P1
 created: 2026-05-25
-updated: 2026-05-25
 depends: []
-milestone:
-description: >-
-  完善 mode 初始化模板、CLI hints、CLAUDE.md 上下文和 how-tos，让 mode 创建和发现路径更自解释。
+description: 完善 mode 初始化模板、CLI hints、CLAUDE.md 上下文和 how-tos，让 mode 创建和发现路径更自解释。
+milestone: null
+priority: P1
+status: completed
+status_note: package stub, workspace default, CLI hints, how-to, mdformat removal
+title: Mode Init Logic
+updated: '2026-05-29'
 ---
 
 # Mode Init Logic

@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing_extensions import Self
 
 from ghoshell_moss.core.blueprint.host import (
@@ -122,13 +123,13 @@ class Host(MossHost):
                 self._ghosts = {}
         return self._ghosts
 
-    def new_mode(self, name: str, apps: list[str], bringup_apps: list[str], description: str = "") -> None:
+    def new_mode(self, name: str, apps: list[str], bringup_apps: list[str], description: str = "") -> Path:
         """
         create new mode follow convertion
         """
         if name in self.all_modes():
             raise NameError(f"Mode {name} already exists")
-        new_mode(name=name, apps=apps, bring_up_apps=bringup_apps, description=description)
+        return new_mode(name=name, apps=apps, bring_up_apps=bringup_apps, description=description)
 
     def apps(self) -> HostAppStore:
         return self._app_store

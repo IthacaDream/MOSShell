@@ -28,7 +28,7 @@ def new_mode(
         description: str = "",
         target_root_package: str = ROOT_MODES_PACKAGE,
         stub_package: str = MODE_STUB_PACKAGE,
-) -> None:
+) -> Path:
     # 1. 确定目标路径
     root_module = import_module(target_root_package)
     target_root_dir = Path(root_module.__file__).parent.resolve()
@@ -68,6 +68,8 @@ def new_mode(
 
     # 5. 自动补全 __init__.py 使其成为可导入的包
     (target_mode_dir / "__init__.py").touch()
+
+    return target_mode_dir
 
 
 def list_modes_from_root_package(package_import_path: str = ROOT_MODES_PACKAGE) -> list[Mode]:
