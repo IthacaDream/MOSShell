@@ -9,7 +9,7 @@ from ghoshell_moss.core.concepts.topic import (
 from ghoshell_moss.depends import depend_zenoh
 from ghoshell_moss.contracts import get_moss_logger, LoggerItf
 from ghoshell_moss.core.helpers import ThreadSafeEvent
-from ghoshell_common.helpers import uuid
+from ghoshell_moss.message import unique_id
 from pydantic import ValidationError
 from .suite_for_test import TopicServiceSuite
 from .key_expr import MOSSTopicExpr
@@ -38,7 +38,7 @@ class ZenohTopicService(TopicService):
         self._session_scope = session_scope
         self._session = session
         # 一定要有一个 sender. 通常是 node name
-        self._sender = address or uuid()
+        self._sender = address or unique_id()
         self._logger = logger or get_moss_logger()
         self._subscriber_lock = asyncio.Lock()
         self._topic_key_expr = MOSSTopicExpr(session_scope=session_scope, address=address)
@@ -162,7 +162,7 @@ class ZenohTopicPublisher(Publisher):
         self._creator = creator
         self._logger = logger or get_moss_logger()
         self._additions = []
-        self._uid = uid or uuid()
+        self._uid = uid or unique_id()
         self._log_prefix = "<ZenohTopicPublisher creator=%s id=%s key=%s>" % (
             self._creator,
             self._uid,
@@ -274,7 +274,7 @@ class ZenohTopicSubscriber(Subscriber[TOPIC_MODEL | None]):
         self._service_stopped = service_stopped
         self._model: type[TopicModel] = model
         self._listening = topic_name or model.default_topic_name()
-        self._uid = uid or uuid()
+        self._uid = uid or unique_id()
         self._queue: janus.Queue[Topic] = janus.Queue(maxsize=maxsize)
         self._receive_lock = asyncio.Lock()
         self._logger = logger or get_moss_logger()

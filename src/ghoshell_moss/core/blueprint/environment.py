@@ -6,7 +6,7 @@ MOSS 环境发现的关键常量.
 from typing import Literal
 from typing_extensions import Self
 from pathlib import Path
-from ghoshell_common.helpers import uuid
+from ghoshell_moss.message import unique_id
 from ghoshell_common.contracts import config_logger_from_yaml
 from importlib import resources
 import logging
@@ -186,7 +186,7 @@ class Environment:
         )
         self._session_id: str = session_id or os.environ.get(ENV_SESSION_ID_KEY, '')
         if not self._session_id:
-            self._session_id = uuid()
+            self._session_id = unique_id()
 
         self._cell_address: str = os.environ.get(ENV_CELL_ADDRESS_KEY, DEFAULT_CELL_ADDRESS)
 

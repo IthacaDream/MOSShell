@@ -3,7 +3,7 @@ import logging
 from typing import Any, Optional, Callable, Coroutine, AsyncIterable
 
 from ghoshell_common.contracts import LoggerItf
-from ghoshell_common.helpers import uuid
+from ghoshell_moss.message import unique_id
 from ghoshell_container import Container, IoCContainer
 
 from ghoshell_moss.core.concepts.channel import (
@@ -624,7 +624,7 @@ class DuplexChannelContext:
                 kwargs=dict(task.kwargs),
                 tokens=task.tokens if task else "",
                 context=task.context if task else {},
-                parent_command_id=task.parent_cid,
+                scope_id=task.scope_id,
                 call_id=task.call_id if task else "",
                 delta_arg=task.meta.delta_arg,
             )
@@ -776,7 +776,7 @@ class DuplexChannelRuntime(AbsChannelRuntime):
 
     def _check_running(self) -> None:
         if not self.is_running():
-            raise RuntimeError(f"Channel proxy {self._name} is not running")
+            raise RuntimeError(f"Channel proxy `{self._name}` is not running")
 
     def is_connected(self) -> bool:
         return self.is_running() and self._ctx.is_connected()
@@ -851,7 +851,7 @@ class DuplexChannelRuntime(AbsChannelRuntime):
                 task = ChannelCtx.task()
             except LookupError:
                 pass
-            cid = task.cid if task else uuid()
+            cid = task.cid if task else unique_id()
 
             # 生成对下游的调用.
             if task is None:
@@ -905,7 +905,7 @@ class DuplexChannelProxy(Channel):
     ):
         self._name = name
         self._description = description
-        self._uid = uid or uuid()
+        self._uid = uid or unique_id()
         self._proxy_connection = to_provider_connection
         self._provider_channel_path = ""
         self._runtime: Optional[DuplexChannelRuntime] = None

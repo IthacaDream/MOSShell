@@ -17,13 +17,13 @@ class AppStoreChannel(Channel):
     """
 
     def __init__(self, name: str, description: str = ""):
-        from ghoshell_common.helpers import uuid
+        from ghoshell_moss.message import unique_id
         self._name = name
         self._description = description or (
             "App Store 核心通道，用于管理当前环境下的所有可用应用。"
             "你可以通过此通道拉起具有特定功能的子进程"
         )
-        self._id = uuid()
+        self._id = unique_id()
 
     def name(self) -> ChannelName:
         return self._name

@@ -13,7 +13,7 @@ try:
 except ImportError:
     raise ImportError("Could not import mcp. Please install ghoshell-moss[mcp].")
 
-from ghoshell_common.helpers import uuid
+from ghoshell_moss.message import unique_id
 from ghoshell_container import IoCContainer
 
 from ghoshell_moss.core.concepts.channel import Channel, ChannelMeta, ChannelRuntime
@@ -35,7 +35,7 @@ class MCPChannel(Channel):
     def __init__(self, *, name: str, description: str, mcp_client: mcp.ClientSession, blocking: bool = False):
         self._name = name
         self._desc = description
-        self._id = uuid()
+        self._id = unique_id()
         self._mcp_client = mcp_client
         self._runtime: Optional[MCPChannelRuntime] = None
         self._blocking = blocking

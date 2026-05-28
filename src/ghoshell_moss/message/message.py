@@ -10,16 +10,6 @@ from datetime import datetime
 from dateutil import tz
 from .contents import ContentModel, Content, Text, Base64Image
 from ulid import ULID
-import ghoshell_common
-
-
-def _ulid_gen() -> str:
-    return str(ULID())
-
-
-# patch uuid to ulid
-ghoshell_common.helpers.uuid = _ulid_gen
-from ghoshell_common.helpers import uuid
 
 __all__ = [
     "AdditionType",
@@ -29,6 +19,7 @@ __all__ = [
     "Message",
     "MessageMeta",
     "WithAdditional",
+    "unique_id",
 ]
 
 # 实现一个消息协议容器. 这个容器经过了几个阶段的改造:
@@ -50,6 +41,12 @@ Additional = Optional[dict[str, Any]]
 这样可以从弱类型容器中, 拿到一个强类型的数据结构, 但又不需要提前定义它. 
 这个数据不对 AI 暴露, 属于 Ghost In Shells 架构自身定义的交互数据. 
 """
+
+default_unique_id_gen = lambda: str(ULID())
+
+
+def unique_id() -> str:
+    return default_unique_id_gen()
 
 
 class HasAdditional(Protocol):
@@ -185,7 +182,7 @@ class MessageMeta(BaseModel):
         description="当 Message 使用 meta 生成 xml 结构时, 用于包括 content 的 xml 标记. 如果为空, 意味着不包裹."
     )
     id: str = Field(
-        default_factory=uuid,
+        default_factory=unique_id,
         description="消息的全局唯一 ID",
     )
     role: str | None = Field(

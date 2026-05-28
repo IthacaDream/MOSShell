@@ -27,7 +27,7 @@ from ghoshell_moss.host.providers import (
 )
 from ghoshell_moss.bridges.zenoh_bridge import ZenohChannelProvider, ZenohProxyChannel
 from ghoshell_moss.core.helpers import ThreadSafeEvent
-from ghoshell_common.helpers import uuid
+from ghoshell_moss.message import unique_id
 from ghoshell_moss.depends import depend_zenoh
 
 depend_zenoh()
@@ -81,7 +81,7 @@ class UnknownCell(Cell):
         self.type = 'unknown'
         self.description = ''
         self.where = ''
-        self._address = 'unknown/' + uuid()
+        self._address = 'unknown/' + unique_id()
 
     @property
     def address(self) -> str:

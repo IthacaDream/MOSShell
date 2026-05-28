@@ -33,7 +33,8 @@ from typing import (
 )
 from jsonargparse import ArgumentParser as JsonArgumentParser
 from argparse import ArgumentParser
-from ghoshell_common.helpers import uuid, Timeleft
+from ghoshell_moss.message import unique_id
+from ghoshell_common.helpers import Timeleft
 from ghoshell_container import get_caller_info
 from pydantic import BaseModel, Field, TypeAdapter, AwareDatetime
 from pydantic.errors import PydanticInvalidForJsonSchema, PydanticSchemaGenerationError
@@ -963,11 +964,11 @@ class CommandTask(Generic[RESULT], ABC):
             context: dict[CommandTaskContextKey, Any] | None = None,
             call_id: str | int | None = None,
             timeout: float | None = None,
-            parent_cid: str | None = None,
+            scope_id: str | None = None,
     ) -> None:
         self.chan = chan
         # command id
-        self.cid: str = cid or uuid()
+        self.cid: str = cid or unique_id()
         self.tokens: str = tokens
         self.args: list = list(args)
         self.kwargs: dict[str, Any] = kwargs
@@ -980,7 +981,7 @@ class CommandTask(Generic[RESULT], ABC):
         self.context = context or {}
         self.errcode: int = 0
         self.errmsg: Optional[str] = None
-        self.parent_cid = parent_cid
+        self.scope_id = scope_id
         if timeout is not None and timeout < 0:
             raise ValueError(f"timeout {timeout} is invalid")
         self.timeout: float | None = timeout or meta.timeout or None
@@ -1102,6 +1103,9 @@ class CommandTask(Generic[RESULT], ABC):
 
     def is_failed(self) -> bool:
         return self.done() and self.errcode != 0
+
+    def is_critical_failed(self) -> bool:
+        return self.done() and self.errcode != 0 and CommandErrorCode.is_critical(self.errcode)
 
     @abstractmethod
     def resolve(self, result: RESULT | CommandTaskResult | Observe) -> None:
@@ -1280,7 +1284,7 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
             call_id: str | int | None = None,
             partial: CommandPartial | None = None,
             timeout: float | None = None,
-            parent_cid: str | None = None,
+            scope_id: str | None = None,
     ) -> None:
         super().__init__(
             chan=chan,
@@ -1294,7 +1298,7 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
             call_id=call_id,
             partial=partial,
             timeout=timeout,
-            parent_cid=parent_cid,
+            scope_id=scope_id,
         )
         self.__result: Optional[RESULT] = None
         self.__done_event: ThreadSafeEvent = ThreadSafeEvent()
@@ -1316,11 +1320,13 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
         self.__done_callbacks.discard(fn)
 
     def copy(self, cid: str = "") -> Self:
-        cid = cid or uuid()
+        """ copy 过的 task 不是同一个 task. """
+        cid = cid or unique_id()
         return BaseCommandTask(
             chan=self.chan,
             cid=cid,
             meta=self.meta.model_copy(),
+            scope_id=self.scope_id,
             func=self.func,
             tokens=self.tokens,
             args=self.args,

@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field, AwareDatetime, ValidationError
 
 from ghoshell_moss.message import Message
 from ghoshell_moss.core.concepts.command import ObserveError
-from ghoshell_common.helpers import uuid
+from ghoshell_moss.message import unique_id
 from ghoshell_container import IoCContainer
 from PIL.Image import Image
 from .conversation import Reaction, Moment
@@ -87,7 +87,7 @@ class Signal(BaseModel):
         description="the signal name, if not match any mind pulse, the signal will be ignore",
     )
     id: str = Field(
-        default_factory=uuid,
+        default_factory=unique_id,
         description="unique identifier of the signal",
     )
     trace_id: str = Field(
@@ -285,7 +285,7 @@ class Impulse(BaseModel):
     它的核心目的是隔离原始信号, 将之转换成更明确的调度信号.
     """
     id: str = Field(
-        default_factory=uuid,
+        default_factory=unique_id,
         description="the impulse id",
     )
     source: str = Field(

@@ -1,6 +1,6 @@
 from typing_extensions import Self
 from ghoshell_moss.core.blueprint.matrix import Cell
-from ghoshell_common.helpers import uuid
+from ghoshell_moss.message import unique_id
 
 __all__ = [
     'FractalCell',
@@ -24,7 +24,7 @@ class FractalCell(Cell):
         self.where = where
         self.accepted: bool = False
         self.connection_keys: dict[str, str] = {}
-        self.uid = uuid()
+        self.uid = unique_id()
 
     @property
     def address(self) -> str:

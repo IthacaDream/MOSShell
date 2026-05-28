@@ -1,6 +1,6 @@
 from typing import Literal, Optional
 
-from ghoshell_common.helpers import uuid
+from ghoshell_moss.message import unique_id
 from ghoshell_common.contracts import LoggerItf
 
 from ghoshell_moss.message import Addition
@@ -34,7 +34,7 @@ class QueueBasedSubscriber(Subscriber[TOPIC_MODEL | None]):
         if model is not None:
             topic_name = topic_name or model.default_topic_name()
         self._listening = topic_name
-        self._uid = uid or uuid()
+        self._uid = uid or unique_id()
         self._queue: janus.Queue[Topic | None] = janus.Queue(maxsize=maxsize)
         self._receive_lock = asyncio.Lock()
         self._service_stopped = service_stopped
@@ -160,7 +160,7 @@ class QueueBasedPublisher(Publisher):
         self._creator = creator
         self._logger = logger or logging.getLogger("moss")
         self._additions = []
-        self._uid = uid or uuid()
+        self._uid = uid or unique_id()
         self._log_prefix = f"[QueueBasedPublisher %s id=%s]" % (self._creator, self._uid)
         self._frequent = frequent
         self._last_sent: float = 0.0
@@ -217,7 +217,7 @@ class QueueBasedTopicService(TopicService):
     """
 
     def __init__(self, sender: str = "", *, logger: LoggerItf | None = None):
-        self._sender = sender or uuid()
+        self._sender = sender or unique_id()
         self._creator = f"TopicService/{self._sender}"
         self._started = False
         self._closing_event = ThreadSafeEvent()

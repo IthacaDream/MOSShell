@@ -9,7 +9,7 @@ from typing import Any, Literal, Optional, AsyncIterator, ClassVar
 
 import numpy as np
 from ghoshell_common.contracts import LoggerItf
-from ghoshell_common.helpers import uuid
+from ghoshell_moss.message import unique_id
 from pydantic import Field
 from websockets import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed, ConnectionClosedOK
@@ -284,7 +284,7 @@ class VolcengineTTSConf(BaseModel):
         """
         :return: (header, url)
         """
-        connection_id = connection_id or uuid()
+        connection_id = connection_id or unique_id()
         ws_header = {
             "X-Api-App-Key": self.unwrap_env(self.app_key),
             "X-Api-Access-Key": self.unwrap_env(self.access_token),
@@ -355,7 +355,7 @@ class VolcengineTTSBatch(TTSBatch):
         self._started = ThreadSafeEvent()
         self._running_loop = loop
         self._has_valid_text = False
-        self._batch_id = batch_id or uuid()
+        self._batch_id = batch_id or unique_id()
         self._text_lock = asyncio.Lock()
         self._chunks: asyncio.Queue[np.ndarray | None] = asyncio.Queue()
         self.texts: asyncio.Queue[str | None] = asyncio.Queue()
@@ -627,7 +627,7 @@ class VolcengineTTS(TTS):
             speaker = batch.speaker()
             # 当前火山的 resource id
             resource_id = speaker.resource_id or self._conf.resource_id
-            connection_id = uuid()
+            connection_id = unique_id()
             header = self._conf.gen_header(connection_id=connection_id, resource_id=resource_id)
             url = self._conf.url
             # 创建初始连接.

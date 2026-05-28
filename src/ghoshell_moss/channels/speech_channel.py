@@ -6,7 +6,7 @@ from ghoshell_container import IoCContainer
 from ghoshell_moss.contracts.speech import Speech, TTSSpeech, TTS, StreamAudioPlayer
 from ghoshell_moss.core import PyChannel, Channel, ChannelRuntime, ChannelCtx
 from ghoshell_moss.core.speech import BaseTTSSpeech
-from ghoshell_common.helpers import uuid
+from ghoshell_moss.message import unique_id
 
 __all__ = ["SpeechChannel", "TTSSpeechChannel"]
 
@@ -24,7 +24,7 @@ class SpeechChannel(Channel):
         speech: TTSSpeech | Speech,
     ):
         self._speech = speech
-        self._uid = uuid()
+        self._uid = unique_id()
         self._name = name
         self._description = description
         self._runtime: Optional[ChannelRuntime] = None

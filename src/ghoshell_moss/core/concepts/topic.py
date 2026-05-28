@@ -5,7 +5,7 @@
 from abc import ABC, abstractmethod
 from typing import Generic, TypeVar, Literal, Any, Protocol, Annotated
 from pydantic import BaseModel, Field, ValidationError
-from ghoshell_common.helpers import uuid
+from ghoshell_moss.message import unique_id
 from ghoshell_moss.message import WithAdditional, Addition
 from typing_extensions import Self
 import time
@@ -58,7 +58,7 @@ class TopicMeta(BaseModel):
     在传输和解析过程中它的数据结构不变, 也不占用 meta 之外的 keyword.
     """
 
-    id: str = Field(default_factory=uuid, description="Unique identifier for the topic.")
+    id: str = Field(default_factory=unique_id, description="Unique identifier for the topic.")
     name: str = Field(
         default="",
         description="Name of the topic.",

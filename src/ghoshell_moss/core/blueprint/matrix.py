@@ -401,7 +401,7 @@ class Matrix(ABC):
         :param address: cell address where providing a channel tree
         :param name: channel name which rewrite the providing channel.
         :param description: channel description which rewrite the providing channel.
-        :param id: channel uid if given, otherwise will generate a uuid for the proxy.
+        :param id: channel uid if given, otherwise will generate a unique id for the proxy.
         :param only_allowed_in_main_cell: if true, check this cell is host main cell or raise error.
         :raise RuntimeError: if the current cell is not the main cell of the matrix runtime.
         """

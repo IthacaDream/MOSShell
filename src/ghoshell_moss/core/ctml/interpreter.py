@@ -4,10 +4,11 @@ from typing import Optional, ClassVar, Callable, Coroutine, Iterable, Any
 from typing_extensions import Self
 
 from ghoshell_common.contracts import LoggerItf
-from ghoshell_common.helpers import Timeleft, uuid
+from ghoshell_common.helpers import Timeleft
+from ghoshell_moss.message import unique_id
 from ghoshell_moss.core.concepts.channel import ChannelFullPath, ChannelMeta
 from ghoshell_moss.core.concepts.command import Command, CommandTask, CommandToken, CommandTaskContextKey
-from ghoshell_moss.core.concepts.errors import CommandErrorCode, InterpretError
+from ghoshell_moss.core.concepts.errors import CommandErrorCode, InterpretError, CommandError
 from ghoshell_moss.core.concepts.interpreter import (
     CommandTaskCallback,
     CommandTokenParser,
@@ -82,7 +83,7 @@ class CTMLInterpreter(Interpreter):
         :param moss_dynamic: 动态生成的讯息.
         """
         # 生成 stream id.
-        self._id = stream_id or uuid()
+        self._id = stream_id or unique_id()
         self._kind: str = kind
         self._previews_interrupted_interpretation: Interpretation | None = interrupted
         self._meta_instruction: str | None = moss_meta_instruction
@@ -593,6 +594,8 @@ class CTMLInterpreter(Interpreter):
             waiting_tasks.append(asyncio.create_task(t.wait(throw=False)))
 
         err = None
+        if not timeleft.alive():
+            raise asyncio.TimeoutError("Timed out while waiting for parsed command tasks to finish")
         try:
             # 阻塞等待运行完成.
             done, pending = await asyncio.wait(
@@ -607,7 +610,7 @@ class CTMLInterpreter(Interpreter):
                 for task in tasks.values():
                     if exp := task.exception():
                         # 根据结果判断是否抛出异常.
-                        raise exp
+                        raise CommandError.from_error(exp)
 
             # 返回所有的 tasks.
             return tasks

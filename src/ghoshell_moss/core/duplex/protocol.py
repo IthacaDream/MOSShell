@@ -3,7 +3,7 @@ import time
 from abc import ABC
 from typing import Any, ClassVar, Optional
 
-from ghoshell_common.helpers import uuid
+from ghoshell_moss.message import unique_id
 from pydantic import BaseModel, Field
 from pydantic_core import PydanticSerializationError
 from typing_extensions import Self, TypedDict
@@ -58,7 +58,7 @@ class ChannelEventSerializedError(Exception):
 class ChannelEventModel(BaseModel, ABC):
     event_type: ClassVar[str] = ""
 
-    event_id: str = Field(default_factory=uuid, description="event id for transport")
+    event_id: str = Field(default_factory=unique_id, description="event id for transport")
     connection_id: str = Field(default="", description="channel proxy id")
     timestamp: float = Field(default_factory=lambda: round(time.time(), 4), description="timestamp")
 
@@ -141,8 +141,8 @@ class CommandCallEvent(ChannelEventModel):
     event_type: ClassVar[str] = "moss.channel.proxy.command.call"
     name: str = Field(description="command name")
     chan: str = Field(description="channel path")
-    command_id: str = Field(default_factory=uuid, description="command id")
-    parent_command_id: str | None = Field(default=None, description="parent command id")
+    command_id: str = Field(default_factory=unique_id, description="command id")
+    scope_id: str | None = Field(default=None, description="command scope id")
     delta_arg: str | None = Field(default=None, description="delta arg")
     args: list[Any] = Field(default_factory=list, description="command args")
     kwargs: dict[str, Any] = Field(default_factory=dict, description="kwargs of the command")

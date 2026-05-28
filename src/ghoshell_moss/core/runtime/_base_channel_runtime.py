@@ -210,7 +210,7 @@ class AbsChannelRuntime(Generic[CHANNEL], ChannelRuntime, ABC):
                 self.log_prefix,
                 task.cid,
             )
-            task.fail(CommandErrorCode.NOT_RUNNING.error(f"channel {self.name} not running"))
+            task.fail(CommandErrorCode.NOT_RUNNING.error(f"channel `{self.name}` is not running"))
             return task
         elif not self.is_connected():
             self.logger.info(

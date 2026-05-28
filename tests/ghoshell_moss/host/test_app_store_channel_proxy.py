@@ -29,8 +29,8 @@ def zenoh_session():
 
 @pytest.fixture
 def session_scope():
-    from ghoshell_common.helpers import uuid
-    return uuid()
+    from ghoshell_moss.message import unique_id
+    return unique_id()
 
 
 @pytest.fixture
@@ -113,7 +113,7 @@ def test_virtual_children_without_provider(zenoh_session, session_scope, mock_ap
 
 @pytest.mark.asyncio
 async def test_virtual_children_with_provider_running(
-    zenoh_session, session_scope, mock_app,
+        zenoh_session, session_scope, mock_app,
 ):
     """provider 已启动时, virtual child proxy 可 bootstrap, 连接, 并调用命令."""
     # 1. 创建 App 侧的 channel
@@ -156,7 +156,7 @@ async def test_virtual_children_with_provider_running(
 
 @pytest.mark.asyncio
 async def test_proxy_bootstrap_after_provider_started(
-    zenoh_session, session_scope, mock_app,
+        zenoh_session, session_scope, mock_app,
 ):
     """
     模拟 Shell 路径: 先从 get_virtual_children() 拿到 proxy,
@@ -203,12 +203,13 @@ async def test_proxy_bootstrap_after_provider_started(
 def _async_return(value):
     async def _inner(*args, **kwargs):
         return value
+
     return _inner
 
 
 @pytest.mark.asyncio
 async def test_start_timeout_default_no_wait(
-    zenoh_session, session_scope, mock_app,
+        zenoh_session, session_scope, mock_app,
 ):
     """timeout=-1 (默认): 调用 start_app 后立即返回，不等待连接。"""
     state = _build_state(
@@ -225,7 +226,7 @@ async def test_start_timeout_default_no_wait(
 
 @pytest.mark.asyncio
 async def test_start_without_channel_runtime(
-    zenoh_session, session_scope, mock_app,
+        zenoh_session, session_scope, mock_app,
 ):
     """timeout>=0 但不在 ChannelCtx 中: 返回 WARN。"""
     state = _build_state(
@@ -241,7 +242,7 @@ async def test_start_without_channel_runtime(
 
 @pytest.mark.asyncio
 async def test_start_timeout_zero_connects_via_tree(
-    zenoh_session, session_scope, mock_app,
+        zenoh_session, session_scope, mock_app,
 ):
     """timeout=0 且 provider 运行中: tree 路径 refresh → fetch → wait_connected 全通。"""
     from ghoshell_moss.core.concepts.channel import ChannelCtx
@@ -289,7 +290,7 @@ async def test_start_timeout_zero_connects_via_tree(
 
 @pytest.mark.asyncio
 async def test_start_timeout_positive_expires(
-    zenoh_session, session_scope, mock_app,
+        zenoh_session, session_scope, mock_app,
 ):
     """timeout>0 且 provider 未启动: 超时返回 WARN。"""
     from ghoshell_moss.core.concepts.channel import ChannelCtx

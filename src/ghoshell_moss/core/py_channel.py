@@ -17,7 +17,7 @@ from ghoshell_moss.core.concepts.channel import (
 )
 from ghoshell_moss.core.runtime import AbsChannelTreeRuntime
 from ghoshell_moss.core.concepts.errors import CommandError
-from ghoshell_common.helpers import uuid
+from ghoshell_moss.message import unique_id
 from ghoshell_common.contracts import LoggerItf
 from PIL.Image import Image
 from ghoshell_moss.core.concepts.command import Command, PyCommand, CommandWrapper, CommandUniqueName
@@ -312,7 +312,7 @@ class PyChannelBuilder(ChannelStateBuilder, ChannelState):
 class BaseStateChannel(StatefulChannel):
 
     def __init__(self, main: ChannelState, uid: str | None = None) -> None:
-        self._uid = uid or uuid()
+        self._uid = uid or unique_id()
         self._main: ChannelState = main
         self._states: dict[str, ChannelState] = {}
         self._modules: dict[str, ChannelModule] = {}
@@ -441,7 +441,7 @@ class StateChannelRuntime(AbsChannelTreeRuntime[StatefulChannel]):
 
     def _check_running(self) -> None:
         if not self.is_running():
-            raise RuntimeError(f"Channel {self} not running")
+            raise RuntimeError(f"Channel `{self}` is not running")
 
     async def switch_state(self, name: str) -> str:
         """

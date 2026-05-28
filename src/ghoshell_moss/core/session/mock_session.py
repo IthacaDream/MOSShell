@@ -79,10 +79,10 @@ class MockSession(Session):
         topics: TopicService | None = None,
         storage: Storage | None = None,
     ):
-        from ghoshell_common.helpers import uuid
+        from ghoshell_moss.message import unique_id
 
         self._session_scope = session_scope
-        self._session_id = session_id or uuid()
+        self._session_id = session_id or unique_id()
         self._topics = topics
         self._running = True
         self._stream_key_prefix = f"MOSS/{session_scope}/streams"

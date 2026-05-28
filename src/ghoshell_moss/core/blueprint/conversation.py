@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from pydantic import BaseModel, Field, AwareDatetime
 
 from ghoshell_moss.message import Message, Content, WithAdditional
-from ghoshell_common.helpers import uuid
+from ghoshell_moss.message import unique_id
 from datetime import datetime
 from dateutil import tz
 import asyncio
@@ -24,7 +24,7 @@ class Reaction(BaseModel, WithAdditional):
     所以仍然需要一种粘合机制拼出交互.
     """
     moment_id: str = Field(
-        default_factory=uuid,
+        default_factory=unique_id,
         description="上一轮 Moment id.",
     )
     logos: str = Field(
@@ -65,7 +65,7 @@ class Moment(BaseModel, WithAdditional):
     """
 
     id: str = Field(
-        default_factory=uuid,
+        default_factory=unique_id,
         description="为 observation 创建唯一 id",
     )
 
@@ -214,7 +214,7 @@ class ConversationMeta(BaseModel, WithAdditional):
     ConversationMeta 用来快速还原一个会话的关键信息, 类似树节点的描述.
     """
     id: str = Field(
-        default_factory=uuid,
+        default_factory=unique_id,
         description="conversation uuid",
     )
     namespace: str = Field(
@@ -256,7 +256,7 @@ class ModelContext(BaseModel, WithAdditional):
     这个数据结构考虑可以存储, 方便调试还原每一个 AI 思考的关键帧.
     """
     request_id: str = Field(
-        default_factory=uuid,
+        default_factory=unique_id,
         description="作为请求的唯一 id. "
     )
     system_prompt: str = Field(

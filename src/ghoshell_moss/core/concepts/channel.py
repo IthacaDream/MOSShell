@@ -760,27 +760,26 @@ class ChannelRuntime(ABC):
         """
         return the channel path in the tree, or None means not registered yet (which is an unnormal issue)
         """
-        return self.tree.get_channel_path(self.channel.id()) or None
+        return self.tree.get_channel_path(self.channel.id())
 
     # --- default magic methods, 为后来的胶水层图灵完备语法做准备 --- #
 
     @staticmethod
-    async def __content__(chunks__) -> None | str:
+    async def __content__(chunks__ = None) -> None | str:
         # 所有的 ChannelRuntime 均允许时序插入多端文本的 Command, 作为流式输入的基准函数.
         # 当 __content__ 魔法 Command 不存在时, ChannelRuntime 会用空函数兜底. 这里是空函数的标准形式.
         # 定义在 Channel Runtime 上提示这是系统级约定.
-        async for chunk in chunks__:
-            pass
         return None
 
+    @staticmethod
     async def __scope_enter__(
-            self,
             *,
             timeout: float | None = None,
             until: Literal['flow', 'any', 'all'] = 'flow',
     ) -> None:
         return None
 
+    @staticmethod
     async def __scope_exit__(self) -> None:
         return None
 

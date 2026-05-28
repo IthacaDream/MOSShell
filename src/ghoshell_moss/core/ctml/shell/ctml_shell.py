@@ -4,7 +4,7 @@ import logging
 from collections.abc import Callable, Iterable
 from typing import Any, Optional, AsyncGenerator
 
-from ghoshell_common.helpers import uuid
+from ghoshell_moss.message import unique_id
 from ghoshell_container import Container, IoCContainer
 
 from ghoshell_moss.contracts.logger import get_moss_logger, LoggerItf
@@ -341,7 +341,7 @@ class CTMLShell(MOSShell[PrimeChannel]):
             undone_tasks=undone_tasks,
             commands=commands,
             speech=self._speech,
-            stream_id=stream_id or uuid(),
+            stream_id=stream_id or unique_id(),
             callback=callback,
             logger=self.logger,
             channel_metas=config,

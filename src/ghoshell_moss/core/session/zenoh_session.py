@@ -15,7 +15,7 @@ from ghoshell_moss.core.blueprint.session import (
 )
 from ghoshell_moss.core.blueprint.environment import DEFAULT_SESSION_SCOPE
 from ghoshell_moss.depends import depend_zenoh
-from ghoshell_common.helpers import uuid
+from ghoshell_moss.message import unique_id
 
 from typing import Iterable
 
@@ -102,10 +102,10 @@ class MossSessionWithZenoh(Session):
         self._stream_key_expr_prefix = f"MOSS/{session_scope}/streams"
         self._received_signal_index: int = 0
 
-        self._session_id = session_id or uuid()
+        self._session_id = session_id or unique_id()
 
         # session 实例级别的 id.
-        self._session_unique_id = uuid()
+        self._session_unique_id = unique_id()
 
         self._zenoh_session = zenoh_session
         if zenoh_session.is_closed():

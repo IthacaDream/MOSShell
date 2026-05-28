@@ -3,7 +3,7 @@ import contextlib
 import logging
 import threading
 from typing import Callable, Coroutine, Optional, AsyncIterator
-from ghoshell_common.helpers import uuid
+from ghoshell_moss.message import unique_id
 from ghoshell_container import Container, IoCContainer
 from pydantic import ValidationError
 
@@ -104,7 +104,7 @@ class DuplexChannelProvider(ChannelProvider):
             reconnect_interval_seconds: float = 0.5,
             container: Container = None,
     ):
-        self._uid = uuid()
+        self._uid = unique_id()
         self._container = Container(
             name=f"moss.duplex_provider.{self.__class__.__name__}",
             parent=container,
@@ -362,7 +362,7 @@ class DuplexChannelProvider(ChannelProvider):
 
     async def _sync_connection(self, new: bool) -> None:
         if new or not self._connection_id:
-            self._connection_id = uuid()
+            self._connection_id = unique_id()
             self._connection_creating_event.clear()
         try:
             listening_topics = []
@@ -657,6 +657,7 @@ class DuplexChannelProvider(ChannelProvider):
                 cid=call_event.command_id,
                 context=call_event.context,
                 call_id=call_event.call_id,
+                scope_id=call_event.scope_id,
             )
         elif Command.is_magic_command(call_event.name):
             # 魔法函数允许到执行期才做检查.
@@ -670,6 +671,7 @@ class DuplexChannelProvider(ChannelProvider):
                 cid=call_event.command_id,
                 context=call_event.context,
                 call_id=call_event.call_id,
+                scope_id=call_event.scope_id,
             )
         else:
             response = call_event.not_available(f"Command {unique_name} not found at provider")
