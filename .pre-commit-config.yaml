@@ -5,7 +5,7 @@ repos:
     - id: features-check
       name: features-check
       description: "Remind about unfinished workstreams (non-blocking)"
-      entry: uv run moss --ai features check
+      entry: .venv/bin/moss --ai features check
       language: system
       pass_filenames: false
       always_run: true
