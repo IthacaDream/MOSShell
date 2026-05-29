@@ -312,7 +312,7 @@ class MossSessionWithZenoh(Session):
         )
 
     async def __aenter__(self) -> Self:
-        self._logger.info("%s session started")
+        self._logger.info("%s session started", self._log_prefix)
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):

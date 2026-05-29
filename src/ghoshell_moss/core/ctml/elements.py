@@ -56,7 +56,7 @@ invalid_command = PyCommand(invalid_command)
 content_command = PyCommand(ChannelRuntime.__content__)
 
 
-class ScopeOpenTask(BaseCommandTask[None]):
+class ScopeEnterTask(BaseCommandTask[None]):
     """
     start a channel scope
     """
@@ -110,7 +110,7 @@ class ScopeOpenTask(BaseCommandTask[None]):
         )
 
 
-class ScopeCloseTask(BaseCommandTask[str]):
+class ScopeExitTask(BaseCommandTask[str]):
     """
     close a channel scope
     """
@@ -395,6 +395,7 @@ class BaseCommandTokenParserElement(CommandTokenParser, ABC):
             raise InterpretError(f"invalid tokens {token.content}")
         command = self._find_command(token.chan, token.name)
         if token.name == SCOPE_COMMAND_NAME or token.name == SCOPE_SHORTCUT:
+            # 容错逻辑, 允许空 channel 表示是父 channel?
             # CommandWithoutDeltaArgElement 会发送一个 Scope 的开闭.
             child = CommandWithoutDeltaArgElement(
                 name=Command.make_unique_name(token.chan, SCOPE_COMMAND_NAME),
@@ -602,13 +603,14 @@ class CommandWithoutDeltaArgElement(BaseCommandTokenParserElement):
         if command is not None:
             task = BaseCommandTask.from_command(
                 command,
+                chan_=self.chan,
                 kwargs={CommandDeltaArgName.CHUNKS.value: receiver},
                 cid=token.command_part_id(),
                 call_id=token.call_id,
             )
         else:
             task = EmptyContentTask(
-                channel=token.chan,
+                channel=self.chan,
                 chunks__=receiver,
                 cid=token.command_part_id(),
                 call_id=token.call_id,
@@ -673,7 +675,7 @@ class CommandWithoutDeltaArgElement(BaseCommandTokenParserElement):
         if with_scope and self.command_token:
             # 如果是隐藏节点, tag 是 None
             tag = SCOPE_SHORTCUT if self.current_task is None else ''
-            scope_task = ScopeOpenTask(channel=self.chan, kwargs=self.command_token.kwargs, tag=tag)
+            scope_task = ScopeEnterTask(channel=self.chan, kwargs=self.command_token.kwargs, tag=tag)
             # 隐藏节点, 所以不对外暴露 token.
             tasks.append(scope_task)
             self._self_scope_open_delivered = True
@@ -744,7 +746,7 @@ class CommandWithoutDeltaArgElement(BaseCommandTokenParserElement):
         if self._self_scope_open_delivered:
             # 如果有任务存在, 则 scope exit 的 tokens 用 caller 来做.
             tag = SCOPE_SHORTCUT if self.current_task is None else self.current_task.caller_name()
-            scope_close_task = ScopeCloseTask(channel=self.chan, tag=tag)
+            scope_close_task = ScopeExitTask(channel=self.chan, tag=tag)
             result.append(scope_close_task)
         # 设置关闭.
         result.extend(super().on_own_end())

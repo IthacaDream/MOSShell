@@ -19,9 +19,9 @@ class MOSSRuntimeInspector:
         """获取当前 MOSS 的指令上下文 (Instruction)。"""
         self._output.syntax(self._moss_runtime.moss_instruction(), 'xml')
 
-    async def dynamic(self, refresh: bool = True) -> None:
+    async def dynamic(self, refresh: bool = True, timeout: float=2.0) -> None:
         """获取当前 MOSS 的动态上下文讯息. """
-        messages = await self._moss_runtime.moss_dynamic_messages(refresh=refresh)
+        messages = await self._moss_runtime.moss_dynamic_messages(refresh=refresh, max_wait=timeout)
         self._output.output(OutputItem.new("Shell", *messages, log="moss dynamic instructions"))
 
     async def static(self) -> None:
@@ -30,10 +30,10 @@ class MOSSRuntimeInspector:
         static = self._moss_runtime.moss_static_messages()
         self._output.syntax(static, 'xml')
 
-    async def channel_mets(self, refresh: bool = True) -> None:
+    async def channel_mets(self, refresh: bool = True, timeout: float = 2.0) -> None:
         """获取最新的 channel metas 信息."""
         if refresh:
-            await self._moss_runtime.shell.refresh_metas()
+            await self._moss_runtime.shell.refresh_metas(timeout=timeout)
         metas = self._moss_runtime.shell.channel_metas(available_only=False)
         for key, meta in metas.items():
             self._output.info("channel %s" % key)

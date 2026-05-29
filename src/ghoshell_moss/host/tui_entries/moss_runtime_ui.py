@@ -32,7 +32,7 @@ class MOSSRuntimeREPLState(REPLState):
             "manifests": ManifestsInspector(self._host.manifests),
             "moss": MOSSRuntimeInspector(self._moss_runtime, self.console),
             "apps": AppStoreInspector(self._moss_runtime.apps),
-            "fractal_hub": FractalInspector(self._moss_runtime.get_fractal_hub())
+            "fractal": FractalInspector(self._moss_runtime.matrix, self._moss_runtime.get_fractal_hub())
         }
 
     def output_on_switch(self, enter_else_leave: bool) -> None:

@@ -372,6 +372,7 @@ class Command(Generic[RESULT], ABC):
         """
         pass
 
+    @property
     @abstractmethod
     def partial(self) -> Optional[CommandPartial]:
         """
@@ -462,7 +463,7 @@ class CommandWrapper(Command[RESULT]):
             meta=meta,
             func=func,
             available_fn=command.is_available,
-            partial=command.partial(),
+            partial=command.partial,
             refresh=command.refresh_meta,
             meta_func=command.meta,
             ctx_fn=ctx_fn,
@@ -473,6 +474,7 @@ class CommandWrapper(Command[RESULT]):
     def func(self) -> Callable:
         return self._func
 
+    @property
     def partial(self) -> Optional[CommandPartial]:
         return self._partial
 
@@ -624,6 +626,7 @@ class PyCommand(CliCommand):
             # refresh only command is dynamic.
             self._meta = self._generate_meta()
 
+    @property
     def partial(self) -> Optional[CommandPartial]:
         if self._partial is not None:
             return self._partial
@@ -1347,6 +1350,8 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
             kwargs: dict | None = None,
             cid: str | None = None,
             call_id: str | int | None = None,
+            context: dict[str, Any] | None = None,
+            scope_id: str | None = None,
     ) -> "BaseCommandTask":
         return cls(
             chan=chan_,
@@ -1355,9 +1360,11 @@ class BaseCommandTask(Generic[RESULT], CommandTask[RESULT]):
             tokens=tokens_,
             args=list(args) if args is not None else [],
             kwargs=kwargs if kwargs is not None else {},
-            partial=command_.partial(),
+            partial=command_.partial,
             cid=cid,
             call_id=call_id,
+            context=context,
+            scope_id=scope_id,
         )
 
     def done(self) -> bool:

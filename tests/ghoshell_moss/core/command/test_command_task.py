@@ -279,3 +279,9 @@ async def test_command_task_timeout():
     task = BaseCommandTask.from_command(foo_command)
     with pytest.raises(asyncio.TimeoutError):
         await task.run()
+
+    task = BaseCommandTask.from_command(foo_command)
+    task.func = None
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(task.wait(throw=True), 0.2)
+

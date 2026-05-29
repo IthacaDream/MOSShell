@@ -69,12 +69,12 @@ async def test_ctml_parallel_baseline():
 
     @a.build.command()
     async def foo() -> None:
-        await asyncio.sleep(0.005)
+        await asyncio.sleep(0.05)
         order.append('foo')
 
     @b.build.command()
     async def bar() -> None:
-        await asyncio.sleep(0.001)
+        await asyncio.sleep(0.01)
         order.append('bar')
 
     tasks = await ctml_shell_test(a, b, ctml="<a:foo/><b:bar/>")
@@ -259,7 +259,6 @@ async def test_ctml_flow_cancels_long_running_child():
 
     # ctml 默认是 until="flow"
     ctml = "<_ channel='a'><a.b:slow_cmd/><fast_cmd/></_>"
-    print("+++++++++++++++ rerun")
     tasks = await ctml_shell_test(a.import_channels((b, "b")), ctml=ctml)
 
     # 结果应该是 b 被 cancel 了，因为 a 的直接序列 (fast_cmd) 跑完了
@@ -1331,6 +1330,7 @@ async def test_primitive_clear_cancels_all():
         ctml="""
         <_ until="all">
             <long_task/>
+            <sleep duration="0.01"/>
             <interrupt/>
         </_>
         """

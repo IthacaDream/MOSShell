@@ -790,3 +790,16 @@ async def test_py_channel_none_block_commands():
         assert task_done.is_set()
         assert runtime.is_idle()
         assert len(data) == 10
+
+
+@pytest.mark.asyncio
+async def test_py_channel_import_factory_return_none():
+    from ghoshell_container import IoCContainer
+    main = PyChannel(name="channel")
+
+    def foo(ioc: IoCContainer) -> None:
+        return None
+
+    main.build.import_channels(foo)
+    async with main.bootstrap() as runtime:
+        assert runtime.is_idle()

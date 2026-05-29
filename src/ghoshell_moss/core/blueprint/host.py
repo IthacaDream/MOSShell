@@ -361,7 +361,7 @@ class FractalHub(ABC):
     FractalHub 解决什么问题呢?
     MossHost 实现基于环境发现构建 HostRuntime 的能力
     """
-    DEFAULT_HUB_NAME: ClassVar['str'] = 'fractal_hub'
+    DEFAULT_HUB_NAME: ClassVar['str'] = 'fractal'
 
     @abstractmethod
     def self_explain(self) -> str:
@@ -399,14 +399,38 @@ class FractalHub(ABC):
     @abstractmethod
     def as_channel(
             self,
-            name: str = '',
             description: str = '',
+            allow_all: bool = False,
+            auto_start: bool = False,
     ) -> Channel:
         """
         将 Hub 定义为一个 Channel.
         可以注册到 MossRuntime.shell
         """
         pass
+
+    @classmethod
+    def channel_factory(
+            cls,
+            description: str = 'fractal moss connection',
+            allow_all: bool = False,
+            auto_start: bool = False,
+    ) -> Callable[[IoCContainer], Channel]:
+        """
+        return a channel factory that can be imported by main channel.
+        """
+
+        def factory(container: IoCContainer) -> Channel | None:
+            hub = container.get(FractalHub)
+            if hub is None:
+                return None
+            if auto_start:
+                matrix = container.force_fetch(Matrix)
+                # 注册启动生命周期.
+                matrix.register_lifecycle_object(hub)
+            return hub.as_channel(description, allow_all, auto_start)
+
+        return factory
 
     def accept(self, cell_name: str):
         """

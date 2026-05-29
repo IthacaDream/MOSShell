@@ -7,10 +7,10 @@ description: >-
 id: zenoh-fractal
 milestone: beta
 priority: P0
-status: in-progress
-status_note: Hub/Provider 分离完成，发现机制 subscriber + re-put，单测 5/5 全绿。Scope 基础设施修复 (parent_cid 跨 duplex, ChannelEventSerializedError 防御) 已合入，远程 scope 取消/超时在 duplex 协议层验证通过。准备端到端验证：远程 moss-as-fractal → 本地 moss-as-mcp，AI 通过 fractal proxy channel 让远程节点说话。
+status: completed
+status_note: 端到端验证通过。远程 moss-as-fractal → 本地 moss-as-mcp，AI 通过 fractal proxy channel 让远程节点说话 (done:3, scope enter + __content__ + scope exit 全部成功)。沿途修复了 duplex provider 命令排序、fractal hub 懒激活、partial 传播三个关键问题。推拉混合发现/环境发现链路验证/how-to 文档另开 feature。
 title: Zenoh Fractal — Hub/Provider 分离与反向注册
-updated: '2026-05-29'
+updated: '2026-05-30'
 ---
 
 # Zenoh Fractal — Hub/Provider 分离与反向注册
@@ -135,20 +135,21 @@ Providers (Channel):   {prefix}/{hub_name}/providers/{node_name}
 | **`ZenohFractalHubProvider` 注册到 workspace stubs** | ✅ done |
 | **`/moss.static()` 缓存 bug 修复** | ✅ done |
 
-### 待完成
+### 待完成 (另开 feature)
 
-| 任务 | 优先级 | 状态 |
-|---|---|---|
-| 端到端验证 (远程 Provider → 本地 Hub → AI) | P0 | 计划已对齐，待执行 |
-| 推拉混合发现 (liveness + queryable) | P2 | 待端到端后 |
-| Fractal 体系 how-to 文档 | P2 | 待端到端后 |
-| 环境发现使用 how-to 文档 | P2 | 待端到端后 |
+| 任务 | 优先级 |
+|---|---|
+| 推拉混合发现 (liveness + queryable) | P2 |
+| Fractal 体系 how-to 文档 | P2 |
+| 环境发现使用 how-to 文档 | P2 |
 
 ### Out of scope (另开 feature)
 
 - 多 transport scheme 支持 (zmq 等)
 - `DuplexChannelProvider` 通用事件体系
 - Fractal 从 blueprint 搬迁到独立层级
+- Scope 父子从属关系校验 (AbsChannelRuntime 缺少校验)
+- Hub 启动时 `is_available()` 门控导致结构刷新被跳过
 
 ## Key Decisions
 
@@ -414,7 +415,29 @@ Providers (Channel):   {prefix}/{hub_name}/providers/{node_name}
 
 ---
 
-### 命题 2: 端到端验证 (2026-05-29 对齐, 待执行)
+### 命题 2: 端到端验证 (✅ 已完成, 2026-05-30)
+
+**验证路径**: 远程 moss-as-fractal → 本地 moss-as-mcp → AI 通过 fractal proxy channel 控制远程节点。
+
+**验证结果**: 全部通过。
+
+1. 远程 `moss-as-fractal --mode default` 启动，CellProvider 反向注册到本地 Hub
+2. 本地 Hub subscriber 发现 `moss_default` 节点
+3. AI 通过 MCP 执行 `<fractal:accept name="moss_default"/>`，节点批准
+4. `<clear chan="fractal"/>` 后远程 channel 树出现在 `fractal.moss_default.*`，包含完整 shell primitives + say + apps
+5. `<fractal.moss_default:__content__>fractal connection established...</fractal.moss_default:__content__>` → `done: 3`，远程出声
+
+**沿途修复的关键 bug**:
+
+| Bug | 根因 | 修复 |
+|---|---|---|
+| Provider 命令乱序 | `create_task(_handle_command_call)` 并发执行 | 改为同步 `_enqueue_command_call`，push 串行保证时序 |
+| `_sync_connection` 静默失败 + 空转 | 发送失败后 `_connection_id` 被清但未 sleep | except 中 `_clear_connection_status` + sleep |
+| Content delta 的 partial 未传播 | `_enqueue_command_call` 手构造 BaseCommandTask 未传 `partial` | 改为 `from_command`，`partial` 从 method 改为 property |
+| Fractal hub 启动时不可见 | Hub 在 Matrix boot 时隐式启动，首次刷新时 subscriber 未就绪 | 改为 channel factory 懒激活 + `add_lifecycle_object` |
+| CTML element channel 绑定错误 | `token.chan` 代替 `self.chan` | 统一改为 `self.chan` |
+
+**依赖**: 命题 3 (How-To 文档) 另开 feature。
 
 **前置条件**: Scope 基础设施修复已合入 (`ec24fc2`, `4a4a56d`, `9699a6d`)。单测 5/5 全绿。
 `.moss_ws` 的 `providers.py` 已注册 `ZenohFractalHubProvider` 和 `ZenohFractalCellContractProvider`。

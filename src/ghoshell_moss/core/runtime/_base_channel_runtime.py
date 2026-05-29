@@ -295,6 +295,9 @@ class AbsChannelRuntime(Generic[CHANNEL], ChannelRuntime, ABC):
         self._channel_scope_change_lock = threading.Lock()
         self._uncommitted_scopes: list[str] = []
 
+    def __repr__(self):
+        return self.log_prefix
+
     def open_scope(self, task: CommandTask) -> None:
         if not self.is_running():
             task.fail(CommandErrorCode.NOT_RUNNING.error("channel is not running"))
@@ -306,6 +309,10 @@ class AbsChannelRuntime(Generic[CHANNEL], ChannelRuntime, ABC):
             new_scope = ChannelScopeImpl(task, scope_id=task.cid, loop=self._loop, until=until, timeout=timeout)
         except Exception as e:
             task.fail(e)
+            self._logger.exception(
+                "%s failed to open scope for task %s, %s, error: %e",
+                self.log_prefix, task.caller_name(), task.cid, e
+            )
             return
         last = self.get_active_scope(None, pop=False)
         if last is not None:
@@ -313,6 +320,10 @@ class AbsChannelRuntime(Generic[CHANNEL], ChannelRuntime, ABC):
         with self._channel_scope_change_lock:
             self._channel_scopes[task.cid] = new_scope
             self._uncommitted_scopes.append(new_scope.scope_id)
+        self._logger.info(
+            "%s open scope for task %s, scope_id=%s",
+            self.log_prefix, task.caller_name(), new_scope.scope_id,
+        )
 
     def get_active_scope(self, scope_id: str | None, pop: bool) -> ChannelScopeImpl | None:
         if scope_id is None:
@@ -338,6 +349,10 @@ class AbsChannelRuntime(Generic[CHANNEL], ChannelRuntime, ABC):
                 scope_id = self._uncommitted_scopes.pop()
         if scope_id is None:
             task.cancel("Scope Closed")
+            self._logger.info(
+                "%s failed to commit scope %s with task %s, cid=%s",
+                self.log_prefix, scope_id, task.caller_name(), task.cid,
+            )
             return
         with self._channel_scope_change_lock:
             scope = self._channel_scopes.get(scope_id, None)
@@ -346,6 +361,10 @@ class AbsChannelRuntime(Generic[CHANNEL], ChannelRuntime, ABC):
             return
         scope.commit(task)
         task.scope_id = scope.scope_id
+        self._logger.info(
+            "%s commit scope %s with task %s, cid=%s",
+            self.log_prefix, scope_id, task.caller_name(), task.cid,
+        )
 
     @property
     def channel(self) -> CHANNEL:
@@ -499,7 +518,6 @@ class AbsChannelRuntime(Generic[CHANNEL], ChannelRuntime, ABC):
                     task.on_compiled()
                 # prepare to send
                 await self._consume_compiled_task_with_paths(paths, task)
-                await asyncio.sleep(0.0)
 
             except janus.AsyncQueueShutDown:
                 # shutdown the old queue.

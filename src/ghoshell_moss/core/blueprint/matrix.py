@@ -538,6 +538,18 @@ class Matrix(ABC):
             pass  # 底层 arun 已经处理了清理
 
     @abstractmethod
+    async def add_lifecycle_object(self, obj: MatrixLifecycleObject) -> None:
+        """
+        可以在运行时动态添加 lifecycle object, 会绑定到 exit stack 启动, 退出时清空.
+        """
+        pass
+
+    @abstractmethod
+    def register_lifecycle_object(self, obj: MatrixLifecycleObject) -> None:
+        """注册 lifecycle object, 只有在运行前可以注册. """
+        pass
+
+    @abstractmethod
     async def __aenter__(self) -> Self:
         pass
 

@@ -303,10 +303,16 @@ async def test_shell_proxy_channel_with_content_command_by_scope():
         except asyncio.CancelledError:
             got = 'canceled'
 
-    def print_error(err):
+    def get_error(err):
         errors.append(err)
 
-    provider.on_error(print_error)
+    proxy_events = []
+
+    def get_proxy_event(e):
+        proxy_events.append(e)
+
+    provider.on_error(get_error)
+    provider.on_proxy_event(get_proxy_event)
     async with provider.arun(provider_main):
         async with shell:
             await shell.wait_connected("proxy")
@@ -318,6 +324,8 @@ async def test_shell_proxy_channel_with_content_command_by_scope():
                 i.commit()
                 tasks = await i.wait_tasks(timeout=10)
                 assert len(tasks) == 3
+                for t in tasks.values():
+                    assert t.chan == 'proxy', t.caller_name() + " failed"
                 i.raise_exception()
 
     assert len(errors) == 0

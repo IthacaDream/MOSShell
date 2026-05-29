@@ -60,7 +60,7 @@ class _SpeechCommandFactory:
             finally:
                 await chunks__.close()
 
-        return PyCommand(func=__content__, partial=_content_partial, name="__content__")
+        return PyCommand(func=__content__, partial=_content_partial, name="__content__", blocking=True)
 
     def build_say_command(self) -> Command:
         tts_speech: TTSSpeech = self._speech

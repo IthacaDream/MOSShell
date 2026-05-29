@@ -122,7 +122,7 @@ class REPLState(TUIState, ABC):
         self._operation_task.set_name(name)
 
     async def _ensure_operation_done(self, cor: Coroutine, name: str) -> None:
-        self.console.hint("- {} started".format(name))
+        self.console.hint("- {} started. press ESC to interrupt.".format(name))
         try:
             r = await cor
             self._handle_operation_result(r)

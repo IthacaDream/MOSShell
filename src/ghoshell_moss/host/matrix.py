@@ -15,7 +15,7 @@ from ghoshell_moss.core.blueprint.session import Session
 from ghoshell_moss.core.blueprint.manifests import Manifests
 from ghoshell_moss.core.blueprint.matrix import Matrix, Cell, MatrixLifecycleObject
 from ghoshell_moss.core.blueprint.app import AppStore, AppInfo
-from ghoshell_moss.core.blueprint.host import Mode, FractalHub
+from ghoshell_moss.core.blueprint.host import Mode
 from ghoshell_moss.core.blueprint.environment import Environment, DEFAULT_CELL_ADDRESS
 from ghoshell_moss.core.blueprint.host import MossSystemPrompter
 from ghoshell_moss.core.concepts.channel import Channel
@@ -599,10 +599,8 @@ class MatrixImpl(Matrix):
         """
         注册抽象里定义好的, 基于约定发现的特殊抽象类型.
         """
-        if self._is_main:
-            # 只有 main 节点允许启动 hub.
-            yield FractalHub
-        return
+        # 暂时不做隐式绑定.
+        yield from []
 
     def _session_communication_bus_ctx_manager(self):
         """管理 session 事件总线的生命周期. """
@@ -611,6 +609,25 @@ class MatrixImpl(Matrix):
         self._exit_stack.enter_context(zenoh_session)
         self._exit_stack.enter_context(self._all_cell_liveness_check_ctx_manager(zenoh_session))
         self._exit_stack.enter_context(self._this_liveness_ctx_managers(zenoh_session))
+
+    async def add_lifecycle_object(self, obj: MatrixLifecycleObject) -> None:
+        self._check_running()
+        for registered in self._lifecycle_bound_objects_or_types:
+            if obj is registered:
+                return
+        self._lifecycle_bound_objects_or_types.append(obj)
+        await self._async_exit_stack.enter_async_context(obj)
+        self._logger.info("%s add lifecycle object to exit stack %s", self._log_prefix, obj)
+
+    def register_lifecycle_object(self, obj: MatrixLifecycleObject) -> None:
+        if self._closing_event.is_set():
+            raise RuntimeError(f"Matrix already closing")
+        if self.is_running():
+            self._event_loop.create_task(self.add_lifecycle_object(obj))
+            self._logger.info("%s try to create task bind lifecycle object %s", self._log_prefix, obj)
+        else:
+            self._lifecycle_bound_objects_or_types.append(obj)
+            self._logger.info("%s register lifecycle object %s", self._log_prefix, obj)
 
     async def __aenter__(self) -> Self:
         if self._started:
@@ -641,6 +658,7 @@ class MatrixImpl(Matrix):
             session = self._container.force_fetch(Session)
             await self._async_exit_stack.enter_async_context(session)
             # 完成启动后, 进入到关联依赖启动. 启动成功才进入到核心生命周期启动.
+            lifecycle_objects = []
             if len(self._lifecycle_bound_objects_or_types) > 0:
                 for lifecycle in self._lifecycle_bound_objects_or_types:
                     if isinstance(lifecycle, type):
@@ -649,12 +667,14 @@ class MatrixImpl(Matrix):
                     else:
                         # todo: 暂时不做类型检查, 交给 AI 在合适的时候做. 或者保留 todo, 报错时可以看到这里源码.
                         lifecycle_obj = lifecycle
+                    lifecycle_objects.append(lifecycle_obj)
                     if lifecycle_obj is not None:
                         self.logger.info(
                             "%s bootstrap bound lifecycle object: %s",
                             self._log_prefix, lifecycle,
                         )
                         await self._async_exit_stack.enter_async_context(lifecycle)
+            self._lifecycle_bound_objects_or_types = lifecycle_objects
             # 进入到根据约定可以做绑定的生命周期对象.
             for lifecycle_contract in self._lifecycle_level_contracts():
                 if bound := self._container.get(lifecycle_contract):

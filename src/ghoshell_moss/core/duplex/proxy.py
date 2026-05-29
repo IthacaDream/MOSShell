@@ -551,6 +551,7 @@ class DuplexChannelContext:
             if self._sync_meta_started_event.is_set():
                 self._sync_meta_started_event.clear()
             # 更新失联状态.
+            self.connection_err = ""
         except asyncio.CancelledError:
             raise
         except Exception as e:
@@ -630,6 +631,10 @@ class DuplexChannelContext:
             )
             # 添加新的 task.
             await self.send_event_to_provider(event.to_channel_event(), throw=True)
+            self._logger.info(
+                "%s send command task %s, cid=%s",
+                self._log_prefix, task.caller_name(), task.cid,
+            )
             self._pending_provider_command_tasks[cid] = task
             if deltas is not None:
                 self._command_call_deltas_sender_tasks[cid] = asyncio.create_task(self._send_delta_args(task, deltas))

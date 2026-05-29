@@ -1,7 +1,6 @@
 import asyncio
 from abc import ABC, abstractmethod
-from typing import Any, TypeVar, Generic, Literal, Callable
-import threading
+from typing import Any, TypeVar, Generic
 
 from ghoshell_container import IoCContainer
 
@@ -331,20 +330,21 @@ class AbsChannelTreeRuntime(Generic[CHANNEL], AbsChannelRuntime[CHANNEL], ABC):
             for t in pending:
                 t.cancel()
             _ = await asyncio.gather(*pending, return_exceptions=True)
-            if origin_task_done in done:
+            if get_result_from_task in done:
+                result = await get_result_from_task
+                # 如果返回值是 stack, 则意味着要循环堆栈.
+                if isinstance(result, CommandStackResult):
+                    # 执行完所有的堆栈. 同时设置真实被执行的任务.
+                    (await self._fulfill_task_with_its_result_stack(task, result, depth=depth),)
+                else:
+                    # 赋值给原来的 task.
+                    task.resolve(result)
+            elif origin_task_done in done:
                 # origin task 已经运行结束.
                 return
             elif wait_runtime_close in done:
                 task.fail(CommandErrorCode.NOT_RUNNING.error("runtime closed"))
                 return
-            result = await get_result_from_task
-            # 如果返回值是 stack, 则意味着要循环堆栈.
-            if isinstance(result, CommandStackResult):
-                # 执行完所有的堆栈. 同时设置真实被执行的任务.
-                (await self._fulfill_task_with_its_result_stack(task, result, depth=depth),)
-            else:
-                # 赋值给原来的 task.
-                task.resolve(result)
         except asyncio.CancelledError:
             if not task.done():
                 task.cancel()

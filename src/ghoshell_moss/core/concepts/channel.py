@@ -668,9 +668,10 @@ class ChannelRuntime(ABC):
         is_self_task = len(paths) == 0
         if is_self_task and task.is_bare_task():
             # 对 bare task 做预处理.
-            if command := self.get_own_command(task.meta.name):
+            own_command = self.get_own_command(task.meta.name)
+            if own_command:
                 # 优先用真实的 command, 包括魔法 command 来不足.
-                task.set_command(command)
+                task.set_command(own_command)
             elif task.is_magical():
                 task = self.partial_bare_magical_task(task)
             else:

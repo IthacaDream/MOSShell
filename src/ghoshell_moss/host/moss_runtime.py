@@ -248,10 +248,6 @@ class MossRuntimeImpl(MossRuntime):
         # 启动 app 并且 bringup
         self._bootstrap_after_matrix()
         await self._async_exit_stack.enter_async_context(self._app_store)
-        # 如果存在 fractal hub, 就完成注册.
-        if fractal_hub := self._matrix.container.get(FractalHub):
-            # 不在这里启动 fractal_hub, 因为实际上 fractal hub 是在 matrix 启动的.
-            self._ctml_shell.main_channel.import_channels(fractal_hub.as_channel())
         # 启动 ctml shell
         await self._async_exit_stack.enter_async_context(self._manager_shell_lifecycle())
         # 注册日志到当前 app store 里.
