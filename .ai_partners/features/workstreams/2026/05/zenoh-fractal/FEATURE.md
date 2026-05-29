@@ -8,9 +8,9 @@ id: zenoh-fractal
 milestone: beta
 priority: P0
 status: in-progress
-status_note: Hub/Provider 分离完成，发现机制升级为 subscriber + re-put，单测 5/5 全绿。TUI 改为 IoC 发现。MossRuntime 新增 get_fractal_hub()。修复 /moss.static() 缓存导致 fractal channel 不可见的 bug。待端到端验证。
+status_note: Hub/Provider 分离完成，发现机制 subscriber + re-put，单测 5/5 全绿。Scope 基础设施修复 (parent_cid 跨 duplex, ChannelEventSerializedError 防御) 已合入，远程 scope 取消/超时在 duplex 协议层验证通过。准备端到端验证：远程 moss-as-fractal → 本地 moss-as-mcp，AI 通过 fractal proxy channel 让远程节点说话。
 title: Zenoh Fractal — Hub/Provider 分离与反向注册
-updated: '2026-05-14'
+updated: '2026-05-29'
 ---
 
 # Zenoh Fractal — Hub/Provider 分离与反向注册
@@ -137,13 +137,12 @@ Providers (Channel):   {prefix}/{hub_name}/providers/{node_name}
 
 ### 待完成
 
-| 任务 | 优先级 |
-|---|---|
-| 端到端验证 (两个 workspace) | P1 |
-| 环境发现链路验证 (providers/contracts) | P1 |
-| 推拉混合发现 (liveness + queryable) | P2 |
-| Fractal 体系 how-to 文档 | P2 |
-| 环境发现使用 how-to 文档 | P2 |
+| 任务 | 优先级 | 状态 |
+|---|---|---|
+| 端到端验证 (远程 Provider → 本地 Hub → AI) | P0 | 计划已对齐，待执行 |
+| 推拉混合发现 (liveness + queryable) | P2 | 待端到端后 |
+| Fractal 体系 how-to 文档 | P2 | 待端到端后 |
+| 环境发现使用 how-to 文档 | P2 | 待端到端后 |
 
 ### Out of scope (另开 feature)
 
@@ -296,6 +295,41 @@ Providers (Channel):   {prefix}/{hub_name}/providers/{node_name}
 **效果**: `/moss.static()` 现在先刷新 metas（重新评估所有 channel 的 `is_available()`），
 再生成 static 输出。fractal channel 和已 open 的节点 channel 正确显示。
 
+### 12. Scope 基础设施修复 — 远程取消/超时跨 duplex 传播 (2026-05-26 ~ 2026-05-28)
+
+**背景**: 在 zenoh fractal 端到端验证前，duplex 协议层的 scope 语义需要能跨越 bridge 传播到 provider 侧。
+否则远程 scope timeout、until='any' 等时序控制会在 proxy 侧失效。
+
+**涉及的 commits** (review by deepseek-v4):
+
+| Commit | 日期 | 内容 |
+|---|---|---|
+| `ec24fc2` | 5/26 | `ChannelMeta.proxy: list[str] → bool`，bare/magic task pipeline |
+| `4a4a56d` | 5/27 | `parent_cid` 跨 duplex 传播，`ChannelEventSerializedError` 防御，magic command 可见性治理 |
+| `9699a6d` | 5/28 | 远程 scope 集成测试（timeout / until='any' / 并行 proxy） |
+
+**关键改动**:
+
+1. **`parent_cid` 跨 duplex 传播** — `CommandCallEvent` 新增 `parent_command_id` 和 `delta_arg` 字段。
+   task 层级关系从 interpreter → duplex → provider 贯通，scope 取消时能级联取消远程任务。
+
+2. **`ChannelMeta.proxy: bool`** — 每个 proxy 节点自标记为 remote，不再由 root 集中管理 `proxy: list[str]`。
+   `DuplexChannelContext` 同步 metas 时统一设置 `virtual=True, proxy=True`。
+
+3. **`ChannelEventSerializedError`** — 包裹 pydantic 序列化错误，proxy 侧 task fail 而不是 bridge 崩溃。
+   新增 `send_event_model_to_provider()` 统一事件发送 + 序列化异常处理。
+
+4. **Magic command 可见性治理** — 只暴露 `__content__` 给模型；`__scope__`、`__enter__`、`__exit__` 隐藏。
+   Provider 侧 magic 命令通过 bare task pipeline 在运行时解析。
+
+5. **远程 scope 测试验证** (thread bridge):
+   - `test_remote_scope_timeout_cancels_proxy_command` — timeout 取消跨 duplex 传播
+   - `test_remote_scope_until_any_cancels_slower_task` — until='any' 正确取消慢任务
+   - `test_remote_two_proxy_channels_parallel` — 两个 proxy channel 并行互不阻塞
+
+**对 zenoh fractal 的影响**: `ZenohProxyChannel` 继承 `DuplexChannelProxy`，上述修复对其同样生效。
+之前的风险点——scope 取消在跨 zenoh 传输时丢失、序列化异常导致 bridge 断开——现在有了协议层保障。
+
 ### 11. FractalServeState 从创建者变为观测者 (2026-05-14)
 
 **决策**: `FractalServeState` 不再自己创建 Hub 和管理 channel，改为从 `runtime.get_fractal_hub()` 发现已有 Hub。
@@ -380,54 +414,94 @@ Providers (Channel):   {prefix}/{hub_name}/providers/{node_name}
 
 ---
 
-### 命题 2: 环境注册验证 (待人类执行)
+### 命题 2: 端到端验证 (2026-05-29 对齐, 待执行)
 
-**目标**: 验证 FractalHub 从环境声明到运行时发现的完整链路。
+**前置条件**: Scope 基础设施修复已合入 (`ec24fc2`, `4a4a56d`, `9699a6d`)。单测 5/5 全绿。
+`.moss_ws` 的 `providers.py` 已注册 `ZenohFractalHubProvider` 和 `ZenohFractalCellContractProvider`。
 
-**验证路径** (按顺序执行):
+**目标**: 验证跨进程（最终跨机器）的完整 fractal 链路：远程 Provider → 本地 Hub → AI 通过 proxy channel 执行远程命令。
 
-```bash
-# Step 1: 确认 FractalHub contract 已在代码中定义
-.venv/bin/moss --ai codex get-interface ghoshell_moss.core.blueprint.host:FractalHub
-# 预期: 看到 name(), usage(), get_connected(), as_channel(), status() 等抽象方法
+**拓扑**:
 
-# Step 2: 确认 ZenohFractalHubProvider 已实现
-.venv/bin/moss --ai codex get-interface ghoshell_moss.host.fractal.zenoh_fractal:ZenohFractalHubProvider
-# 预期: contract() -> FractalHub, factory() -> ZenohSessionFractalHub
-
-# Step 3: 确认 config 文件存在
-ls src/ghoshell_moss/host/stubs/workspace/configs/zenoh_config_fractal_hub.json5
-# 预期: 文件存在，内容为 peer mode + random port
-
-# Step 4: 确认 FractalHub 出现在 contracts 中
-.venv/bin/moss --ai manifests contracts ghoshell_moss.core.blueprint.host:FractalHub
-# 预期: 如果已注册，显示 contract 条目；如果未注册，需要完成 contract 注册步骤
-
-# Step 5: 确认 ZenohFractalHubProvider 出现在 providers 中
-.venv/bin/moss --ai manifests providers | grep -i fractal
-# 预期: 看到 ZenohFractalHubProvider 条目
-
-# Step 6 (可选): 创建新 workspace 验证完整链路
-.venv/bin/moss ws init test_fractal
-cd test_fractal
-.venv/bin/moss --ai manifests providers | grep -i fractal
-.venv/bin/moss --ai manifests contracts | grep -i fractal
+```
+远程节点 (Provider)                       本地节点 (Hub + MCP)
+─────────────────────                     ────────────────────────
+moss-as-fractal --mode X                  moss-as-mcp --mode default
+  │                                         │
+  MossRuntime (带 shell)                    MossRuntime (带 shell)
+  ZenohFractalCellProvider                  ZenohFractalHub (IoC 自动创建)
+  zenoh session ──connect──→               zenoh session (listen :20779)
+  │                                         │
+  re-put manifest ─────────────────────→  subscriber 发现
+  ZenohChannelProvider ←── duplex ───→  ZenohProxyChannel
+  (暴露 shell.main_channel)               (虚拟 proxy, 在 fractal 下)
+                                             │
+                                           AI (Claude Code via MCP)
+                                           看到 fractal channel
+                                           执行 accept + 远程命令
 ```
 
-**当前状态**:
-- `ZenohFractalHubProvider` 已注册到 stubs `providers.py`
-- `FractalHub` contract 注册机制待确认（可能需要额外的 contract 声明）
-- `.moss_ws` 是本地 workspace，需手动同步或重建
+**步骤**:
+
+**Phase A — 人类操作 (本地 Hub 启动)**
+
+```bash
+# 本地启动 MCP (Hub 侧)
+moss-as-mcp --mode default
+# Hub 由 Matrix 自动创建，zenoh session 监听 tcp/0.0.0.0:20779
+# subscriber 等待 manifests/**
+```
+
+**Phase B — 人类操作 (远程 Provider 启动)**
+
+```bash
+# 远程机器上 (或本地另一进程)
+moss-as-fractal --mode <mode>
+# CellProvider 创建独立 zenoh session
+# connect 到本地 IP:20779
+# re-put manifest + liveness token
+```
+
+**Phase C — AI 验证 (通过 MCP)**
+
+1. **发现**: 查看 shell channel 树，确认 `fractal` channel 存在且 context 显示待批准节点
+2. **批准**: `<fractal:accept name="节点名"/>` — 批准远程节点
+3. **刷新**: 刷新 metas 后，远程 main_channel 的命令出现在 `fractal.节点名.*` 下
+4. **说话**: `<fractal.节点名:__content__>你好，连接成功</fractal.节点名:__content__>`
+   — 远程主通道的 `__content__` 默认触发语音输出（Speech module）
+5. **验证通过**: 远程设备发出声音
+
+**Fractal mode 无关性**: Hub 的 channel 由 Matrix `__aenter__` 时通过 `container.bound(FractalHub)` 检测并注入 shell，
+不经过 channel manifest 的 K5 合并。因此任何 mode 都能看到 fractal channel。
+
+**AI 交互要点** (CTML v1.0):
+
+- Fractal channel 提供 `accept(name)` 和 `ignore(name)` 两个自有命令
+- 批准后，远程节点作为 virtual children 出现，每个 child 是 `ZenohProxyChannel`
+- 远程主通道的 `__content__` 默认 = 语音输出
+- 使用开闭标签传文本: `<fractal.node_name:__content__>文本</fractal.node_name:__content__>`
+- Scope 取消语义跨 duplex 传播已验证 (thread bridge)，zenoh 链路上理论一致
+
+**配置注意事项**:
+
+- 本地 Hub 的 `zenoh_config_fractal_hub.json5`: `listen: ["tcp/0.0.0.0:20779"]`
+- 远程 Provider 的 `zenoh_config_fractal.json5`: `connect: ["tcp/<本地IP>:20779"]`
+- 本地两进程验证用 `127.0.0.1:20779`，跨机器需替换为实际 IP
 
 **阻塞点预判**:
-- `moss manifests contracts FractalHub` 返回 0 结果 → contract 注册机制需要单独处理
-- 新 workspace 的 `providers.py` 来自 stubs 拷贝 → stubs 更新后新 ws 自动包含
+
+- 防火墙/NAT 阻断 zenoh peer 连接
+- Hub 未启动时 fractal channel 在 shell 树中可见但 `is_available()=False`
+- `/moss.static()` 缓存问题已修复 (命题 1 前的 fix)，但首次可能需显式 refresh
+- 远程 mode 需确保 `providers.py` 注册了 `ZenohFractalCellContractProvider`
+
+**依赖**: 命题 3 (How-To 文档) 在验证通过后执行。
 
 ---
 
 ### 命题 3: How-To 文档 (待端到端验证完成后)
 
-**前置条件**: 命题 2 验证通过，人类完成端到端测试。
+**前置条件**: 命题 2 端到端验证通过。
 
 **需记录的 how-to**:
 
