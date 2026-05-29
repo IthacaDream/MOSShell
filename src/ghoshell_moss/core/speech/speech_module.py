@@ -5,7 +5,7 @@ from ghoshell_moss.core.blueprint.channel_builder import CommandUtil
 from ghoshell_moss.core.blueprint.states_channel import ChannelModule
 from ghoshell_moss.core.concepts.command import Command, PyCommand
 from ghoshell_moss.contracts.speech import Speech, SpeechStream, TTSSpeech
-from ghoshell_moss.core.speech.mock import MockSpeech
+from ghoshell_moss.core.speech.null import NullSpeech
 
 
 def build_content_command(speech: Speech) -> Command:
@@ -152,7 +152,7 @@ class SpeechChannelModule(ChannelModule):
         return self._own_commands
 
     async def on_startup(self) -> None:
-        self._speech = CommandUtil.get_contract(Speech) or MockSpeech()
+        self._speech = CommandUtil.get_contract(Speech) or NullSpeech()
         factory = _SpeechCommandFactory(self._speech)
         commands = {}
         if self._register_content:

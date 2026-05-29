@@ -30,12 +30,14 @@ class MossInReachyMini:
             default_state: str = "waken",
             name: str = "reachy_mini",
             description: str = "reachy mini robot",
+            allow_vision: bool = False,
     ):
         self._mini = mini
         self.logger = logger
         self._default_state = default_state
         self._name = name
         self._description = description
+        self._allow_vision = allow_vision
 
         # layer 1: body components
         self._head = Head(mini)
@@ -89,9 +91,10 @@ class MossInReachyMini:
             if name != default_state:
                 channel.with_state(state)
 
-        channel.import_channels(
-            self._vision.as_channel(),
-        )
+        if self._allow_vision:
+            channel.import_channels(
+                self._vision.as_channel(),
+            )
 
         return channel
 
@@ -114,10 +117,12 @@ class ReachyMiniChannelCreator(ChannelCreator):
             name: str = "",
             description: str = "",
             default_state: str = "waken",
+            allow_vision: bool = False,
     ) -> None:
         self._name = name
         self._description = description
         self._default_state = default_state
+        self._allow_vision = allow_vision
 
     def factory(self, container: IoCContainer) -> Channel:
         ws = container.force_fetch(Workspace)
@@ -135,5 +140,6 @@ class ReachyMiniChannelCreator(ChannelCreator):
             default_state=self._default_state,
             name=self._name,
             description=self._description,
+            allow_vision=self._allow_vision,
         )
         return reachy_mini.as_channel()

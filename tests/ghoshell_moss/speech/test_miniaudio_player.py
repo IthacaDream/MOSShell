@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from ghoshell_moss.contracts.speech import AudioFormat
-from ghoshell_moss.core.speech.player import MiniAudioStreamPlayer
+from ghoshell_moss.core.speech.player import VirtualStreamPlayer
 
 
 def _make_sine(duration: float, sample_rate: int, freq: float = 440.0, amplitude: float = 0.3) -> np.ndarray:
@@ -16,7 +16,7 @@ def _make_sine(duration: float, sample_rate: int, freq: float = 440.0, amplitude
 @pytest.mark.asyncio
 async def test_basic_lifecycle():
     """start → close 基本生命周期."""
-    player = MiniAudioStreamPlayer(sample_rate=44100, channels=1)
+    player = VirtualStreamPlayer(sample_rate=44100, channels=1)
     assert not player.is_closed()
 
     await player.start()
@@ -29,7 +29,7 @@ async def test_basic_lifecycle():
 @pytest.mark.asyncio
 async def test_add_and_wait():
     """add 音频片段后 wait_play_done 正常返回."""
-    player = MiniAudioStreamPlayer(sample_rate=44100, channels=1)
+    player = VirtualStreamPlayer(sample_rate=44100, channels=1)
     await player.start()
 
     audio = _make_sine(0.05, 44100)
@@ -44,7 +44,7 @@ async def test_add_and_wait():
 @pytest.mark.asyncio
 async def test_add_pcm_f32le():
     """PCM_F32LE 格式自动转为 int16."""
-    player = MiniAudioStreamPlayer(sample_rate=16000, channels=1)
+    player = VirtualStreamPlayer(sample_rate=16000, channels=1)
     await player.start()
 
     t = np.linspace(0, 0.05, int(16000 * 0.05), endpoint=False)
@@ -58,7 +58,7 @@ async def test_add_pcm_f32le():
 @pytest.mark.asyncio
 async def test_add_resample():
     """不同采样率自动重采样."""
-    player = MiniAudioStreamPlayer(sample_rate=16000, channels=1)
+    player = VirtualStreamPlayer(sample_rate=16000, channels=1)
     await player.start()
 
     audio_24k = _make_sine(0.05, 24000)
@@ -71,13 +71,11 @@ async def test_add_resample():
 @pytest.mark.asyncio
 async def test_is_playing():
     """add 后 is_playing() 返回 True，播放完毕后返回 False."""
-    player = MiniAudioStreamPlayer(sample_rate=44100, channels=1)
+    player = VirtualStreamPlayer(sample_rate=44100, channels=1)
     await player.start()
 
-    # 播放前
     assert not player.is_playing()
 
-    # 添加一段音频
     audio = _make_sine(0.1, 44100)
     player.add(audio, audio_type=AudioFormat.PCM_S16LE, rate=44100)
     assert player.is_playing()
@@ -90,15 +88,14 @@ async def test_is_playing():
 
 @pytest.mark.asyncio
 async def test_clear():
-    """clear 清空播放队列."""
-    player = MiniAudioStreamPlayer(sample_rate=44100, channels=1)
+    """clear 清空播放队列并立即停止."""
+    player = VirtualStreamPlayer(sample_rate=44100, channels=1)
     await player.start()
 
     audio = _make_sine(0.2, 44100)
     player.add(audio, audio_type=AudioFormat.PCM_S16LE, rate=44100)
 
     await player.clear()
-    # clear 后不应阻塞
     assert not player.is_playing()
 
     await player.close()
@@ -107,7 +104,7 @@ async def test_clear():
 @pytest.mark.asyncio
 async def test_multiple_add_streaming():
     """多次 add 模拟流式播放."""
-    player = MiniAudioStreamPlayer(sample_rate=44100, channels=1)
+    player = VirtualStreamPlayer(sample_rate=44100, channels=1)
     await player.start()
 
     for _ in range(10):
@@ -121,7 +118,7 @@ async def test_multiple_add_streaming():
 @pytest.mark.asyncio
 async def test_estimated_end_time_monotonic():
     """estimated_end_time 随 add 单调递增."""
-    player = MiniAudioStreamPlayer(sample_rate=44100, channels=1)
+    player = VirtualStreamPlayer(sample_rate=44100, channels=1)
     await player.start()
 
     prev_time = 0.0
@@ -138,11 +135,11 @@ async def test_estimated_end_time_monotonic():
 @pytest.mark.asyncio
 async def test_double_start_idempotent():
     """重复 start 不创建第二个线程."""
-    player = MiniAudioStreamPlayer(sample_rate=44100, channels=1)
+    player = VirtualStreamPlayer(sample_rate=44100, channels=1)
     await player.start()
 
     thread_id_1 = player._thread.ident
-    await player.start()  # should be no-op
+    await player.start()
     thread_id_2 = player._thread.ident
 
     assert thread_id_1 == thread_id_2
@@ -153,11 +150,32 @@ async def test_double_start_idempotent():
 @pytest.mark.asyncio
 async def test_add_after_close_is_noop():
     """close 后 add 不抛异常."""
-    player = MiniAudioStreamPlayer(sample_rate=44100, channels=1)
+    player = VirtualStreamPlayer(sample_rate=44100, channels=1)
     await player.start()
     await player.close()
 
     audio = _make_sine(0.05, 44100)
-    # 不应抛异常
     end_time = player.add(audio, audio_type=AudioFormat.PCM_S16LE, rate=44100)
     assert end_time > 0
+
+
+@pytest.mark.asyncio
+async def test_clear_interrupts_playback():
+    """clear 后 is_playing 立即返回 False，wait_play_done 不阻塞."""
+    player = VirtualStreamPlayer(sample_rate=44100, channels=1)
+    await player.start()
+
+    # 添加一段长音频
+    audio = _make_sine(2.0, 44100)
+    player.add(audio, audio_type=AudioFormat.PCM_S16LE, rate=44100)
+    assert player.is_playing()
+
+    # clear 立即中断
+    await player.clear()
+    assert not player.is_playing()
+
+    # wait_play_done 应立即返回（无需等 2 秒）
+    done = await player.wait_play_done(timeout=0.5)
+    assert done
+
+    await player.close()

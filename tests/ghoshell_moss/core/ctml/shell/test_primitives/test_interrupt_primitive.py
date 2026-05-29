@@ -48,6 +48,7 @@ async def test_interrupt_in_ctml():
             for i in range(10):
                 interpreter.feed(f"<chan{i}:foo/>")
             # sleep 10 also cleared
+            await asyncio.sleep(0.1)
             interpreter.feed("<sleep duration='10'/><interrupt/>")
             interpreter.commit()
             await interpreter.wait_stopped()

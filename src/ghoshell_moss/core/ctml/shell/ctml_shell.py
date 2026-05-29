@@ -34,7 +34,7 @@ from ghoshell_moss.core.ctml.versions import get_moss_ctml_meta_instruction, CTM
 from ghoshell_moss.core.ctml.v1_0.prompts import make_static_messages, make_dynamic_messages
 from ghoshell_moss.core.ctml.shell.ctml_main import create_ctml_main_chan, default_primitive_map
 from ghoshell_moss.core.helpers import ThreadSafeEvent, ThreadSafeFuture
-from ghoshell_moss.core.speech.mock import MockSpeech
+from ghoshell_moss.core.speech.null import NullSpeech
 from ghoshell_moss.core.speech.speech_module import build_content_command
 from ghoshell_moss.contracts.speech import Speech
 from collections import deque
@@ -197,7 +197,7 @@ class CTMLShell(MOSShell[PrimeChannel]):
         else:
             speech = self._container.get(Speech)
             if speech is None:
-                speech = MockSpeech()
+                speech = NullSpeech()
                 self._container.set(Speech, speech)
             self._speech = speech
 

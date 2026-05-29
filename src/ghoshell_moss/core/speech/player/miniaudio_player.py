@@ -35,17 +35,15 @@ class MiniAudioStreamPlayer(BaseAudioStreamPlayer):
         )
         self._playback: Optional[miniaudio.PlaybackDevice] = None
 
-    def _audio_stream_start(self):
-        self._data_queue: queue.Queue[bytes] = queue.Queue()
-        self._buf = b""  # 未播放的剩余字节
+    def _make_generator(self):
+        """创建 audio generator，每次 yield 精确 frame_count 的字节。"""
+        bytes_per_frame = self.channels * 2  # SIGNED16 = 2 bytes/sample
 
         def _audio_generator():
-            bytes_per_frame = self.channels * 2  # SIGNED16 = 2 bytes/sample
             frames_needed = yield b""  # prime
             while not self._stop_event.is_set():
                 bytes_needed = (frames_needed or 0) * bytes_per_frame
 
-                # 从队列填充缓冲区直到凑够所需字节
                 while len(self._buf) < bytes_needed:
                     try:
                         self._buf += self._data_queue.get_nowait()
@@ -56,21 +54,42 @@ class MiniAudioStreamPlayer(BaseAudioStreamPlayer):
                     frames_needed = yield self._buf[:bytes_needed]
                     self._buf = self._buf[bytes_needed:]
                 else:
-                    # 数据不足，用静音补足
                     missing = max(bytes_needed - len(self._buf), 0)
                     result = self._buf + b"\x00" * missing
                     self._buf = b""
                     frames_needed = yield result
 
-        gen = _audio_generator()
-        next(gen)  # prime
+        return _audio_generator()
 
+    def _start_playback(self):
+        """启动 miniaudio 播放设备。"""
+        gen = self._make_generator()
+        next(gen)  # prime
         self._playback = miniaudio.PlaybackDevice(
             output_format=miniaudio.SampleFormat.SIGNED16,
             nchannels=self.channels,
             sample_rate=self.sample_rate,
         )
         self._playback.start(gen)
+
+    def _audio_stream_start(self):
+        self._data_queue: queue.Queue[bytes] = queue.Queue()
+        self._buf = b""
+        self._start_playback()
+
+    async def clear(self) -> None:
+        """清空播放队列并立即停止音频输出。"""
+        # 停止 miniaudio 设备 → 立即中断所有音频输出
+        if self._playback is not None:
+            self._playback.stop()
+            self._playback = None
+        # 清空内部缓冲区
+        self._data_queue = queue.Queue()
+        self._buf = b""
+        # 重启设备，准备接收新音频
+        self._start_playback()
+        # 父类清空 _audio_queue 并重置时间估算
+        await super().clear()
 
     def _audio_stream_write(self, data: np.ndarray):
         self._data_queue.put(data.tobytes())
