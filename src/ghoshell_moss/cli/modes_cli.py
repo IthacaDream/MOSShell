@@ -157,7 +157,7 @@ def _resolve_mode_dir(mode) -> Path | None:
 def create_mode(
         name: str = typer.Argument(..., help="Unique name for the new mode."),
         description: str = typer.Option("", "--desc", "-d", help="One-line description."),
-        apps: List[str] = typer.Option(["*"], "--app", "-a", help="Allowed app patterns (can repeat)."),
+        apps: List[str] = typer.Option([], "--app", "-a", help="Allowed app patterns (can repeat)."),
         up: List[str] = typer.Option([], "--up", "-u", help="Bring-up app patterns (can repeat)."),
 ):
     """

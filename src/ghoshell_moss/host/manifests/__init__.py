@@ -3,6 +3,7 @@ from ghoshell_moss.core.blueprint.manifests import (
     Manifests, ConfigInfo, TopicInfo, ProviderInfo, CtmlVersionInfo,
     ResourceStorageItem, NucleusMetaInfo,
 )
+from ghoshell_moss.core.codex.discover import ScanError
 from .configs import search_config_infos_from_package
 from .providers import search_provider_infos_from_package
 from .topics import search_topic_infos_from_package
@@ -31,8 +32,13 @@ class PackageManifests(Manifests):
             self,
             root_package_name: str,
             ctml_versions: dict[str, CtmlVersionInfo] | None = None,
+            *,
+            strict: bool = False,
+            errors: list[ScanError] | None = None,
     ):
         self.root_package_name = root_package_name
+        self._strict = strict
+        self._errors = errors
         self._config_infos: dict[str, ConfigInfo] | None = None
         self._provider_infos: list[ProviderInfo] | None = None
         self._topic_infos: dict[str, TopicInfo] | None = None
@@ -42,15 +48,24 @@ class PackageManifests(Manifests):
         self._resource_storages: PackageResourceStorages | None = None
         self._nuclei: dict[str, NucleusMetaInfo] | None = None
 
+    @property
+    def scan_errors(self) -> list[ScanError]:
+        """Errors collected during the last scan, if an error collector was provided."""
+        return self._errors or []
+
     @classmethod
-    def from_environment(cls, env: Environment | None = None) -> Self:
+    def from_environment(
+        cls, env: Environment | None = None,
+        *, strict: bool = False, errors: list[ScanError] | None = None,
+    ) -> Self:
         """
         找到环境下的声明资源.
         """
         env = env or Environment.discover()
         env.bootstrap()
         ctml_versions = cls.find_ctml_versions_from_env(env=env)
-        return cls(ENVIRONMENT_MANIFESTS_ROOT_PACKAGE, ctml_versions=ctml_versions)
+        return cls(ENVIRONMENT_MANIFESTS_ROOT_PACKAGE, ctml_versions=ctml_versions,
+                   strict=strict, errors=errors)
 
     @classmethod
     def find_ctml_versions_from_env(cls, env: Environment) -> dict[str, CtmlVersionInfo]:
@@ -66,7 +81,10 @@ class PackageManifests(Manifests):
         return ctml_versions
 
     @classmethod
-    def from_environment_moss_mode(cls, mode: str, env: Environment | None = None) -> Self:
+    def from_environment_moss_mode(
+        cls, mode: str, env: Environment | None = None,
+        *, strict: bool = False, errors: list[ScanError] | None = None,
+    ) -> Self:
         """
         找到模式下的声明资源.
         """
@@ -74,12 +92,15 @@ class PackageManifests(Manifests):
         env.bootstrap()
         root_package_name = ENVIRONMENT_MODE_MANIFESTS_ROOT_PACKAGE.format(mode=mode)
         ctml_versions = cls.find_ctml_versions_from_env(env=env)
-        return cls(root_package_name, ctml_versions=ctml_versions)
+        return cls(root_package_name, ctml_versions=ctml_versions,
+                   strict=strict, errors=errors)
 
     def channels(self) -> dict[str, Channel]:
         if self._channels is None:
             channels_package = '.'.join([self.root_package_name, 'channels'])
-            found = search_main_channel_from_manifest(channels_package)
+            found = search_main_channel_from_manifest(
+                channels_package, strict=self._strict, errors=self._errors,
+            )
             if found is not None:
                 channel, found_module = found
                 self._channels = {"__main__": channel}
@@ -99,25 +120,33 @@ class PackageManifests(Manifests):
     def configs(self) -> dict[str, ConfigInfo]:
         if self._config_infos is None:
             configs_package = '.'.join([self.root_package_name, 'configs'])
-            self._config_infos = search_config_infos_from_package(configs_package)
+            self._config_infos = search_config_infos_from_package(
+                configs_package, strict=self._strict, errors=self._errors,
+            )
         return self._config_infos
 
     def topics(self) -> dict[str, TopicInfo]:
         if self._topic_infos is None:
             topics_package = '.'.join([self.root_package_name, 'topics'])
-            self._topic_infos = search_topic_infos_from_package(topics_package)
+            self._topic_infos = search_topic_infos_from_package(
+                topics_package, strict=self._strict, errors=self._errors,
+            )
         return self._topic_infos
 
     def providers(self) -> list[ProviderInfo]:
         if self._provider_infos is None:
             providers_package = '.'.join([self.root_package_name, 'providers'])
-            self._provider_infos = list(search_provider_infos_from_package(providers_package))
+            self._provider_infos = list(search_provider_infos_from_package(
+                providers_package, strict=self._strict, errors=self._errors,
+            ))
         return self._provider_infos
 
     def resource_storages(self) -> PackageResourceStorages:
         if self._resource_storages is None:
             resources_package = '.'.join([self.root_package_name, 'resources'])
-            self._resource_storages = PackageResourceStorages(resources_package)
+            self._resource_storages = PackageResourceStorages(
+                resources_package, strict=self._strict, errors=self._errors,
+            )
         return self._resource_storages
 
     NUCLEI_SUB_PACKAGE = 'nuclei'
@@ -125,7 +154,9 @@ class PackageManifests(Manifests):
     def nuclei(self) -> dict[str, NucleusMetaInfo]:
         if self._nuclei is None:
             nuclei_package = '.'.join([self.root_package_name, self.NUCLEI_SUB_PACKAGE])
-            self._nuclei = search_nucleus_infos(nuclei_package)
+            self._nuclei = search_nucleus_infos(
+                nuclei_package, strict=self._strict, errors=self._errors,
+            )
         return self._nuclei
 
     def resource_storage_manifests(self) -> list[ResourceStorageItem]:
@@ -191,15 +222,20 @@ class MergedManifests(Manifests):
             self._nuclei.update(manifest.nuclei())
 
     @classmethod
-    def from_environment_mode(cls, *, mode: str = '', env: Environment | None = None) -> Manifests:
+    def from_environment_mode(
+        cls, *, mode: str = '', env: Environment | None = None,
+        strict: bool = False, errors: list[ScanError] | None = None,
+    ) -> Manifests:
         """
         默认根据模式来生成.
         """
         env = env or Environment.discover()
         env.bootstrap()
-        env_manifests = PackageManifests.from_environment(env)
+        env_manifests = PackageManifests.from_environment(env, strict=strict, errors=errors)
         if mode:
-            mode_manifests = PackageManifests.from_environment_moss_mode(mode, env)
+            mode_manifests = PackageManifests.from_environment_moss_mode(
+                mode, env, strict=strict, errors=errors,
+            )
             return cls([env_manifests, mode_manifests])
         return env_manifests
 

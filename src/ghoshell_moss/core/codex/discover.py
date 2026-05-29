@@ -13,16 +13,17 @@ Author / AI Persona:
 =============================================================================
 """
 
+import concurrent.futures
 import inspect
 import importlib
 import importlib.util
 import pkgutil
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Iterator, Optional, Tuple, TypeVar
 
 __all__ = [
     'ModuleManifest', 'MemberPredicate',
-    'CodexReflectionError',
+    'CodexReflectionError', 'ScanError',
     'scan_module', 'scan_package',
     'is_subclass_of', 'is_class', 'is_routine', 'is_native_to',
 ]
@@ -40,6 +41,18 @@ class CodexReflectionError(Exception):
 
 
 @dataclass
+class ScanError:
+    """Captures a non-fatal error encountered during package scanning.
+
+    When ``strict=False`` (the default), scanners collect these rather than
+    raising, so callers can inspect what went wrong after the scan completes.
+    """
+    module_path: str
+    exception: Exception
+    stage: str  # "scan" | "import" | "iterate"
+
+
+@dataclass
 class ModuleManifest:
     """
     A lightweight reference to a module in the runtime environment.
@@ -49,6 +62,7 @@ class ModuleManifest:
     module_path: str
     file_path: Optional[str] = None
     is_package: bool = False
+    timeout: Optional[float] = None
 
     @property
     def module_name(self) -> str:
@@ -60,6 +74,8 @@ class ModuleManifest:
         Lazily loads and returns the actual Python ModuleType object.
         Code execution (import) ONLY happens when this property is accessed.
         """
+        if self.timeout is not None:
+            return _import_with_timeout(self.module_path, self.timeout)
         try:
             return importlib.import_module(self.module_path)
         except Exception as e:
@@ -110,7 +126,23 @@ class ModuleManifest:
 # Discovery & Scanning APIs (codex.pkg)
 # ============================================================================
 
-def scan_module(module_path: str) -> ModuleManifest:
+def _import_with_timeout(module_path: str, timeout: float) -> Any:
+    """Import a module in a thread, raising CodexReflectionError on timeout."""
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(importlib.import_module, module_path)
+        try:
+            return future.result(timeout=timeout)
+        except concurrent.futures.TimeoutError:
+            raise CodexReflectionError(
+                f"Import of '{module_path}' timed out after {timeout}s"
+            )
+        except Exception as e:
+            raise CodexReflectionError(
+                f"Failed to dynamically load module '{module_path}': {str(e)}"
+            )
+
+
+def scan_module(module_path: str, *, timeout: float | None = None) -> ModuleManifest:
     """
     Scans a single module path and returns its Manifest WITHOUT executing its code.
     This relies on importlib spec finding, making it incredibly fast and safe.
@@ -127,7 +159,8 @@ def scan_module(module_path: str) -> ModuleManifest:
         return ModuleManifest(
             module_path=module_path,
             file_path=spec.origin,
-            is_package=is_package
+            is_package=is_package,
+            timeout=timeout,
         )
     except Exception as e:
         raise CodexReflectionError(f"Error scanning module '{module_path}': {e}")
@@ -138,20 +171,37 @@ def scan_package(
         max_depth: int = 1,
         *,
         parse: Callable[[ModuleManifest], bool] | None = None,
+        strict: bool = False,
+        errors: list[ScanError] | None = None,
+        timeout: float | None = None,
 ) -> Iterator[ModuleManifest]:
     """
     Recursively scans a package and yields ModuleManifests up to max_depth.
 
     Depth 0: Yields only the root package.
     Depth 1: Yields the root package + direct submodules/subpackages.
+
+    Args:
+        strict: When True, exceptions propagate instead of being silently skipped.
+        errors: When provided, suppressed errors are appended to this list
+                (even when strict=False).
+        timeout: Maximum seconds for any single module import.
     """
     if parse is None:
         parse = lambda x: True
+
+    def _collect(module_path: str, exc: Exception, stage: str) -> None:
+        if errors is not None:
+            errors.append(ScanError(module_path=module_path, exception=exc, stage=stage))
+
     try:
-        root_manifest = scan_module(package_path)
+        root_manifest = scan_module(package_path, timeout=timeout)
         if parse(root_manifest):
             yield root_manifest
-    except CodexReflectionError:
+    except CodexReflectionError as e:
+        _collect(package_path, e, "scan")
+        if strict:
+            raise
         return  # Skip if root cannot be scanned
 
     if not root_manifest.is_package or max_depth <= 0:
@@ -166,18 +216,25 @@ def scan_package(
 
                 if module_info.ispkg:
                     # Recursive yield from sub-packages
-                    yield from scan_package(submodule_path, max_depth=max_depth - 1, parse=parse)
+                    yield from scan_package(
+                        submodule_path, max_depth=max_depth - 1,
+                        parse=parse, strict=strict, errors=errors, timeout=timeout,
+                    )
                 else:
                     # Yield single module
                     try:
-                        got = scan_module(submodule_path)
+                        got = scan_module(submodule_path, timeout=timeout)
                         if parse(got):
                             yield got
-                    except CodexReflectionError:
+                    except CodexReflectionError as e:
+                        _collect(submodule_path, e, "scan")
+                        if strict:
+                            raise
                         continue
-    except CodexReflectionError:
-        # Silently ignore unreadable package directories during deep scans
-        pass
+    except CodexReflectionError as e:
+        _collect(package_path, e, "scan")
+        if strict:
+            raise
 
 
 # ============================================================================

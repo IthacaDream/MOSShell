@@ -7,6 +7,7 @@ from ghoshell_moss.core.blueprint.host import (
 from ghoshell_moss.core.blueprint.ghost import GhostMeta
 from ghoshell_moss.core.blueprint.manifests import Manifests
 from ghoshell_moss.core.blueprint.matrix import Matrix
+from ghoshell_moss.core.codex.discover import ScanError
 from ghoshell_moss.contracts.workspace import LocalWorkspace, Workspace
 from ghoshell_moss.core.blueprint.environment import Environment
 from ghoshell_moss.host.manifests import PackageManifests, MergedManifests
@@ -30,7 +31,11 @@ class Host(MossHost):
             env: Environment | None = None,
             mode: Mode | str | None = None,
             session_scope: str | None = None,
+            strict_scan: bool = False,
     ):
+        self._strict_scan = strict_scan
+        self._scan_errors: list[ScanError] = []
+
         self._env = env or Environment.discover()
         if mode is not None:
             self._env.set_mode(mode if isinstance(mode, str) else mode.name)
@@ -41,7 +46,9 @@ class Host(MossHost):
         self._workspace = LocalWorkspace(self.env.workspace_path)
         if not self._workspace.root_path().exists():
             raise RuntimeError()
-        self._env_manifest = PackageManifests.from_environment(self.env)
+        self._env_manifest = PackageManifests.from_environment(
+            self.env, strict=strict_scan, errors=self._scan_errors,
+        )
 
         self._env_modes: dict[str, Mode] | None = None
         self._ghosts: dict[str, GhostMeta] | None = None
@@ -105,21 +112,34 @@ class Host(MossHost):
     def mode(self) -> Mode:
         return self._moss_mode
 
+    @property
+    def scan_errors(self) -> list[ScanError]:
+        """Aggregated scan errors from manifests, modes, and ghosts discovery."""
+        return list(self._scan_errors)
+
     def all_modes(self) -> dict[str, Mode]:
         if self._env_modes is None:
             try:
                 self._env_modes = {
-                    mode.name: mode for mode in list_modes_from_root_package()
+                    mode.name: mode for mode in list_modes_from_root_package(
+                        strict=self._strict_scan, errors=self._scan_errors,
+                    )
                 }
             except Exception:
+                if self._strict_scan:
+                    raise
                 self._env_modes = {}
         return self._env_modes
 
     def all_ghosts(self) -> dict[str, GhostMeta]:
         if self._ghosts is None:
             try:
-                self._ghosts = list_ghosts_from_root_package()
+                self._ghosts = list_ghosts_from_root_package(
+                    strict=self._strict_scan, errors=self._scan_errors,
+                )
             except Exception:
+                if self._strict_scan:
+                    raise
                 self._ghosts = {}
         return self._ghosts
 

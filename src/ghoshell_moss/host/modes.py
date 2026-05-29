@@ -1,5 +1,5 @@
 from ghoshell_moss.core.blueprint.host import Mode
-from ghoshell_moss.core.codex.discover import scan_package
+from ghoshell_moss.core.codex.discover import scan_package, ScanError
 from ghoshell_moss.core.blueprint.environment import MODE_STUB_PACKAGE
 from importlib import import_module
 from pathlib import Path
@@ -72,20 +72,27 @@ def new_mode(
     return target_mode_dir
 
 
-def list_modes_from_root_package(package_import_path: str = ROOT_MODES_PACKAGE) -> list[Mode]:
+def list_modes_from_root_package(
+        package_import_path: str = ROOT_MODES_PACKAGE,
+        *,
+        strict: bool = False,
+        errors: list[ScanError] | None = None,
+) -> list[Mode]:
     """
     通过复用 scan_package 逻辑发现所有模式。
     """
     modes = []
     # 我们只关心根包下的一级子包 (max_depth=1)
     # scan_package 第一个产出通常是 ROOT 本身，我们需要跳过它或过滤掉
-    for module_manifest in scan_package(package_import_path, max_depth=1):
+    for module_manifest in scan_package(
+        package_import_path, max_depth=1, strict=strict, errors=errors,
+    ):
         # 排除掉根包本身，只处理子包（即具体的 Mode 包）
         if module_manifest.module_path == package_import_path:
             continue
 
         # 只要是子包，就尝试解析为 Mode
-        mode = find_mode_from_package(module_manifest.module_path)
+        mode = find_mode_from_package(module_manifest.module_path, strict=strict)
         if mode:
             modes.append(mode)
     return modes
@@ -103,10 +110,12 @@ def _ensure_manifest_to_mode(package_path: str, mode: Mode) -> Mode:
     return mode
 
 
-def find_mode_from_package(package_import_path: str) -> Mode | None:
+def find_mode_from_package(package_import_path: str, *, strict: bool = False) -> Mode | None:
     try:
         module = import_module(package_import_path)
     except ImportError:
+        if strict:
+            raise
         return None
 
     mode: Mode | None = None

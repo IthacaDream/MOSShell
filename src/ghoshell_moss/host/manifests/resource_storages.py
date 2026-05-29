@@ -17,7 +17,7 @@ from ghoshell_moss.contracts.resource import (
     ResourceStorageMeta,
 )
 from ghoshell_moss.core.blueprint.manifests import ResourceStorageItem, ResourceStorageInfo
-from ghoshell_moss.core.codex.discover import scan_package
+from ghoshell_moss.core.codex.discover import scan_package, ScanError
 from ghoshell_container import IoCContainer
 from pydantic import Field
 
@@ -68,23 +68,33 @@ class ResourceStorageItemItem(ResourceStorageItem):
 
 def find_resource_storage_metas(
         package_import_path: str,
+        *,
+        strict: bool = False,
+        errors: list[ScanError] | None = None,
 ) -> Iterable[tuple[str, str, str, ResourceStorageMeta]]:
     """
     Scan a package for ResourceStorageMeta instances.
 
     Yields: (module_file, module_path, attr_name, ResourceStorageMeta)
     """
-    for manifest in scan_package(package_import_path, max_depth=2):
+    for manifest in scan_package(package_import_path, max_depth=2, strict=strict, errors=errors):
         try:
             for name, obj in manifest.iter_members(respect_all=True):
                 if isinstance(obj, ResourceStorageMeta):
                     yield manifest.file_path, manifest.module_path, name, obj
-        except Exception:
+        except Exception as e:
+            if strict:
+                raise
+            if errors is not None:
+                errors.append(ScanError(module_path=manifest.module_path, exception=e, stage="iterate"))
             continue
 
 
 def search_resource_storage_metas(
         package_import_path: str = MANIFEST_RESOURCES_PATH,
+        *,
+        strict: bool = False,
+        errors: list[ScanError] | None = None,
 ) -> dict[str, ResourceStorageInfo]:
     """
     Scan and collect ResourceStorageMeta instances into StorageMetaInfo dict.
@@ -93,7 +103,7 @@ def search_resource_storage_metas(
     """
     results: dict[str, ResourceStorageInfo] = {}
     for file_path, module_path, attr_name, obj in find_resource_storage_metas(
-            package_import_path
+            package_import_path, strict=strict, errors=errors,
     ):
         path = f"{obj.scheme()}:{obj.host}"
         info = ResourceStorageInfo(
@@ -148,18 +158,23 @@ class PackageResourceStorages(ResourceStorage[ResourceStorageInfo, ResourceStora
             self,
             package_name: str,
             host: str | None = None,
+            *,
+            strict: bool = False,
+            errors: list[ScanError] | None = None,
     ) -> None:
         self._package_name = package_name
         self._host = host or package_name
         self._items: dict[str, ResourceStorageItem] = {}
         self._scanned = False
+        self._strict = strict
+        self._errors = errors
 
     def scan(self) -> None:
         """Scan the package for ResourceStorageMeta instances."""
         if self._scanned:
             return
         for file_path, module_path, attr_name, obj in find_resource_storage_metas(
-                self._package_name
+                self._package_name, strict=self._strict, errors=self._errors,
         ):
             path = f"{obj.scheme()}:{obj.host}"
             info = ResourceStorageInfo(
