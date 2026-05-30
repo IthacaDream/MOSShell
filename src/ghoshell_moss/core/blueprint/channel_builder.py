@@ -240,9 +240,19 @@ def new_command(
 class Builder(ABC):
     """
     用来动态构建一个 Channel 的通用接口.
+
+    Builder 有唯一 id. builder 是有副作用的.
+    一个实例应该只使用一次.
     """
 
     # ---- decorators ---- #
+    @abstractmethod
+    def name(self) -> str:
+        pass
+
+    @abstractmethod
+    def description(self) -> str:
+        pass
 
     @abstractmethod
     def available(self, func: Callable[[], bool]) -> Callable[[], bool]:

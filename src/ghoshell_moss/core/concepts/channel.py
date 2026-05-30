@@ -14,11 +14,13 @@ from typing import (
     Annotated,
     Callable,
     Coroutine, Literal,
+    List, TYPE_CHECKING,
 )
 
 from ghoshell_container import INSTANCE, IoCContainer, get_container
 from pydantic import BaseModel, Field, AwareDatetime
 from typing_extensions import Self
+
 from ghoshell_moss.core.concepts.command import (
     BaseCommandTask,
     Command,
@@ -41,8 +43,11 @@ from ghoshell_common.contracts import LoggerItf
 from datetime import datetime
 from dateutil import tz
 
+if TYPE_CHECKING:
+    from PIL.Image import Image
+
 __all__ = [
-    "Channel",
+    "Channel", "ChannelState",
     "TaskDoneCallback",
     "ChannelRuntime",
     "ChannelTree",
@@ -231,6 +236,112 @@ class ChannelCtx:
         return item
 
 
+class ChannelState(ABC):
+    """
+    Channel 的运行时状态, 用来快速构建一个 StateChannel.
+
+    运行过程中要使用 IoC 容器, 可以通过 bootstrap 函数被调用时获取并持有依赖
+    或者 channel_builder.CommandUtil.get_contract 在每个 command 和生命周期函数被调用时获取.
+    """
+
+    @abstractmethod
+    def name(self) -> str:
+        """
+        return name of the state
+        """
+        pass
+
+    @abstractmethod
+    def description(self) -> str:
+        """
+        return description of the state
+        """
+        pass
+
+    @abstractmethod
+    def is_available(self) -> bool:
+        """
+        if the state is available
+        """
+        pass
+
+    def is_dynamic(self) -> bool:
+        """
+        if the state is dynamic, need to refresh each time.
+        """
+        # 既然是有状态的 Channel, 默认是动态的.
+        return True
+
+    async def get_instruction(self) -> str:
+        """
+        return instruction provided by the state
+        """
+        return ''
+
+    async def get_context_messages(self) -> "List[Message | str | Image]":
+        """
+        return the context messages from the state.
+        """
+        return []
+
+    async def on_startup(self) -> None:
+        """
+        when channel startup.
+        """
+        return None
+
+    async def on_close(self) -> None:
+        """
+        when channel close.
+        """
+        return None
+
+    async def on_running(self) -> None:
+        """
+        when channel is running.
+        """
+        return None
+
+    async def on_idle(self) -> None:
+        """
+        when channel is idle, all the commands are done and the children are idle as well
+        """
+        return None
+
+    @abstractmethod
+    def own_commands(self) -> dict[str, Command]:
+        """
+        return the commands mapping by name
+        """
+        pass
+
+    @abstractmethod
+    def get_own_command(self, name: str) -> Command | None:
+        """
+        get a command by name
+        """
+        pass
+
+    def bootstrap(self, container: IoCContainer) -> None:
+        """
+        register something to the container. or get some contracts from it.
+        函数会被 ChannelRuntime 实例化后调用.
+        """
+        return
+
+    def get_children(self) -> dict[ChannelName, 'Channel']:
+        """
+        return the sustain children channel
+        """
+        return {}
+
+    def get_virtual_children(self) -> dict[ChannelName, 'Channel']:
+        """
+        return the virtual children that may be changed during runtime
+        """
+        return {}
+
+
 class Channel(ABC):
     """
     MOSS 架构本质上想构建一种面向模型使用的高级编程语言.
@@ -238,7 +349,9 @@ class Channel(ABC):
 
     对应编程语言 Python 的 Module,  在 Shell 架构中定义了 Channel (中文: 经络)
     Channel 实例本身应该是无副作用的, 只有在运行时通过 bootstrap 之后, 才会返回有作用的实例.
+    它的唯一性通过 channel.id 判断, 而不是实例本身.
     """
+    MAIN_CHANNEL_NAME = '__main__'
 
     @abstractmethod
     def name(self) -> ChannelName:
@@ -254,6 +367,9 @@ class Channel(ABC):
         Channel 实例用 id 来判断唯一性, 会与 Runtime 绑定.
         """
         pass
+
+    def __eq__(self, other):
+        return self.id() == other.id() and self.name() == other.name()
 
     @abstractmethod
     def description(self) -> str:
@@ -283,11 +399,23 @@ class Channel(ABC):
             return []
         return channel_path.split(".", limit)
 
-    @abstractmethod
     def bootstrap(self, container: Optional[IoCContainer] = None) -> "ChannelRuntime":
         """
         传入一个 IoC 容器, 创建 Channel 的 Runtime 实例.
         """
+        if container is None:
+            from ghoshell_container import Container
+            container = Container(name="channel/{name}{id}".format(name=self.name(), id=self.id()))
+        runtime_instance = self.materialize(container)
+        if isinstance(runtime_instance, ChannelRuntime):
+            return runtime_instance
+        elif isinstance(runtime_instance, ChannelState):
+            from ghoshell_moss.core.blueprint.states_channel import new_stateful_channel_from_main
+            return new_stateful_channel_from_main(runtime_instance, id=self.id()).bootstrap(container)
+        raise RuntimeError(f"invalid channel runtime instance: {runtime_instance}")
+
+    @abstractmethod
+    def materialize(self, container: IoCContainer) -> 'ChannelState | ChannelRuntime':
         pass
 
 

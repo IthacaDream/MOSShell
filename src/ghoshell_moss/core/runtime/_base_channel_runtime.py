@@ -254,7 +254,7 @@ class AbsChannelRuntime(Generic[CHANNEL], ChannelRuntime, ABC):
         self._channel: CHANNEL = channel
         self._name = channel.name()
         self._uid = channel.id()
-        container: IoCContainer = container or Container(name="Channel/%s/%s" % (self._name, self._uid))
+        container: IoCContainer = container or self.create_raw_container(self._name, self._uid)
         self._container = self.prepare_container(container)
         self._logger: LoggerItf | None = logger
         # import lib 是最重要的.
@@ -297,6 +297,10 @@ class AbsChannelRuntime(Generic[CHANNEL], ChannelRuntime, ABC):
 
     def __repr__(self):
         return self.log_prefix
+
+    @classmethod
+    def create_raw_container(cls, name: str, uid: str = '') -> Container:
+        return Container(name="Channel/%s/%s" % (name, uid or 'uid-missed'))
 
     def open_scope(self, task: CommandTask) -> None:
         if not self.is_running():

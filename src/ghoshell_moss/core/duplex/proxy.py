@@ -934,7 +934,7 @@ class DuplexChannelProxy(Channel):
     def id(self) -> str:
         return self._uid
 
-    def bootstrap(self, container: Optional[IoCContainer] = None, depth: int = 0) -> "DuplexChannelRuntime":
+    def materialize(self, container: IoCContainer) -> "DuplexChannelRuntime":
         if self._runtime is not None and self._runtime.is_running():
             raise RuntimeError(f"Channel {self} has already been started.")
 

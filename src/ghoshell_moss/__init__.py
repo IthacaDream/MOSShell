@@ -37,9 +37,9 @@ from ghoshell_moss.core.blueprint.states_channel import (
     new_shell_main_channel,
     new_default_shell_main_channel,
 
-    new_channel_from_state,
+    new_stateful_channel_from_main,
     new_prime_channel,
-    new_state_builder,
+    new_channel_state,
     new_stateful_channel,
 )
 from ghoshell_moss.core.py_channel import PyChannel

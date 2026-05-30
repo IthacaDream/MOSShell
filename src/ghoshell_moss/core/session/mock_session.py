@@ -126,6 +126,10 @@ class MockSession(Session):
             self._session_storage = self._make_session_level_storage(self._session_root_storage)
         return self._session_storage
 
+    @property
+    def tmp_storage(self) -> Storage:
+        return self._session_storage.sub_storage('tmp')
+
     def _make_session_level_storage(self, storage: Storage) -> Storage:
         scope_level_storage = storage.sub_storage(self._session_scope)
         return scope_level_storage.sub_storage(f"session-{self._session_id}")

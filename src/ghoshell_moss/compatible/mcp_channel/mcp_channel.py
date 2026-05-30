@@ -57,7 +57,7 @@ class MCPChannel(Channel):
             raise RuntimeError("MCPChannel not bootstrapped")
         return self._runtime
 
-    def bootstrap(self, container: Optional[IoCContainer] = None) -> ChannelRuntime:
+    def materialize(self, container: IoCContainer) -> ChannelRuntime:
         if self._runtime is not None and self._runtime.is_running():
             raise RuntimeError(f"Channel {self} has already been started.")
 

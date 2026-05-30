@@ -2,9 +2,10 @@ import asyncio
 from typing import Optional
 from ghoshell_moss.core.concepts.channel import Channel, ChannelName, ChannelRuntime, ChannelCtx
 from ghoshell_moss.core.concepts.command import Command
-from ghoshell_moss.core.blueprint.states_channel import new_channel_from_state, ChannelState
+from ghoshell_moss.core.blueprint.states_channel import new_stateful_channel_from_main, ChannelState
 from ghoshell_moss.core.blueprint.matrix import Matrix
 from ghoshell_moss.core.blueprint.app import AppStore
+from ghoshell_moss.message import unique_id
 from ghoshell_container import IoCContainer
 from threading import Lock
 
@@ -34,7 +35,7 @@ class AppStoreChannel(Channel):
     def description(self) -> str:
         return self._description
 
-    def bootstrap(self, container: Optional[IoCContainer] = None) -> ChannelRuntime:
+    def materialize(self, container: IoCContainer) -> ChannelRuntime:
         app_store = container.force_fetch(AppStore)
         matrix = container.force_fetch(Matrix)
         real_channel = build_apps_channel(
@@ -64,7 +65,11 @@ class AppStoreChannelState(ChannelState):
         self._own_commands: dict[str, Command] = {}
         self._app_channels: dict[str, Channel] = {}
         self._app_channels_lock = Lock()
+        self._uid = unique_id()
         self._bootstrap()
+
+    def id(self) -> str:
+        return self._uid
 
     def _bootstrap(self) -> None:
         from ghoshell_moss.core.concepts.command import PyCommand
@@ -195,4 +200,4 @@ def build_apps_channel(
         name=name,
         description=description,
     )
-    return new_channel_from_state(state, id=id)
+    return new_stateful_channel_from_main(state, id=id)

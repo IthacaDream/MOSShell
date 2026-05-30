@@ -97,7 +97,7 @@ ENV_GHOST_NAME_KEY = 'MOSS_GHOST_NAME'
 ENV_PARENT_PID_KEY = 'MOSS_PARENT_PID'
 
 ENV_CELL_ADDRESS_KEY = 'MOSS_CELL_ADDRESS'
-DEFAULT_CELL_ADDRESS = 'main'
+DEFAULT_CELL_ADDRESS = 'host/{mode}'
 
 MOSSEnvKey = Literal[
     "MOSS_WORKSPACE", "MOSS_SESSION_SCOPE", "MOSS_MODE_NAME",
@@ -188,7 +188,10 @@ class Environment:
         if not self._session_id:
             self._session_id = unique_id()
 
-        self._cell_address: str = os.environ.get(ENV_CELL_ADDRESS_KEY, DEFAULT_CELL_ADDRESS)
+        self._cell_address: str = os.environ.get(
+            ENV_CELL_ADDRESS_KEY,
+            DEFAULT_CELL_ADDRESS.format(mode=self._moss_mode)
+        )
 
         # 为空表示运行时不启用 ghost.
         self._ghost_name: str = ghost_name or os.environ.get(ENV_GHOST_NAME_KEY, '')

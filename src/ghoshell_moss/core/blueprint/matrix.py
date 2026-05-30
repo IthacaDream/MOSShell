@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 
 from ghoshell_moss.core.concepts.channel import Channel, ChannelProxy
 from ghoshell_moss.core.blueprint.session import Session
-from ghoshell_moss.contracts import LoggerItf, ConfigStore, Workspace, SystemPrompter, ResourceRegistry
+from ghoshell_moss.contracts import LoggerItf, ConfigStore, Workspace, SystemPrompter, ResourceRegistry, Storage
 from ghoshell_container import IoCContainer
 from ghoshell_moss.core.blueprint.manifests import Manifests
 from pydantic import BaseModel, Field
@@ -36,6 +36,7 @@ class Cell(ABC):
     description: str  # 节点的描述.
     type: CellType | str
     where: str  # 这个节点自身的工作目录.
+    workspace: str | None = None  # cell 级的 workspace, 如果为空, 系统需要帮它创建一个.
 
     @property
     def address(self) -> str:
@@ -68,6 +69,7 @@ class Cell(ABC):
             "where": self.where,
             "log_name": self.log_name,
             "is_alive": self.is_alive(),
+            "workspace": self.workspace,
         }
 
 
@@ -244,6 +246,45 @@ class Matrix(ABC):
         """
         pass
 
+    @property
+    @abstractmethod
+    def workspace(self) -> Workspace:
+        """
+        workspace 管理.
+        """
+        pass
+
+    @property
+    def cell_workspace(self) -> Workspace:
+        """cell 独立的 workspace. 基于约定返回. """
+        from ghoshell_moss.contracts.workspace import LocalWorkspace
+        # 系统默认的 workspace 约定体系. code as prompt
+        if self.this.type == CellType.host.value:
+            return self.workspace
+        if hasattr(self, '_this_cell_workspace'):
+            return getattr(self, '_this_cell_workspace')
+        else:
+            if self.this.workspace is not None:
+                root_path = Path(self.this.workspace).resolve()
+            else:
+                # runtime 下面的 cells. 用来放无 workspace cell 的专属目录.
+                root_path = self.workspace.runtime().sub_storage('cells').abspath() / self.this.address
+            workspace = LocalWorkspace(root_path)
+            setattr(self, '_this_cell_workspace', workspace)
+            return workspace
+
+    def storages(self) -> dict[str, Storage]:
+        """各种 Matrix 可提供的存储路径, 显式声明定义. """
+        return {
+            'workspace': self.workspace.root(),
+            'runtime': self.workspace.runtime(),
+            'configs': self.workspace.configs(),
+            'assets': self.workspace.assets(),
+            'session': self.session.storage,
+            'session_tmp': self.session.tmp_storage,
+            'cell': self.cell_workspace.root(),
+        }
+
     # -- 运行前 注册函数 -- #
 
     def register(
@@ -418,14 +459,6 @@ class Matrix(ABC):
     def logger(self) -> LoggerItf:
         """
         日志模块. 从属于当前节点.
-        """
-        pass
-
-    @property
-    @abstractmethod
-    def workspace(self) -> Workspace:
-        """
-        workspace 管理.
         """
         pass
 

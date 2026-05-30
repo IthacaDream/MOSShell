@@ -165,7 +165,7 @@ async def test_shell_task_can_get_channel():
     async def foo() -> bool:
         # 可以在运行时获取到 channel 本体.
         chan = ChannelCtx.channel()
-        return chan is a_chan
+        return chan == a_chan
 
     async with shell:
         async with await shell.interpreter() as interpreter:

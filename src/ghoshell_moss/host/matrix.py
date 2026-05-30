@@ -37,7 +37,7 @@ import logging
 import threading
 import psutil
 
-__all__ = ['AppCell', 'HostMainCell', 'MatrixImpl']
+__all__ = ['AppCell', 'HostCell', 'MatrixImpl']
 
 
 class AppCell(Cell):
@@ -47,6 +47,7 @@ class AppCell(Cell):
         self.description = app.description
         self.type = "app"
         self.where = app.work_directory
+        self.workspace = self.where
         self._alive_event = event
         self._address = app.address
 
@@ -58,13 +59,14 @@ class AppCell(Cell):
         return self._alive_event.is_set()
 
 
-class HostMainCell(Cell):
+class HostCell(Cell):
 
-    def __init__(self, mode: Mode, event: threading.Event):
-        self.name = DEFAULT_CELL_ADDRESS
+    def __init__(self, mode: Mode, event: threading.Event, workspace: str):
+        self.name = mode.name
         self.type = 'host'
         self.description = mode.description
         self.where = mode.file
+        self.workspace = workspace
         self._alive_event = event
 
     def is_alive(self) -> bool:
@@ -125,7 +127,7 @@ class MatrixImpl(Matrix):
 
         # prepare main cell
         event = threading.Event()
-        main_cell = HostMainCell(self._current_mode, event)
+        main_cell = HostCell(self._current_mode, event, str(self.workspace.root().abspath()))
         cell_alive_events[main_cell.address] = event
         cells[main_cell.address] = main_cell
         self._main_cell = main_cell
@@ -142,7 +144,7 @@ class MatrixImpl(Matrix):
 
         self._cells = cells
         self._cell_alive_events = cell_alive_events
-        self._is_main = isinstance(self._this_cell, HostMainCell)
+        self._is_main = isinstance(self._this_cell, HostCell)
         self._logger: LoggerItf | logging.Logger | None = logger
         self._started = False
         self._channel_provider_task: asyncio.Task | None = None

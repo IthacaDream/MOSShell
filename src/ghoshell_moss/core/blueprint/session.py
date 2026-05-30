@@ -216,15 +216,6 @@ class Session(ABC):
         """
         pass
 
-    @property
-    @abstractmethod
-    def storage(self) -> Storage:
-        """
-        session 专属的 storage.
-        需要的话可以将文件作为通讯方式.
-        """
-        pass
-
     @abstractmethod
     def output(self, role: str | Role, *messages: Message | str, log: str = '') -> None:
         """
@@ -344,6 +335,24 @@ class Session(ABC):
         async with stream:
             async for delta in stream:
                 yield delta.payload.decode('utf-8')
+
+    @property
+    @abstractmethod
+    def storage(self) -> Storage:
+        """
+        session 专属的 storage.
+        需要的话可以将文件作为通讯方式.
+        """
+        pass
+
+    @property
+    @abstractmethod
+    def tmp_storage(self) -> Storage:
+        """
+        Session 级别的临时文件区.
+        应该在启动和关闭时检查清理.
+        """
+        pass
 
     @abstractmethod
     async def __aenter__(self) -> Self:

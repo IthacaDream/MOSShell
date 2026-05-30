@@ -2,7 +2,11 @@ import asyncio
 
 import pytest
 
-from ghoshell_moss.core.py_channel import PyChannel, PyChannelBuilder, BaseStateChannel
+from ghoshell_moss.core.blueprint.states_channel import (
+    new_channel_state, new_stateful_channel_from_main, new_prime_channel,
+    new_stateful_channel,
+)
+from ghoshell_moss.core.py_channel import PyChannel
 from ghoshell_moss.core.concepts.channel import ChannelCtx
 from ghoshell_moss.message import Message
 
@@ -15,7 +19,7 @@ from ghoshell_moss.message import Message
 @pytest.mark.asyncio
 async def test_main_state_commands():
     """main_state 的命令始终可用."""
-    chan = PyChannel(name="main")
+    chan = new_prime_channel(name="main")
 
     @chan.build.command()
     async def foo() -> str:
@@ -30,7 +34,7 @@ async def test_main_state_commands():
 @pytest.mark.asyncio
 async def test_register_state_via_new_state():
     """new_state() 返回 ChannelStateBuilder, 注册为可切换 state."""
-    chan = PyChannel(name="main")
+    chan = new_stateful_channel(name="main")
     st = chan.new_state("idle", "idle state")
 
     @st.command()
@@ -44,8 +48,8 @@ async def test_register_state_via_new_state():
 @pytest.mark.asyncio
 async def test_register_state_via_with_state():
     """with_state() 接受外部 ChannelState."""
-    chan = PyChannel(name="main")
-    ext_state = PyChannelBuilder(name="external", description="external state")
+    chan = new_stateful_channel(name="main")
+    ext_state = new_channel_state(name="external", description="external state")
 
     @ext_state.command()
     async def ext_cmd() -> str:
@@ -58,7 +62,7 @@ async def test_register_state_via_with_state():
 @pytest.mark.asyncio
 async def test_switch_state_basic():
     """切换到 state 后, 其命令出现在 runtime."""
-    chan = PyChannel(name="main")
+    chan = new_stateful_channel(name="main")
     idle_st = chan.new_state("idle", "idle state")
 
     @idle_st.command()
@@ -544,13 +548,13 @@ async def test_stop_current_state_auto_registered_when_active():
 @pytest.mark.asyncio
 async def test_base_state_channel_from_builder():
     """BaseStateChannel 包装一个 ChannelState, 可以直接 bootstrap."""
-    builder = PyChannelBuilder(name="base", description="a base state channel")
+    builder = new_channel_state(name="base", description="a base state channel")
 
     @builder.command()
     async def greet() -> str:
         return "hello"
 
-    chan = BaseStateChannel(builder)
+    chan = new_stateful_channel_from_main(builder)
     async with chan.bootstrap() as runtime:
         cmd = runtime.get_command("greet")
         assert cmd is not None
@@ -560,13 +564,13 @@ async def test_base_state_channel_from_builder():
 @pytest.mark.asyncio
 async def test_base_state_channel_with_switchable_states():
     """BaseStateChannel 也可以注册和切换 state."""
-    main_st = PyChannelBuilder(name="root", description="root state")
+    main_st = new_channel_state(name="root", description="root state")
 
     @main_st.command()
     async def root_cmd() -> str:
         return "root"
 
-    chan = BaseStateChannel(main_st)
+    chan = new_stateful_channel_from_main(main_st)
     alt_st = chan.new_state("alt", "alternative")
 
     @alt_st.command()
@@ -721,8 +725,8 @@ async def test_state_bootstrap_called_for_main_state():
 
 
 def test_py_channel_builder_satisfies_module_protocol():
-    """PyChannelBuilder 自动满足 ChannelModule Protocol."""
-    builder = PyChannelBuilder(name="test")
+    """new_channel_state 自动满足 ChannelModule Protocol."""
+    builder = new_channel_state(name="test")
     assert hasattr(builder, 'name')
     assert hasattr(builder, 'own_commands')
 
@@ -730,8 +734,8 @@ def test_py_channel_builder_satisfies_module_protocol():
 @pytest.mark.asyncio
 async def test_with_module_registration():
     """with_module 注册 module 到 channel."""
-    chan = PyChannel(name="main")
-    module = PyChannelBuilder(name="speech")
+    chan = new_prime_channel(name="main")
+    module = new_channel_state(name="speech")
 
     @module.command()
     async def speak(text: str) -> str:
@@ -745,13 +749,14 @@ async def test_with_module_registration():
 @pytest.mark.asyncio
 async def test_module_commands_appear_on_runtime():
     """module 的命令通过 runtime 可见可执行."""
-    chan = PyChannel(name="main")
-    mod = PyChannelBuilder(name="tts")
+    chan = new_prime_channel(name="main")
+    mod = new_channel_state(name="tts")
 
     @mod.command()
     async def say(text: str) -> str:
         return f"said: {text}"
 
+    # state as mod? bad smell
     chan.with_module(mod)
     async with chan.bootstrap() as runtime:
         cmd = runtime.get_command("say")
@@ -769,7 +774,7 @@ async def test_module_commands_coexist_with_main():
     async def main_cmd() -> str:
         return "main"
 
-    mod = PyChannelBuilder(name="tts")
+    mod = new_channel_state(name="tts")
 
     @mod.command()
     async def tts_cmd() -> str:
@@ -785,13 +790,13 @@ async def test_module_commands_coexist_with_main():
 async def test_multiple_modules_cumulative():
     """多个 module 同时激活，所有命令都可用."""
     chan = PyChannel(name="main")
-    mod_a = PyChannelBuilder(name="mod_a")
+    mod_a = new_channel_state(name="mod_a")
 
     @mod_a.command()
     async def cmd_a() -> str:
         return "a"
 
-    mod_b = PyChannelBuilder(name="mod_b")
+    mod_b = new_channel_state(name="mod_b")
 
     @mod_b.command()
     async def cmd_b() -> str:
@@ -812,7 +817,7 @@ async def test_module_command_priority_main_wins():
     async def foo() -> str:
         return "main"
 
-    mod = PyChannelBuilder(name="mod")
+    mod = new_channel_state(name="mod")
 
     @mod.command()
     async def foo() -> str:
@@ -828,7 +833,7 @@ async def test_module_command_priority_over_current_state():
     """module 命令优先于 current_state 同名命令。"""
     chan = PyChannel(name="main")
 
-    mod = PyChannelBuilder(name="base_tts")
+    mod = new_channel_state(name="base_tts")
 
     @mod.command()
     async def say() -> str:
@@ -850,7 +855,7 @@ async def test_module_command_priority_over_current_state():
 async def test_module_lifecycle_on_startup():
     """module.on_startup() 在 channel bootstrap 时被调用。"""
     chan = PyChannel(name="main")
-    mod = PyChannelBuilder(name="speech")
+    mod = new_channel_state(name="speech")
     started = []
 
     @mod.startup
@@ -869,7 +874,7 @@ async def test_module_lifecycle_on_startup():
 async def test_module_lifecycle_on_close():
     """module.on_close() 在 channel 关闭时被调用。"""
     chan = PyChannel(name="main")
-    mod = PyChannelBuilder(name="speech")
+    mod = new_channel_state(name="speech")
     closed = []
 
     @mod.close
@@ -887,7 +892,7 @@ async def test_module_lifecycle_on_close():
 async def test_module_context_messages_merged():
     """module 的 context messages 被合并到 meta 中。"""
     chan = PyChannel(name="main")
-    mod = PyChannelBuilder(name="sensor")
+    mod = new_channel_state(name="sensor")
 
     @chan.build.context_messages
     async def main_ctx() -> list[Message]:
@@ -915,8 +920,8 @@ async def test_module_context_messages_merged():
 async def test_channel_meta_includes_modules():
     """ChannelMeta.modules 记录 module name 列表（for debug）。"""
     chan = PyChannel(name="main")
-    chan.with_module(PyChannelBuilder(name="mod_a"))
-    chan.with_module(PyChannelBuilder(name="mod_b"))
+    chan.with_module(new_channel_state(name="mod_a"))
+    chan.with_module(new_channel_state(name="mod_b"))
 
     async with chan.bootstrap() as runtime:
         await runtime.refresh_metas()
@@ -928,9 +933,9 @@ async def test_channel_meta_includes_modules():
 @pytest.mark.asyncio
 async def test_module_on_base_state_channel():
     """BaseStateChannel 也支持 with_module。"""
-    main_st = PyChannelBuilder(name="root")
-    chan = BaseStateChannel(main_st)
-    mod = PyChannelBuilder(name="extra")
+    main_st = new_channel_state(name="root")
+    chan = new_stateful_channel_from_main(main_st)
+    mod = new_channel_state(name="extra")
 
     @mod.command()
     async def extra_cmd() -> str:
@@ -945,7 +950,7 @@ async def test_module_on_base_state_channel():
 async def test_module_state_independent():
     """module 不受 state 切换影响（module 始终激活）。"""
     chan = PyChannel(name="main")
-    mod = PyChannelBuilder(name="core")
+    mod = new_channel_state(name="core")
 
     @mod.command()
     async def core_cmd() -> str:
@@ -1013,7 +1018,7 @@ async def test_protocol_duck_typing():
 async def test_module_no_commands():
     """module 没有命令时也是有效的。"""
     chan = PyChannel(name="main")
-    mod = PyChannelBuilder(name="empty")
+    mod = new_channel_state(name="empty")
 
     @mod.context_messages
     def sync_context_message_case():

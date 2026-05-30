@@ -330,7 +330,6 @@ class BaseChannelTree(ChannelTree, ChannelTreeContext):
             return None
         # 创建新的 runtime.
         try:
-            # 初始化 channel 对应的 runtime
             runtime = channel.bootstrap(self._container)
         except Exception as e:
             self.logger.exception("%r bootstrap channel %s exception: %s", self, path, e)

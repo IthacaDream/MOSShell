@@ -10,7 +10,8 @@ from ghoshell_moss.core.blueprint.states_channel import StatefulChannel
 from ghoshell_moss.core.concepts.channel import Channel, ChannelName, ChannelNamePattern, \
     ChannelProvider
 from ghoshell_moss.core.concepts.command import Command
-from ghoshell_moss.core.blueprint.states_channel import new_channel_from_state, ChannelState
+from ghoshell_moss.message import unique_id
+from ghoshell_moss.core.blueprint.states_channel import new_stateful_channel_from_main, ChannelState
 from ghoshell_moss.bridges.zenoh_bridge import ZenohChannelProvider, ZenohProxyChannel
 from ghoshell_moss.contracts.workspace import Workspace
 from ghoshell_moss.contracts import LoggerItf, get_moss_logger
@@ -303,7 +304,7 @@ class ZenohFractalHub(FractalHub):
             ),
             allow_all=allow_all,
         )
-        return new_channel_from_state(state)
+        return new_stateful_channel_from_main(state)
 
 
 class FractalHubChannelState(ChannelState):
@@ -330,6 +331,10 @@ class FractalHubChannelState(ChannelState):
         self._proxy_channels_lock = threading.Lock()
         self._own_commands = self._build_commands()
         self._hub.set_auto_accept(allow_all)
+        self._uid = unique_id()
+
+    def id(self) -> str:
+        return self._uid
 
     def _build_commands(self) -> dict[str, Command]:
         from ghoshell_moss.core.blueprint.channel_builder import new_command

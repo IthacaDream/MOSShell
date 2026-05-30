@@ -32,6 +32,22 @@ __all__ = [
 ]
 
 
+class SessionStorages:
+
+    def __init__(self, root_storage: Storage, session_scope: str, session_id: str):
+        self._root_storage = root_storage
+        self._session_scope = session_scope or 'default'
+        self._session_id = session_id or 'default'
+        # 可以整体删除的临时文件库.
+        self.tmp_storage = root_storage.sub_storage('tmp')
+        # scopes
+        self.scope_storage = root_storage.sub_storage('scopes')
+        self.session_storage = self.scope_storage.sub_storage(self._session_scope).sub_storage(
+            f"session-{session_id}")
+        self.session_tmp_storage = self.tmp_storage.sub_storage(self._session_scope).sub_storage(
+            f"session-{session_id}/tmp")
+
+
 class SimpleOutputBuffer(OutputBuffer):
 
     def __init__(self, maxsize: int, on_change_interval: float = 0.5) -> None:
@@ -123,17 +139,7 @@ class MossSessionWithZenoh(Session):
         self._topic_service = topic_service
         self._closing_event = ThreadSafeEvent()
         self._session_root_storage = session_root_storage
-        self._session_storage: Storage = self.make_session_level_storage(self._session_root_storage)
-
-    def make_session_level_storage(self, storage: Storage) -> Storage:
-        """提供 session 级别的一个独立 storage 空间. """
-        scope_level_storage = storage.sub_storage(self._session_scope)
-        if self._session_id:
-            # 返回
-            return scope_level_storage.sub_storage(f"session-{self._session_id}")
-        return scope_level_storage
-
-    # 定义独立的逻辑, 方便未来重构.
+        self._session_storages = SessionStorages(self._session_root_storage, self._session_scope, self._session_id)
 
     @property
     def session_scope(self) -> str:
@@ -145,7 +151,11 @@ class MossSessionWithZenoh(Session):
 
     @property
     def storage(self) -> Storage:
-        return self._session_storage
+        return self._session_storages.session_storage
+
+    @property
+    def tmp_storage(self) -> Storage:
+        return self._session_storages.tmp_storage
 
     @property
     def topics(self) -> TopicService:

@@ -18,16 +18,15 @@ class SpeechChannel(Channel):
     """
 
     def __init__(
-        self,
-        name: str,
-        description: str,
-        speech: TTSSpeech | Speech,
+            self,
+            name: str,
+            description: str,
+            speech: TTSSpeech | Speech,
     ):
         self._speech = speech
         self._uid = unique_id()
         self._name = name
         self._description = description
-        self._runtime: Optional[ChannelRuntime] = None
 
     def name(self) -> str:
         return self._name
@@ -48,10 +47,7 @@ class SpeechChannel(Channel):
         stream = self._speech.new_stream(batch_id=batch_id)
         await stream.speak(chunks__)
 
-    def bootstrap(self, container: Optional[IoCContainer] = None) -> "ChannelRuntime":
-        if self._runtime and self._runtime.is_running():
-            raise RuntimeError(f"{self._name} already running")
-
+    def materialize(self, container: IoCContainer) -> "ChannelRuntime":
         channel = PyChannel(name=self._name, description=self._description, blocking=True)
 
         # 注册说话的命令. 可能被覆盖.
@@ -74,12 +70,12 @@ class TTSSpeechChannel(SpeechChannel):
     """
 
     def __init__(
-        self,
-        *,
-        name: str,
-        description: str,
-        tts: TTS,
-        player: StreamAudioPlayer,
+            self,
+            *,
+            name: str,
+            description: str,
+            tts: TTS,
+            player: StreamAudioPlayer,
     ):
         speech = BaseTTSSpeech(tts=tts, player=player)
         super().__init__(

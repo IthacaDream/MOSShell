@@ -3,7 +3,7 @@ import inspect
 import logging
 from typing import Optional, Callable, Iterable
 
-from ghoshell_container import BINDING, INSTANCE, IoCContainer, Provider, provide
+from ghoshell_container import BINDING, INSTANCE, IoCContainer, Provider, provide, Container
 from typing_extensions import Self
 
 from ghoshell_moss.message import Message
@@ -21,7 +21,10 @@ from ghoshell_moss.message import unique_id
 from ghoshell_common.contracts import LoggerItf
 from PIL.Image import Image
 from ghoshell_moss.core.concepts.command import Command, PyCommand, CommandWrapper, CommandUniqueName
-from ghoshell_moss.core.blueprint.states_channel import ChannelStateBuilder, ChannelState, StatefulChannel, PrimeChannel
+from ghoshell_moss.core.blueprint.states_channel import (
+    MutableChannelState, ChannelState, StatefulChannel, PrimeChannel,
+    StatefulChannelRuntime,
+)
 from ghoshell_moss.core.blueprint.channel_builder import (
     CommandFunction,
     MessageFunction,
@@ -31,20 +34,22 @@ from ghoshell_moss.core.blueprint.channel_builder import (
     ChannelFactory,
 )
 from ghoshell_moss.core.blueprint.states_channel import ChannelModule
+from copy import copy
 import re
 
-__all__ = ["PyChannel", "StatefulChannelRuntime", "PyChannelBuilder", "BaseStateChannel"]
+__all__ = ["PyChannel", "StatefulChannelRuntimeImpl", "PyChannelBuilder", "BaseStateChannel"]
 
 _ChannelNamePattern = re.compile(ChannelNamePattern)
 _ChannelName = str
 
 
-class PyChannelBuilder(ChannelStateBuilder, ChannelState):
-    def __init__(self, name: str, blocking: bool = True, description: str = "") -> None:
+class PyChannelBuilder(MutableChannelState, ChannelState):
+
+    def __init__(self, name: str, blocking: bool = True, description: str = "", uid: str = '') -> None:
         self._name = name
         self._description = description
+        self._uid = uid or unique_id()
         self._blocking = blocking
-        self._description_fn: Optional[StringType] = None
         self._available_fn: Optional[Callable[[], bool]] = None
         self._on_idle_funcs: list[tuple[LifecycleFunction, bool]] = []
         self._on_start_up_funcs: list[tuple[LifecycleFunction, bool]] = []
@@ -62,6 +67,20 @@ class PyChannelBuilder(ChannelStateBuilder, ChannelState):
         self._container_instances = {}
         self._dynamic = False
         self._logger = logging.getLogger("moss")
+
+    def copy(self) -> Self:
+        from copy import copy
+        copied = copy(self)
+        update = {}
+        for k, v in self.__dict__.items():
+            if k.startswith("_") and not k.startswith("__"):
+                if isinstance(v, dict) or isinstance(v, list):
+                    update[k] = v.copy()
+        copied.__dict__.update(update)
+        return copied
+
+    def id(self) -> str:
+        return self._uid
 
     def name(self) -> str:
         return self._name
@@ -229,7 +248,10 @@ class PyChannelBuilder(ChannelStateBuilder, ChannelState):
         self._providers.append((provider, override))
         return self
 
-    def import_channels(self, *children: Channel | tuple[Channel, _ChannelName]) -> Self:
+    def import_channels(
+            self,
+            *children: Channel | ChannelFactory | tuple[Channel | ChannelFactory, _ChannelName],
+    ) -> Self:
         for value in children:
             if isinstance(value, tuple):
                 channel, name = value
@@ -340,17 +362,39 @@ class PyChannelBuilder(ChannelStateBuilder, ChannelState):
 
 class BaseStateChannel(StatefulChannel):
 
-    def __init__(self, main: ChannelState, uid: str | None = None) -> None:
+    def __init__(
+            self,
+            main: ChannelState,
+            uid: str | None = None,
+            states: dict[str, ChannelState] | None = None,
+            modules: dict[str, ChannelModule] | None = None,
+            default_state_name: str = '',
+            bootstrap_callbacks: list[Callable[[Self, IoCContainer], None]] | None = None,
+    ) -> None:
         self._uid = uid or unique_id()
         self._main: ChannelState = main
-        self._states: dict[str, ChannelState] = {}
-        self._default_state_name: str = ''
-        self._modules: dict[str, ChannelModule] = {}
+        self._states: dict[str, ChannelState] = states or {}
+        self._default_state_name: str = default_state_name
+        self._modules: dict[str, ChannelModule] = modules or {}
+        self._boostrap_callbacks: list[Callable[[Self, IoCContainer], None]] = bootstrap_callbacks or []
+
+    def on_bootstrap(self, bootstrapper: Callable[[StatefulChannel, IoCContainer], None]) -> None:
+        self._boostrap_callbacks.append(bootstrapper)
+
+    def copy(self) -> Self:
+        from copy import copy
+        copied = copy(self)
+        # main 不 copy, 因为就是表示是有副作用的.
+        copied._main = copied._main
+        copied._states = {k: v.copy() for k, v in copied._states.items()}
+        copied._modules = copied._modules.copy()
+        copied._boostrap_callbacks = copied._boostrap_callbacks.copy()
+        return copied
 
     def main_state(self) -> ChannelState:
         return self._main
 
-    def new_state(self, name: str, description: str) -> ChannelStateBuilder:
+    def new_state(self, name: str, description: str) -> MutableChannelState:
         new_state = PyChannelBuilder(name=name, description=description)
         self._states[name] = new_state
         return new_state
@@ -393,12 +437,20 @@ class BaseStateChannel(StatefulChannel):
     def description(self) -> str:
         return self._main.description()
 
-    def bootstrap(self, container: Optional[IoCContainer] = None) -> "ChannelRuntime":
+    def materialize(self, container: IoCContainer) -> "StatefulChannelRuntimeImpl":
         # 所有 state 的启动都是在 StatefulChannelRuntime 中.
-        return StatefulChannelRuntime(self, container=container)
+        if len(self._boostrap_callbacks) > 0:
+            container = container or StatefulChannelRuntimeImpl.create_raw_container(
+                self.name(),
+                self.id(),
+            )
+            for callback in self._boostrap_callbacks:
+                callback(self, container)
+
+        return StatefulChannelRuntimeImpl(self, container=container)
 
 
-class PyChannel(BaseStateChannel, PrimeChannel):
+class PyChannel(PrimeChannel, BaseStateChannel):
     """
     一个 Prime Channel.
     """
@@ -419,7 +471,7 @@ class PyChannel(BaseStateChannel, PrimeChannel):
         matched = _ChannelNamePattern.fullmatch(name)
         if matched is None:
             raise ValueError("Channel name '%s' is not valid" % name)
-        state = PyChannelBuilder(name=name, description=description, blocking=blocking)
+        state = PyChannelBuilder(name=name, description=description, blocking=blocking, uid=uid)
         super().__init__(state, uid=uid)
         self._builder = state
 
@@ -441,7 +493,7 @@ class PyChannel(BaseStateChannel, PrimeChannel):
         return child
 
 
-class StatefulChannelRuntime(AbsChannelTreeRuntime[StatefulChannel]):
+class StatefulChannelRuntimeImpl(StatefulChannelRuntime, AbsChannelTreeRuntime[StatefulChannel]):
     """
     实现标准的, 支持各种 State 的 ChannelRuntime.
     """
@@ -506,6 +558,26 @@ class StatefulChannelRuntime(AbsChannelTreeRuntime[StatefulChannel]):
         finally:
             if self._current_state is None:
                 await self.stop_current_state()
+
+    async def add_virtual_channel(self, channel: Channel, wait_started: bool = False) -> bool:
+        if isinstance(self._main_state, MutableChannelState):
+            self._main_state.add_virtual_channel(channel)
+            if wait_started:
+                await self.refresh_metas()
+                if runtime := self.tree.get_channel_runtime(channel):
+                    await runtime.wait_started()
+                    return True
+        return False
+
+    async def remove_virtual_channel(self, name: str, wait_refreshed: bool = False) -> bool:
+        if isinstance(self._main_state, MutableChannelState):
+            self._main_state.remove_virtual_channel(name)
+            if wait_refreshed:
+                await self.refresh_metas()
+                if _ := self.fetch_sub_runtime(name):
+                    return False
+                return True
+        return False
 
     async def stop_current_state(self) -> str:
         """
