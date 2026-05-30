@@ -751,17 +751,6 @@ class ChannelRuntime(ABC):
             elif command_name == self.__scope_exit__.__name__:
                 task.func = self.__scope_exit__
                 self.commit_scope(task)
-            elif task.scope_id:
-                # task 如果已经约定了 scope id, 则应该要检查 scope 是否存在. 也就是是否被前序 task 创建了.
-                if scope := self.get_active_scope(None, False):
-                    # task 的 scope_id 无法对齐时.
-                    if scope.scope_id != task.scope_id:
-                        task.cancel("Scope not found")
-                        continue
-                    task = scope.add_task(task)
-                else:
-                    # 如果声明了作用域, 但没有发现的话, task 恒定被关闭.
-                    task.cancel("Scope not found.")
             elif last := self.get_active_scope(None, False):
                 # 做标记.
                 last.add_task(task)

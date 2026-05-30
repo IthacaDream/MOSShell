@@ -3,11 +3,11 @@ import logging
 from ghoshell_container import IoCContainer
 from reachy_mini import ReachyMini
 
-from ghoshell_moss import new_prime_channel, Message, Text, Channel
+from ghoshell_moss import new_prime_channel, Message, Text, Channel, Matrix
 from ghoshell_moss.core.blueprint.channel_builder import ChannelCreator
 from ghoshell_moss.contracts import Workspace, LoggerItf
 from ghoshell_moss.core.concepts.channel import ChannelCtx
-from ghoshell_moss.core.py_channel import StatefulChannelRuntime
+from ghoshell_moss.core.py_channel import StatefulChannelRuntimeImpl
 from ghoshell_moss_contrib.moss_in_reachy_mini.components.antennas import Antennas
 from ghoshell_moss_contrib.moss_in_reachy_mini.components.body import Body
 from ghoshell_moss_contrib.moss_in_reachy_mini.components.head import Head
@@ -16,7 +16,7 @@ from ghoshell_moss_contrib.moss_in_reachy_mini.state.asleep import AsleepState
 from ghoshell_moss_contrib.moss_in_reachy_mini.state.boring import BoringState
 from ghoshell_moss_contrib.moss_in_reachy_mini.state.waken import WakenState
 
-__all__ = ['MossInReachyMini', 'ReachyMiniChannelCreator']
+__all__ = ['MossInReachyMini', 'ReachyMiniChannelCreator', 'provide_channel']
 
 
 class MossInReachyMini:
@@ -103,7 +103,7 @@ class MossInReachyMini:
     async def bootstrap(self):
         self._mini.__enter__()
         runtime = ChannelCtx.runtime()
-        if isinstance(runtime, StatefulChannelRuntime):
+        if isinstance(runtime, StatefulChannelRuntimeImpl):
             await runtime.switch_state("waken")
 
     async def aclose(self):
@@ -125,21 +125,39 @@ class ReachyMiniChannelCreator(ChannelCreator):
         self._allow_vision = allow_vision
 
     def factory(self, container: IoCContainer) -> Channel:
-        ws = container.force_fetch(Workspace)
+        matrix = container.force_fetch(Matrix)
         logger = container.force_fetch(LoggerItf)
         if not container.bound(ReachyMini):
-            reachy_mini = ReachyMini()
-            container.set(ReachyMini, reachy_mini)
-        else:
-            # 完全没必要绑定, 直接拿单例即可.
-            reachy_mini = container.force_fetch(ReachyMini)
-        reachy_mini = MossInReachyMini(
-            mini=reachy_mini,
-            ws=ws,
+            container.set(ReachyMini, ReachyMini())
+        mini = container.force_fetch(ReachyMini)
+        return MossInReachyMini(
+            mini=mini,
+            ws=matrix.cell_workspace,
             logger=logger,
             default_state=self._default_state,
             name=self._name,
             description=self._description,
             allow_vision=self._allow_vision,
-        )
-        return reachy_mini.as_channel()
+        ).as_channel()
+
+
+async def provide_channel(matrix: Matrix) -> None:
+    """app 入口: 注入依赖, 组装 Channel, 注册到 Matrix.
+
+    MossInReachyMini 三层模型:
+      1. 无副作用类型   — 类定义
+      2. 无副作用配置   — 此处: 注入依赖, 组装 Channel
+      3. 有副作用实例   — bootstrap/close 生命周期, 连接硬件
+
+    环境变量:
+      REACHY_MEDIA_BACKEND: media backend, 默认 no_media (跳过 GStreamer camera)
+    """
+    import os
+    media_backend = os.environ.get('REACHY_MEDIA_BACKEND', 'no_media')
+    mini = ReachyMini(media_backend=media_backend)
+    reachy = MossInReachyMini(
+        mini=mini,
+        ws=matrix.cell_workspace,
+        logger=matrix.logger,
+    )
+    await matrix.provide_channel(reachy.as_channel())

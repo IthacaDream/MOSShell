@@ -3,7 +3,7 @@ title: Reachy Mini Integration — 完整 workspace 集成与测试体系
 status: in-progress
 priority: P1
 created: 2026-05-29
-updated: 2026-05-29
+updated: 2026-05-30
 depends: []
 milestone:
 description: >-
@@ -79,13 +79,39 @@ channel factory 失败 → `StatefulChannelRuntime.__init__()` 异常 → `CTMLS
 
 ### 下一步
 
-1. **音频播放器阻塞/同步/中断** — 当前焦点
-2. ReachyMini 硬件连接延迟到 bootstrap
-3. Matrix 错误传播加固
-4. 框架层 context 内容类型过滤（视觉数据不应注入非多模态模型）
-5. 依赖体系分层：host 瘦身，reachy_mini 迁到 app 独立 venv
-6. 运行时数据路径纳入 `workspace.runtime/` 约定
-7. Mode import 诊断在 `moss modes list` 层面做检查
+1. **Scope 语法异常** — `<_>` scope 在 app channel 上大量 cancelled，不加 scope 正常。scope 开关未正确传递
+2. 音频播放器阻塞/同步/中断
+3. ReachyMini 硬件连接延迟到 bootstrap
+4. Matrix 错误传播加固
+5. 框架层 context 内容类型过滤
+6. `host` extras 瘦身：`pydantic-ai` 迁到 `ghost` extras
+7. 运行时数据路径纳入 `workspace.runtime/` 约定
+8. Mode import 诊断
+
+## 2026-05-30 Session — App 独立 venv 迁移 + 端到端验证
+
+### 完成项
+
+- **App 独立 venv 落地**：`.moss_ws/apps/reachy_mini/body/` 作为独立 app 运行，拥有自己的 `pyproject.toml` + `.venv` (Python 3.13, 195 packages)
+- **依赖隔离**：`reachy-mini` SDK 及重量级传递依赖 (`pygobject`→`pycairo`, `gstreamer_python` 等) 隔离在 app venv 中，核心开发环境干净
+- **全链路验证通过**：MOSS Host → Circus `uv run` → Matrix → Zenoh channel proxy → CTML 命令执行，端到端通畅
+- **`_app_to_circus_params` bug 修复**：`args_list` 被 `[self._get_app_script(app)]` 覆盖，导致 `uv main.py` 而不是 `uv run main.py`。改回使用 `_get_app_executable()` 返回的完整 `args_list`
+- **`ReachyMiniChannelCreator` 清理**：去 Matrix/Workspace 双路径，直接 `force_fetch(Matrix)`
+- **`provide_channel()` 可复用入口**：放到 `ghoshell_moss_contrib.moss_in_reachy_mini.main`，app `main.py` 薄到 3 行
+- **`.env` + `dotenv` 模式**：app 目录下 `.env` 管理环境变量，`main.py` 顶部 `load_dotenv()` 在任何 import 前加载
+- **macOS GStreamer 兼容**：pip 安装的 `gstreamer_python` 在 uv venv 中 GObject 类型系统初始化失败（`g_type_get_qdata: assertion 'node != NULL'`），最终 segfault。默认使用 `media_backend='no_media'` 跳过本地相机，通过 `REACHY_MEDIA_BACKEND` 环境变量可配置
+- **NumPy macOS 14 兼容**：NumPy 2.4.x 引用了 macOS 15 的 ILP64 Accelerate 符号，pin `numpy<2.3` 解决
+
+### 发现的新问题
+
+- **Scope 语法异常**：不加 `<_>` scope 时所有命令正常执行（11 done, 0 cancelled），加 scope 后大量 cancelled。不是音频同步问题，scope 开关本身未正确传递到 app channel
+- **`pydantic-ai` 在 `[host]` extras 中**：app 不需要它（属于 ghost 依赖），当前 app 带上了不必要的 `pydantic-ai` → `host` extras 待瘦身
+
+### Key Decisions
+
+- **App 模式优于 Mode Channel**：通过 Zenoh proxy 通讯，app 进程独立管理生命周期，依赖隔离，可单独重启
+- **`no_media` 为默认**：macOS 上 GStreamer 兼容问题暂不解决，等 pip 包修复或换 conda env
+- **`.env` 在 app 目录**：app 自行管理环境变量，不依赖 host 传递
 
 ## 第一步：Workspace 入库
 

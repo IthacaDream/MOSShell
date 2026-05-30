@@ -420,6 +420,59 @@ async def test_remote_scope_timeout_cancels_proxy_command():
 
 
 @pytest.mark.asyncio
+async def test_main_scope_run_remote_task():
+    provider_main = PyChannel(name="provider")
+    provider, proxy = create_thread_bridge('proxy')
+
+    got = []
+
+    @provider_main.build.command()
+    async def foo() -> str:
+        got.append(1)
+        await asyncio.sleep(0.05)
+        got.append(1)
+        return "hello"
+
+    shell = new_ctml_shell()
+    shell.main_channel.import_channels(proxy)
+
+    @shell.main_channel.build.content_command
+    async def content(chunks__):
+        await asyncio.sleep(0.01)
+        return None
+
+    async with provider.arun(provider_main):
+        async with shell:
+            await shell.wait_connected("proxy")
+            async with shell.interpreter_in_ctx() as i:
+                i.feed("<proxy:foo/>")
+                i.commit()
+                tasks = await i.wait_tasks(timeout=2)
+                i.raise_exception()
+                assert len(tasks) == 1
+                assert len(got) == 2
+                got.clear()
+            async with shell.interpreter_in_ctx() as i:
+                i.feed("<_><proxy:foo/>hello</_>")
+                i.commit()
+                tasks = await i.wait_tasks(timeout=2)
+                for t in tasks.values():
+                    assert t.done()
+                i.raise_exception()
+            assert len(got) == 1
+            got.clear()
+
+            async with shell.interpreter_in_ctx() as i:
+                i.feed("<_><proxy:foo/></_>")
+                i.commit()
+                tasks = await i.wait_tasks(timeout=2)
+            assert len(tasks) >= 3
+            for t in tasks.values():
+                assert t.success()
+            assert len(got) == 2
+
+
+@pytest.mark.asyncio
 async def test_remote_scope_until_any_cancels_slower_task():
     """远程 scope until='any' — 快命令先完成，慢命令被 scope 取消"""
     provider_main = PyChannel(name="provider")

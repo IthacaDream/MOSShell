@@ -223,8 +223,8 @@ class HostAppStore(AppStore):
 
         return {
             "name": app.address,
-            "cmd": executable,  # 仅包含可执行程序名
-            "args": [self._get_app_script(app)],  # 参数列表
+            "cmd": executable,
+            "args": args_list,
             "options": options,
         }
 

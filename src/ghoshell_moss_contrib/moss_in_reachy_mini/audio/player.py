@@ -95,5 +95,6 @@ class ReachyMiniStreamPlayerProvider(Provider[StreamAudioPlayer]):
 
     def factory(self, con: IoCContainer) -> StreamAudioPlayer:
         logger = con.force_fetch(LoggerItf)
+        # todo: ReachyMini 如果都要依赖, 就不要做运行时隔离了, 做 module 级别引用就好了.
         mini = ReachyMini()
         return ReachyMiniStreamPlayer(mini, logger=logger)

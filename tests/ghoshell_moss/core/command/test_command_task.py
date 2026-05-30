@@ -285,3 +285,15 @@ async def test_command_task_timeout():
     with pytest.raises(asyncio.TimeoutError):
         await asyncio.wait_for(task.wait(throw=True), 0.2)
 
+
+@pytest.mark.asyncio
+async def test_command_task_cancel_is_not_success():
+    async def foo() -> int:
+        await asyncio.sleep(1)
+        return 123
+
+    foo_command = PyCommand(foo, timeout=0.01)
+    task = BaseCommandTask.from_command(foo_command)
+    task.cancel()
+    assert task.cancelled()
+    assert not task.success()
