@@ -236,7 +236,7 @@ class HostAppStore(AppStore):
             # 构造参数
             params = self._app_to_circus_params(
                 app,
-                self._env_obj.dump_moss_env(for_child_process=True, with_os_env=False, cell_address=app.address),
+                self._env_obj.dump_moss_env(for_child_process=True, with_os_env=True, cell_address=app.address),
                 argument,
             )
             app_runtime_logs_dir = Path(app.work_directory).joinpath("runtime").joinpath("logs").resolve()
