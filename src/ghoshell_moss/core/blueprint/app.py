@@ -7,7 +7,6 @@ from enum import Enum
 from .matrix import Cell
 import frontmatter
 import fnmatch
-
 __all__ = [
     'AppInfo',
     'AppWatcher',
