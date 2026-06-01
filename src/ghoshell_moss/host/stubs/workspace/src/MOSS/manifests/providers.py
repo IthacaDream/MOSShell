@@ -1,7 +1,7 @@
 from ghoshell_moss.host.providers import (
-    WorkspaceSessionProvider,
+    HostSessionProvider,
     ZenohTopicServiceProvider,
-    WorkspaceLoggerProvider,
+    HostLoggerProvider,
     HostEnvZenohProvider,
     HostEnvConfigStoreProvider,
 )
@@ -11,13 +11,13 @@ from ghoshell_moss.host.providers.audio_player_provider import AudioPlayerProvid
 from ghoshell_moss.core.resources.memory_registry import InMemoryResourceRegistryProvider
 from ghoshell_moss.host.fractal.zenoh_fractal import ZenohFractalHubProvider, ZenohFractalCellContractProvider
 
-moss_session_provider = WorkspaceSessionProvider()
+moss_session_provider = HostSessionProvider()
 
 config_store_provider = HostEnvConfigStoreProvider()
 
 zenoh_session_provider = HostEnvZenohProvider()
 
-logger_provider = WorkspaceLoggerProvider()
+logger_provider = HostLoggerProvider()
 
 topic_service_provider = ZenohTopicServiceProvider()
 

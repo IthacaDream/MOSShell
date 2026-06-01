@@ -16,9 +16,9 @@ from ghoshell_moss.core.concepts.topic import TopicService
 from ghoshell_moss.core.blueprint.session import (
     Session, Signal, Role, OutputItem, OutputBuffer, Sample, StreamSubscriber,
 )
-from ghoshell_moss.core.session.utils import SimpleOutputBuffer, SessionStorages
+from ghoshell_moss.core.session.utils import SimpleOutputBuffer
 
-__all__ = ["MockSession", "SimpleOutputBuffer", "SessionStorages"]
+__all__ = ["MockSession", "SimpleOutputBuffer"]
 
 
 class _MockStreamSubscriber(StreamSubscriber):
@@ -106,6 +106,18 @@ class MockSession(Session):
         self.outputs: list[OutputItem] = []
         self.stream_pubs: dict[str, list[bytes]] = {}
 
+    @property
+    def sessions_root_storage(self) -> Storage:
+        return self._session_root_storage
+
+    @property
+    def sessions_tmp_root_storage(self) -> Storage:
+        return self._session_root_storage.sub_storage('tmp')
+
+    # ── storages ──────────────────────────────
+
+
+
     # ── properties ──────────────────────────────
 
     @property
@@ -119,16 +131,6 @@ class MockSession(Session):
     @property
     def topics(self) -> TopicService:
         return self._topics
-
-    @property
-    def storage(self) -> Storage:
-        if self._session_storage is None:
-            self._session_storage = self._make_session_level_storage(self._session_root_storage)
-        return self._session_storage
-
-    @property
-    def tmp_storage(self) -> Storage:
-        return self._session_storage.sub_storage('tmp')
 
     def _make_session_level_storage(self, storage: Storage) -> Storage:
         scope_level_storage = storage.sub_storage(self._session_scope)

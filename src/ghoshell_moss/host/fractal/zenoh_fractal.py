@@ -4,7 +4,7 @@ from pathlib import Path
 
 from typing import Iterable, Type
 from typing_extensions import Self
-from ghoshell_moss.core.blueprint.host import FractalHub, FractalCellProvider
+from ghoshell_moss.core.blueprint.fractal import FractalHub, FractalCellProvider
 from ghoshell_moss.core.blueprint.environment import Environment
 from ghoshell_moss.core.blueprint.states_channel import StatefulChannel
 from ghoshell_moss.core.concepts.channel import Channel, ChannelName, ChannelNamePattern, \

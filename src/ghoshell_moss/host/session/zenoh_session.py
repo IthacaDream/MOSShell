@@ -16,7 +16,7 @@ from ghoshell_moss.core.blueprint.session import (
 from ghoshell_moss.core.blueprint.environment import DEFAULT_SESSION_SCOPE
 from ghoshell_moss.depends import depend_zenoh
 from ghoshell_moss.message import unique_id
-from ghoshell_moss.core.session.utils import SessionStorages, SimpleOutputBuffer
+from ghoshell_moss.core.session.utils import SimpleOutputBuffer
 
 depend_zenoh()
 import zenoh
@@ -37,6 +37,7 @@ class MossSessionWithZenoh(Session):
             self,
             session_scope: str,
             session_root_storage: Storage,
+            session_tmp_root_storage: Storage,
             logger: LoggerItf,
             zenoh_session: zenoh.Session,
             topic_service: TopicService,
@@ -45,6 +46,7 @@ class MossSessionWithZenoh(Session):
         """
         :param session_scope: Moss Matrix 运行时, 所有通讯都围绕同一个 session scope.
         :param session_root_storage: 在当前隔离级别下, Session 拿到的 Root Storage.
+        :param session_tmp_storage:  session 的临时存储路径.
         :param logger: 日志模块.
         :param zenoh_session: 依赖 zenoh 通讯.
         :param topic_service: session 持有 topic service. 未来应该是 session 构建它.
@@ -79,7 +81,7 @@ class MossSessionWithZenoh(Session):
         self._topic_service = topic_service
         self._closing_event = ThreadSafeEvent()
         self._session_root_storage = session_root_storage
-        self._session_storages = SessionStorages(self._session_root_storage, self._session_scope, self._session_id)
+        self._session_tmp_root_storage = session_tmp_root_storage
 
     @property
     def session_scope(self) -> str:
@@ -90,16 +92,16 @@ class MossSessionWithZenoh(Session):
         return self._session_id
 
     @property
-    def storage(self) -> Storage:
-        return self._session_storages.session_storage
-
-    @property
-    def tmp_storage(self) -> Storage:
-        return self._session_storages.tmp_storage
-
-    @property
     def topics(self) -> TopicService:
         return self._topic_service
+
+    @property
+    def sessions_root_storage(self) -> Storage:
+        return self._session_root_storage
+
+    @property
+    def sessions_tmp_root_storage(self) -> Storage:
+        return self._session_tmp_root_storage
 
     def _check_running(self) -> None:
         if self._zenoh_session.is_closed():

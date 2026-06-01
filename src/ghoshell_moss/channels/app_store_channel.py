@@ -1,12 +1,11 @@
 import asyncio
-from typing import Optional
 from ghoshell_moss.core.concepts.channel import Channel, ChannelName, ChannelRuntime, ChannelCtx
 from ghoshell_moss.core.concepts.command import Command
 from ghoshell_moss.core.blueprint.states_channel import new_stateful_channel_from_main, ChannelState
 from ghoshell_moss.core.blueprint.matrix import Matrix
 from ghoshell_moss.core.blueprint.app import AppStore
-from ghoshell_moss.message import unique_id
 from ghoshell_container import IoCContainer
+from ghoshell_moss.message import unique_id
 from threading import Lock
 
 __all__ = ['AppStoreChannel', 'build_apps_channel', 'AppStoreChannelState']
@@ -17,9 +16,8 @@ class AppStoreChannel(Channel):
     the App Store Channel.
     """
 
-    def __init__(self, name: str, description: str = ""):
-        from ghoshell_moss.message import unique_id
-        self._name = name
+    def __init__(self, name: str = '', description: str = ""):
+        self._name = name or 'apps'
         self._description = description or (
             "App Store 核心通道，用于管理当前环境下的所有可用应用。"
             "你可以通过此通道拉起具有特定功能的子进程"

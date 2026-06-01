@@ -5,7 +5,7 @@ FractalServeState — REPL 内分形 Hub 调试状态。
 Hub 的生命周期和 channel 集成由 Matrix 管理，此状态仅做观测和控制。
 """
 from ghoshell_moss import Matrix
-from ghoshell_moss.core.blueprint.host import FractalHub
+from ghoshell_moss.core.blueprint.fractal import FractalHub
 
 __all__ = ['FractalInspector']
 

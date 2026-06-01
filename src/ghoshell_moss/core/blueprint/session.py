@@ -336,23 +336,46 @@ class Session(ABC):
             async for delta in stream:
                 yield delta.payload.decode('utf-8')
 
+    # --- session 的各种文件存储空间, 支持不同的隔离级别, 作为一种文件通讯方式 --- #
+
     @property
     @abstractmethod
-    def storage(self) -> Storage:
+    def sessions_root_storage(self) -> Storage:
         """
-        session 专属的 storage.
-        需要的话可以将文件作为通讯方式.
+        所有历史 sessions 所在的持久化 storage.
         """
         pass
 
     @property
     @abstractmethod
+    def sessions_tmp_root_storage(self) -> Storage:
+        """
+        所有 sessions 临时存储路径的鹅共用 Storage.
+        """
+        pass
+
+    @property
+    def scope_storage(self) -> Storage:
+        """
+        Session scope 级别的持久化 Storage.
+        """
+        return self.sessions_root_storage.sub_storage(f"scope-{self.session_scope}")
+
+    @property
+    def storage(self) -> Storage:
+        """
+        session id 专属的 storage.
+        需要的话可以将文件作为通讯方式.
+        """
+        return self.scope_storage.sub_storage(f"session-{self.session_id}")
+
+    @property
     def tmp_storage(self) -> Storage:
         """
         Session 级别的临时文件区.
         应该在启动和关闭时检查清理.
         """
-        pass
+        return self.sessions_tmp_root_storage.sub_storage(f"{self.session_scope}-{self.session_id}")
 
     @abstractmethod
     async def __aenter__(self) -> Self:

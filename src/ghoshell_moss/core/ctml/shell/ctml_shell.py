@@ -265,7 +265,7 @@ class CTMLShell(MOSShell[PrimeChannel]):
                 continue
             waiting.append(runtime.wait_connected())
         if len(waiting) > 0:
-            await asyncio.gather(*waiting)
+            _ = await asyncio.gather(*waiting)
 
     async def wait_until_idle(self, timeout: float | None = None) -> None:
         if not self.is_running():

@@ -41,7 +41,7 @@ class Atom(Ghost):
 
     def system_prompt(self) -> str:
         """调试用: 返回 Agent 实际使用的 instruction."""
-        return self._meta._build_instruction(self._container)
+        return self._meta.build_instruction_from_ioc(self._container)
 
     # ── 消息协议 ──────────────────────────────────
 

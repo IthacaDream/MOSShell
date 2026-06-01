@@ -71,7 +71,7 @@ moss codex get-interface ghoshell_moss.core.blueprint.app
 AI 控制面：
 
 ```bash
-moss codex get-interface ghoshell_moss.host.app_store_channel
+moss codex get-interface ghoshell_moss.channels.app_store_channel
 ```
 
 AppStoreChannel 注册在 Shell Channel 树中，暴露 `list_apps` / `start` / `stop`。
@@ -218,11 +218,12 @@ if __name__ == "__main__":
 
 ```python
 async def producer_task(matrix: Matrix):
-    session = matrix.session
+    session = matrix.session_storage
     while True:
         msg = Message.new().with_content("periodic signal")
         session.output('log', msg)
         await asyncio.sleep(1)
+
 
 if __name__ == "__main__":
     Matrix.discover().run(producer_task)

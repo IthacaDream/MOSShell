@@ -1,17 +1,17 @@
 import logging
-from typing import Type
+from typing import Type, Iterable
 
 from ghoshell_moss.contracts.workspace import Workspace
 from ghoshell_moss.contracts.logger import LoggerItf, default_logger_formatter
-from ghoshell_container import Provider, IoCContainer
+from ghoshell_container import Provider, IoCContainer, INSTANCE
 from logging.handlers import TimedRotatingFileHandler
 
 __all__ = [
-    'WorkspaceLoggerProvider',
+    'HostLoggerProvider',
 ]
 
 
-class WorkspaceLoggerProvider(Provider[LoggerItf]):
+class HostLoggerProvider(Provider[LoggerItf]):
 
     def __init__(
             self,
@@ -29,6 +29,9 @@ class WorkspaceLoggerProvider(Provider[LoggerItf]):
 
     def contract(self) -> Type[LoggerItf]:
         return LoggerItf
+
+    def aliases(self) -> Iterable[Type[INSTANCE]]:
+        yield logging.Logger
 
     def factory(self, con: IoCContainer) -> LoggerItf:
         ws = con.get(Workspace)

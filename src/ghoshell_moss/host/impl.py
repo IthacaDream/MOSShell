@@ -7,7 +7,7 @@ from ghoshell_moss.core.blueprint.host import (
 from ghoshell_moss.core.blueprint.ghost import GhostMeta
 from ghoshell_moss.core.blueprint.manifests import Manifests
 from ghoshell_moss.core.blueprint.matrix import Matrix
-from ghoshell_moss.core.codex.discover import ScanError
+from ghoshell_moss.core.codex.discover import ScanError, ModuleManifest
 from ghoshell_moss.contracts.workspace import LocalWorkspace, Workspace
 from ghoshell_moss.core.blueprint.environment import Environment
 from ghoshell_moss.host.manifests import PackageManifests, MergedManifests
@@ -17,6 +17,8 @@ from ghoshell_moss.host.ghosts import list_ghosts_from_root_package
 from ghoshell_moss.host.matrix import MatrixImpl
 from ghoshell_moss.host.moss_runtime import MossRuntimeImpl
 from ghoshell_moss.host.ghost_runtime import GhostRuntimeImpl
+import importlib
+import pathlib
 
 __all__ = ['Host']
 
@@ -31,10 +33,9 @@ class Host(MossHost):
             env: Environment | None = None,
             mode: Mode | str | None = None,
             session_scope: str | None = None,
-            strict_scan: bool = False,
     ):
-        self._strict_scan = strict_scan
-        self._scan_errors: list[ScanError] = []
+        self._scan_ghost_errors: list[ScanError] = []
+        self._scan_manifest_errors: list[ScanError] = []
 
         self._env = env or Environment.discover()
         if mode is not None:
@@ -47,11 +48,11 @@ class Host(MossHost):
         if not self._workspace.root_path().exists():
             raise RuntimeError()
         self._env_manifest = PackageManifests.from_environment(
-            self.env, strict=strict_scan, errors=self._scan_errors,
+            self.env, strict=False, errors=self._scan_manifest_errors,
         )
 
         self._env_modes: dict[str, Mode] | None = None
-        self._ghosts: dict[str, GhostMeta] | None = None
+        self._ghosts: dict[str, tuple[GhostMeta, ModuleManifest]] | None = None
         moss_mode = mode
         if moss_mode is None:
             moss_mode = self.env.moss_mode_name
@@ -115,33 +116,26 @@ class Host(MossHost):
     @property
     def scan_errors(self) -> list[ScanError]:
         """Aggregated scan errors from manifests, modes, and ghosts discovery."""
-        return list(self._scan_errors)
+        return list(self._scan_ghost_errors)
 
     def all_modes(self) -> dict[str, Mode]:
         if self._env_modes is None:
-            try:
-                self._env_modes = {
-                    mode.name: mode for mode in list_modes_from_root_package(
-                        strict=self._strict_scan, errors=self._scan_errors,
-                    )
-                }
-            except Exception:
-                if self._strict_scan:
-                    raise
-                self._env_modes = {}
+            self._env_modes = {
+                mode.name: mode for mode in list_modes_from_root_package(
+                    strict=False, errors=self._scan_ghost_errors,
+                )
+            }
         return self._env_modes
 
-    def all_ghosts(self) -> dict[str, GhostMeta]:
+    def all_ghost_manifests(self) -> dict[str, tuple[GhostMeta, ModuleManifest]]:
         if self._ghosts is None:
-            try:
-                self._ghosts = list_ghosts_from_root_package(
-                    strict=self._strict_scan, errors=self._scan_errors,
-                )
-            except Exception:
-                if self._strict_scan:
-                    raise
-                self._ghosts = {}
+            self._ghosts = list_ghosts_from_root_package(
+                strict=False, errors=self._scan_ghost_errors,
+            )
         return self._ghosts
+
+    def all_ghosts(self) -> dict[str, GhostMeta]:
+        return {name: value[0] for name, value in self.all_ghost_manifests().items()}
 
     def new_mode(self, name: str, apps: list[str], bringup_apps: list[str], description: str = "") -> Path:
         """
@@ -156,6 +150,12 @@ class Host(MossHost):
 
     def matrix(self) -> Matrix:
         return self._matrix
+
+    def scan_manifest_errors(self) -> list[ScanError]:
+        return self._scan_manifest_errors
+
+    def scan_ghost_errors(self) -> list[ScanError]:
+        return self._scan_ghost_errors
 
     def run(
             self,
@@ -173,10 +173,10 @@ class Host(MossHost):
         )
 
     def run_ghost(
-        self,
-        ghost: str | GhostMeta,
-        *,
-        run_shell: bool = True,
+            self,
+            ghost: str | GhostMeta,
+            *,
+            run_shell: bool = True,
     ) -> GhostRuntime:
         """创建 GhostRuntime — 编排 MossRuntime + Ghost 生命周期.
 
@@ -186,14 +186,21 @@ class Host(MossHost):
             run_shell: 传递给 MossRuntime.
         """
         if isinstance(ghost, str):
-            ghost_meta = self.all_ghosts().get(ghost)
+            ghost_meta, _manifest = self.all_ghost_manifests().get(ghost)
             if ghost_meta is None:
                 raise KeyError(f"Ghost '{ghost}' not found in workspace")
-        else:
+            manifest: ModuleManifest = _manifest
+            module = importlib.import_module(manifest.module_path)
+            source_path = pathlib.Path(module.__file__).parent.absolute()
+        elif isinstance(ghost, GhostMeta):
             ghost_meta = ghost
+            source_path = None
+        else:
+            raise ValueError(f'invalid ghost argument type {type(ghost)}')
 
         moss_runtime = self.run(run_shell=run_shell)
         return GhostRuntimeImpl(
             moss_runtime=moss_runtime,
             ghost_meta=ghost_meta,
+            source_path=source_path,
         )

@@ -1,12 +1,28 @@
 import typer
 
 from ghoshell_moss.host import Host
+from ghoshell_moss.core.codex.discover import ScanError
 from .utils import console, print_simple_table, print_simple_panel
 
 ghost_app = typer.Typer(
     help="Manage MOSS Ghosts (Intelligent Agent Identities).",
     no_args_is_help=True,
 )
+
+
+def _display_scan_errors(errors: list[ScanError]) -> None:
+    """显示发现过程中的非致命 scan 错误。"""
+    if not errors:
+        return
+    console.print(f"\n[yellow]Warning: {len(errors)} ghost discovery error(s):[/yellow]")
+    error_data = [
+        [err.module_path, err.stage, f"{type(err.exception).__name__}: {err.exception}"]
+        for err in errors
+    ]
+    print_simple_table(
+        data=error_data,
+        headers=["Module", "Stage", "Error"],
+    )
 
 
 @ghost_app.command(name="list")
@@ -21,6 +37,7 @@ def list_ghosts():
             "[dim]Place a GhostMeta instance in MOSS/ghosts/ "
             "(as a module or package) to make it discoverable.[/dim]"
         )
+        _display_scan_errors(host.scan_errors)
         return
 
     table_data = []
@@ -38,6 +55,7 @@ def list_ghosts():
     )
     console.print(f"\n[dim]Total: {len(ghosts)} ghost(s) found.[/dim]")
     console.print("[dim]Use [bold]moss ghosts show <name>[/bold] for details.[/dim]")
+    _display_scan_errors(host.scan_errors)
 
 
 @ghost_app.command(name="show")
@@ -48,6 +66,7 @@ def show_ghost(name: str):
 
     if name not in ghosts:
         console.print(f"[red]Error: Ghost '{name}' not found.[/red]")
+        _display_scan_errors(host.scan_errors)
         raise typer.Exit(1)
 
     meta = ghosts[name]
@@ -100,3 +119,5 @@ def show_ghost(name: str):
             console.print(f"  [dim]•[/dim] {c}")
     else:
         console.print("\n[dim]Contracts: none declared[/dim]")
+
+    _display_scan_errors(host.scan_errors)

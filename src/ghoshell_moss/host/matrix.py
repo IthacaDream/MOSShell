@@ -1,5 +1,5 @@
 import asyncio
-from typing import Coroutine, Iterable, Type
+from typing import Coroutine, Iterable, Type, Literal
 
 from typing_extensions import Self
 
@@ -22,8 +22,8 @@ from ghoshell_moss.core.concepts.channel import Channel
 from ghoshell_moss.core.concepts.topic import TopicService
 from ghoshell_moss.core.concepts.errors import FatalError
 from ghoshell_moss.host.providers import (
-    WorkspaceZenohProvider, WorkspaceLoggerProvider, ZenohTopicServiceProvider,
-    WorkspaceSessionProvider,
+    WorkspaceZenohProvider, HostLoggerProvider, ZenohTopicServiceProvider,
+    HostSessionProvider,
 )
 from ghoshell_moss.bridges.zenoh_bridge import ZenohChannelProvider, ZenohProxyChannel
 from ghoshell_moss.core.helpers import ThreadSafeEvent
@@ -259,9 +259,9 @@ class MatrixImpl(Matrix):
             *[info.config for info in self.manifests.configs().values()]
         ))
         # 注册 session.
-        default_providers.append(WorkspaceSessionProvider(session_scope=self.env.session_scope))
+        default_providers.append(HostSessionProvider())
         # 否则注册约定的日志模块, 但仍然可能被 contracts 覆盖.
-        default_providers.append(WorkspaceLoggerProvider())
+        default_providers.append(HostLoggerProvider())
 
         # 注册 Topic Service.
         default_providers.append(ZenohTopicServiceProvider(
@@ -296,8 +296,8 @@ class MatrixImpl(Matrix):
         return self._current_mode
 
     @property
-    def moss_mode_name(self) -> str:
-        return self._current_mode.name
+    def ghost_name(self) -> str | Literal['None']:
+        return self.env.ghost_name or 'None'
 
     def list_cells(self) -> dict[str, Cell]:
         return self._cells
@@ -318,8 +318,7 @@ class MatrixImpl(Matrix):
             self,
             channel: Channel,
             *,
-            cell_type: str | None = None,
-            cell_name: str | None = None,
+            address: str | None = None,
     ) -> asyncio.Future[None]:
         self._check_running()
         # cancel providing channel
@@ -329,9 +328,7 @@ class MatrixImpl(Matrix):
             cancelling = self._channel_provider_task
             self._channel_provider_task = None
 
-        cell_name = cell_name or self._this_cell.name
-        cell_type = cell_type or self._this_cell.type
-        provider_address = Cell.make_address(cell_type, cell_name)
+        provider_address = address or self._this_cell.address
 
         async def _providing():
             nonlocal cancelling, channel
@@ -359,10 +356,10 @@ class MatrixImpl(Matrix):
             name: str,
             description: str = '',
             id: str | None = None,
-            only_allowed_in_main_cell: bool = True,
+            only_allowed_in_host_cell: bool = True,
     ) -> ZenohProxyChannel:
         self._check_running()
-        if only_allowed_in_main_cell and not self._is_main:
+        if only_allowed_in_host_cell and not self._is_main:
             raise RuntimeError(f"Only allowed in main cell type: {self.this.type}")
         return ZenohProxyChannel(
             address=address,

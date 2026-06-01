@@ -191,4 +191,4 @@ def test_storage_uses_tmpdir():
     storage = sess.storage
     assert storage is not None
     # 第二次访问返回同一个实例
-    assert sess.storage is storage
+    assert sess.storage.abspath() == storage.abspath()

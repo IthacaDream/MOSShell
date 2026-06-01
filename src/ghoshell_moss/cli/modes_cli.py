@@ -10,6 +10,7 @@ from .utils import console, print_simple_table, print_simple_panel
 import typer
 
 from ghoshell_moss.host import Host
+from ghoshell_moss.core.codex.discover import ScanError
 
 mode_app = typer.Typer(help="Manage MOSS Host Modes (Environment Isolation).", no_args_is_help=True)
 
@@ -23,6 +24,21 @@ _MANIFEST_FILES = [
     ("nuclei.py",    "感知核声明"),
     ("contracts.py", "mode 专属契约"),
 ]
+
+
+def _display_scan_errors(errors: list[ScanError]) -> None:
+    """显示发现过程中的非致命 scan 错误。"""
+    if not errors:
+        return
+    console.print(f"\n[yellow]Warning: {len(errors)} mode discovery error(s):[/yellow]")
+    error_data = [
+        [err.module_path, err.stage, f"{type(err.exception).__name__}: {err.exception}"]
+        for err in errors
+    ]
+    print_simple_table(
+        data=error_data,
+        headers=["Module", "Stage", "Error"],
+    )
 
 
 def _list_manifest_files(mode_dir: Path) -> list[tuple[str, str, bool]]:
@@ -87,6 +103,7 @@ def list_modes():
 
     console.print(f"\n[dim]Total: {len(modes)} modes found.[/dim]")
     console.print(f"[dim]Use [bold]moss modes show <name>[/bold] to see instructions.[/dim]")
+    _display_scan_errors(host.scan_errors)
 
 
 @mode_app.command(name="show")
@@ -130,6 +147,8 @@ def show_mode(name: str):
         else:
             _print_manifest_files_human(manifest_status)
         console.print(f"\n[dim]Tip: [bold]moss --mode {name} manifests explain[/bold] for full capability view.[/dim]")
+
+    _display_scan_errors(host.scan_errors)
 
 
 def _resolve_mode_dir(mode) -> Path | None:

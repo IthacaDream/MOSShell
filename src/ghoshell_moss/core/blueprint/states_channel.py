@@ -236,15 +236,11 @@ def new_default_shell_main_channel(
     """
     from ghoshell_moss.core.ctml.shell.ctml_main import inject_system_primitives
     from ghoshell_moss.core.speech import SpeechChannelModule
-    from ghoshell_moss.host.app_store_channel import AppStoreChannel
 
     main = new_shell_main_channel(description=description)
 
     # -- 系统原语 --------------------------------------------------
     inject_system_primitives(main, extended=True)
-
-    # -- App Store ---------------------------------------------------
-    main.import_channels(AppStoreChannel(name='apps'))
 
     # -- Speech --------------------------------------------------
     main.with_module(SpeechChannelModule())

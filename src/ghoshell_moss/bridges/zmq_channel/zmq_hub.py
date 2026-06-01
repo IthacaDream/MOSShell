@@ -118,7 +118,7 @@ class ManagedProcess:
                 self.logger.log(level, "[%s] %s", self.name, decoded)
 
         try:
-            await asyncio.gather(
+            _ = await asyncio.gather(
                 read_stream(self.process.stdout, logging.INFO),
                 read_stream(self.process.stderr, logging.ERROR),
             )

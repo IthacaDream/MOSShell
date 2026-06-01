@@ -10,6 +10,7 @@ import pytest
 from ghoshell_container import Container
 
 from ghoshell_moss.core.blueprint.mindflow import Moment, Reaction
+from ghoshell_moss.core.blueprint.ghost import GhostWorkspace
 from ghoshell_moss.message import Message
 from ghoshell_moss.contracts.system_prompter import SystemPrompter, BaseSystemPrompter
 from ghoshell_moss.contracts.workspace import Workspace, LocalWorkspace
@@ -45,37 +46,34 @@ class TestSoul:
         assert meta.soul_content == ""
 
     def test_soul_path_resolves_to_name(self, tmp_path: Path):
-        souls_dir = tmp_path / "souls"
-        souls_dir.mkdir()
-        (souls_dir / "test_atom.md").write_text("from file")
-        ws = LocalWorkspace(tmp_path)
+        souls_dir = tmp_path
+        (souls_dir / "soul.md").write_text("from file")
+        ws = GhostWorkspace(home=tmp_path, source=None)
         meta = _atom_meta(soul_path=None, soul_content=None)
-        meta._load_soul(ws.root_path())
+        meta._load_soul(ws)
         assert meta.soul_content == "from file"
 
     def test_soul_path_explicit_str(self, tmp_path: Path):
-        souls_dir = tmp_path / "souls"
-        souls_dir.mkdir()
+        souls_dir = tmp_path
         (souls_dir / "custom.md").write_text("custom")
-        ws = LocalWorkspace(tmp_path)
-        meta = _atom_meta(soul_path="custom", soul_content=None)
-        meta._load_soul(ws.root_path())
+        meta = _atom_meta(soul_path="custom.md", soul_content=None)
+        ws = GhostWorkspace(home=tmp_path, source=None)
+        meta._load_soul(ws)
         assert meta.soul_content == "custom"
 
     def test_soul_path_absolute(self, tmp_path: Path):
-        file = tmp_path / "abs.md"
+        file = tmp_path / "soul.md"
         file.write_text("absolute")
         meta = _atom_meta(soul_path=file, soul_content=None)
-        meta._load_soul(Path("/irrelevant"))
-        assert meta.soul_content == "absolute"
+        meta._load_soul(GhostWorkspace(Path("/irrelevant"), source=None))
+        assert meta.soul_content == ""
 
     def test_soul_content_skips_file_load(self, tmp_path: Path):
-        souls_dir = tmp_path / "souls"
-        souls_dir.mkdir()
-        (souls_dir / "test_atom.md").write_text("should not load")
-        ws = LocalWorkspace(tmp_path)
+        souls_dir = tmp_path
+        (souls_dir / "soul.md").write_text("should not load")
+        ws = GhostWorkspace(home=tmp_path, source=None)
         meta = _atom_meta(soul_content="preset")
-        meta._load_soul(ws.root_path())
+        meta._load_soul(ws)
         assert meta.soul_content == "preset"
 
 
@@ -86,13 +84,13 @@ class TestBuildInstruction:
     def test_no_system_prompter(self):
         meta = _atom_meta(soul_content="my soul")
         c = Container()
-        assert meta._build_instruction(c) == "my soul"
+        assert meta.build_instruction_from_ioc(c) == "my soul"
 
     def test_with_system_prompter(self):
         meta = _atom_meta(soul_content="my soul")
         prompter = BaseSystemPrompter(own_instruction="moss instruction")
         c = _container((SystemPrompter, prompter))
-        instruction = meta._build_instruction(c)
+        instruction = meta.build_instruction_from_ioc(c)
         assert "moss instruction" in instruction
         assert "my soul" in instruction
 
@@ -100,7 +98,7 @@ class TestBuildInstruction:
         meta = _atom_meta(soul_content="soul")
         prompter = BaseSystemPrompter(own_instruction="moss")
         c = _container((SystemPrompter, prompter))
-        lines = meta._build_instruction(c).split("\n")
+        lines = meta.build_instruction_from_ioc(c).split("\n")
         assert lines[0] == "moss"
         assert lines[1] == "soul"
 
@@ -123,12 +121,13 @@ class TestBuildAgent:
         souls_dir = tmp_path / "souls"
         souls_dir.mkdir()
         (souls_dir / "test_atom.md").write_text("soul from ws")
-        ws = LocalWorkspace(tmp_path)
+        ws = GhostWorkspace(home=tmp_path, source=None)
         meta = _atom_meta(
             model=AnthropicModel(model_name="claude-sonnet-4-6"),
             soul_content=None,
+            soul_path='souls/test_atom.md',
         )
-        c = _container((Workspace, ws))
+        c = _container((GhostWorkspace, ws))
         meta.build_agent(c)
         assert meta.soul_content == "soul from ws"
 

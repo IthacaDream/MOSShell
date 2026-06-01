@@ -3,7 +3,6 @@ from typing import Iterable, Generic, TypeVar, Callable, Protocol, TypeAlias, An
 from prompt_toolkit import PromptSession
 from typing_extensions import Self
 from rich.console import Console, RenderableType
-from rich.segment import Segment
 from rich.traceback import Traceback, Trace
 from rich.rule import Rule
 from rich.text import Text

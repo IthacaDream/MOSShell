@@ -1,89 +1,76 @@
 ---
-title: Ghost Playground — 多级隔离文件空间
+title: Ghost Playground — 多级隔离文件空间 → 缩并为 GhostWorkspace
 status: completed
 priority: P0
 created: 2026-05-22
-updated: 2026-05-22
-step: implemented
+updated: 2026-06-02
+step: superseded_by_matrix_storage_declaration
 depends:
   - first-ghost-prototype
 milestone:
 description: >-
-  为 Ghost 提供统一的多级隔离 Storage 入口 (home/session/workspace)，解决子功能散落拼路径的防污染问题。
+  原计划为 Ghost 提供统一多级隔离 Storage 入口。后因 Matrix 自身接管整套环境存储声明，缩并为 GhostWorkspace dataclass。
 ---
 
-# Ghost Playground
+# Ghost Playground → GhostWorkspace
 
-> Ghost 的文件空间集合。类比 MossSystemPrompter 的 tree model —— 系统约定的 scope slots，
-> 命名访问器是对 slot 的薄封装。无反向注册 API，常量和 scopes() 的 flat dict 结构自然提供扩展。
+> 2026-06-02 修订：GhostPlayground 被缩并为 GhostWorkspace。Matrix 接管了所有存储声明。
 
-## Motivation
+## 原始设计（已废弃）
 
-系统中 Workspace、Session.storage 等 Storage 已经存在，但它们是散落的 — IoC provider
-要读写文件时，不知道应该往哪个 storage 写。各处随意 `container.fetch(Workspace).root()`
-自己拼路径，session 数据可能写到 workspace，ghost 的记忆散落在 runtime 角落。
+原计划通过 GhostPlayground ABC 将 workspace/session/home 三种 Storage 组织为单一入口，
+让 ghost 子功能（memory, personality, scratchpad...）有明确的 scope 选择。
+ABC 在 `blueprint/host.py`，默认实现 + Provider 在 `host/ghost_playground.py`。
 
-GhostPlayground 把已有的 storage 按 scope 组织成单一入口，让子功能 (memory, personality,
-scratchpad, logs...) 明确选择 "我写到哪个 scope"。本质是**防污染**，不是权限控制。
+## 为什么缩并
 
-## Design Index
+在后续开发中发现：**Matrix 自身应该做整套环境声明。** Matrix 是通讯拓扑和资源管理的单一事实源，
+它已经持有 Workspace + Session，所有存储路径约定应该由 Matrix 统一声明，而不是再建一个
+GhostPlayground 中间层去桥接。
 
-- 讨论记录: `discuss/01-design-decisions.md`
-- ABC 定义位置: `ghoshell_moss/core/blueprint/host.py` (与 MossSystemPrompter, GhostRuntime 同簇)
-- 默认实现位置: `ghoshell_moss/host/ghost_playground.py`
+Matrix 在 staged 改动中新增了完整的存储树声明：
 
-## Key Decisions
-
-### 1. 三个系统约定 scope，无 cwd
-
-| scope | 来源 | 生命周期 |
-|-------|------|----------|
-| `home` | workspace 下按 ghost name 约定子目录 | 跨 session 持久 |
-| `session` | Session.storage | session 结束即清理 |
-| `workspace` | Workspace.root() | 持久，最大权限 |
-
-cwd 被拒绝 — workspace 创建本身就是授权动作，moss 在 workspace 内读写合理。
-cwd 是用户当前目录，moss 无理由静默获得这个权限。真需要时通过 provider 自己挂。
-
-### 2. 对位 MossSystemPrompter 模式
-
-| MossSystemPrompter | GhostPlayground |
-|---|---|
-| CTML_SLOT / PROJECT_SLOT ... | HOME_SCOPE / SESSION_SCOPE / WORKSPACE_SCOPE |
-| ctml_instruction() 命名访问器 | home() / session() / workspace() |
-| flatten() 自解释 | scopes() 自解释 |
-| default_instruction() 推荐组装 | default_scope() → home |
-| 无反向注册 API | 无反向注册 API |
-
-### 3. 反向注册由 flat dict 结构自然提供
-
-不提供 with_scope()。子类 override scopes() 即可追加:
 ```python
-def scopes(self) -> dict[str, Storage]:
-    return super().scopes() | {"remote": self._remote_storage}
+# Matrix ABC 上新增
+ghosts_storage   → workspace/ghosts/
+modes_storage    → workspace/modes/
+ghost_home       → workspace/ghosts/{ghost_name}/
+mode_home        → workspace/modes/{mode_name}/
 ```
-常量 (HOME_SCOPE 等) 标记系统保证存在的 scope，consumer 可通过常量获取稳定引用，
-AI 做 flatten 式自解释时也能区分 "系统约定" 和 "运行时扩展"。
 
-### 4. 无 allow flag — ghost meta 已有 provider 体系
+既然 Matrix 已经声明了 `ghost_home`，GhostPlayground 的存在就是多余的了——它只是在 Matrix
+和 Ghost 之间做了一次无意义的转发。
 
-GhostMeta 本身提供 provider，具备几乎无限的能力。权限控制不在 playground 层重复。
-workspace scope 直接可用 — 创建 workspace 本身就是授权。
+## 当前形态：GhostWorkspace
 
-### 5. 注入时机: Matrix 启动前
+GhostPlayground 缩并为 `GhostWorkspace` — 一个只有两个字段的 dataclass，定义在
+`blueprint/ghost.py`：
 
-GhostRuntimeImpl.__aenter__ step 1 预注入阶段，通过 `container.bound(GhostPlayground)`
-检查 manifests 是否已声明。未声明则补充默认实现。必须在 MossRuntime.__aenter__
-(step 2, 启动 Matrix) 之前完成，否则依赖方可能拿到 None 或找不到而崩溃。
+```python
+@dataclass(frozen=True)
+class GhostWorkspace:
+    home: pathlib.Path      # host 为 ghost 分配的持久化存储区域
+    source: Optional[pathlib.Path]  # ghost 源代码所处环境
+```
 
-### 6. ABC 在 blueprint/host.py，实现在 host/
+- `home`: 来自 `matrix.ghost_home`（路径约定 `workspace/ghosts/{name}/`）
+- `source`: ghost 模块的源码目录，用于 soul 文件加载等
 
-遵循 MossSystemPrompter 的放置模式: 通用 contracts (Storage/Workspace) 已在
-contracts/workspace.py，MOSS 特定约定放 blueprint/host.py。
+`GhostWorkspaceProvider` 在 `host/ghost_runtime.py`，是 Provider[GhostWorkspace] 的简单适配器。
+Ghost 和 GhostMeta 通过 `container.get(GhostWorkspace)` 获取。
 
-## Implementation Notes
+## 变更清单
 
-- GhostRuntimeImpl 构造 playground 时: home 路径 = `workspace.root().sub_storage(f"ghosts/{ghost.name()}")`
-- session scope = `session.storage` (Session 上已有)
-- workspace scope = `workspace.root()`
-- 注入后 Ghost 及其子功能通过 `container.fetch(GhostPlayground)` 获取
+| 操作 | 文件 |
+|------|------|
+| 删除 | `host/ghost_playground.py`（GhostPlaygroundImpl + GhostPlaygroundProvider） |
+| 从 ABC 移除 | `blueprint/host.py` — GhostPlayground class |
+| 新增 | `blueprint/ghost.py` — GhostWorkspace dataclass |
+| 新增 | `host/ghost_runtime.py` — GhostWorkspaceProvider |
+| Matrix 新增 | `blueprint/matrix.py` — ghost_home / ghosts_storage / modes_storage 等存储声明 |
+| Stub 新增 | `stubs/workspace/ghosts/` — ghosts/None/, ghosts/echo/ 目录结构 + soul.md |
+
+## 后续影响
+
+- `ghosts/atom/_meta.py` 的 `_load_soul()` 和 `build_agent()` 改用 GhostWorkspace（随本次 unstaged 改动完成）
+- Ghost 子功能需要存储时，直接从 IoC 拿 `GhostWorkspace` 或直接 `matrix.ghost_home`

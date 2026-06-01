@@ -1,15 +1,18 @@
 import contextlib
+from typing import Type
+
 import janus
 from typing_extensions import Self
 
-from ghoshell_moss.core.blueprint.host import GhostRuntime, MossRuntime, LoopHealth, GhostPlayground
-from ghoshell_moss.core.blueprint.ghost import Ghost, GhostMeta
+from ghoshell_moss.core.blueprint.host import GhostRuntime, MossRuntime, LoopHealth
+from ghoshell_moss.core.blueprint.ghost import Ghost, GhostMeta, GhostWorkspace
 from ghoshell_moss.core.blueprint.mindflow import Mindflow, Articulator, Action, Signal
 from ghoshell_moss.core.concepts.errors import FatalError
 from ghoshell_moss.core.concepts.errors import InterpretError
 from ghoshell_moss.core.concepts.command import CommandTask
+from ghoshell_container import Provider, IoCContainer
 from ghoshell_moss.message import Message
-from .ghost_playground import GhostPlaygroundProvider
+import pathlib
 
 __all__ = ["GhostRuntimeImpl"]
 
@@ -27,13 +30,20 @@ class GhostRuntimeImpl(GhostRuntime):
         5. Mindflow 解析 + nuclei 注册 + 三循环托管给 matrix.create_task
     """
 
-    def __init__(self, *, moss_runtime: MossRuntime, ghost_meta: GhostMeta):
+    def __init__(
+            self,
+            *,
+            moss_runtime: MossRuntime,
+            ghost_meta: GhostMeta,
+            source_path: pathlib.Path | None,
+    ):
         if moss_runtime.is_running():
             raise RuntimeError(
                 "MossRuntime already started. "
                 "Pass a not-yet-entered instance — GhostRuntime owns the lifecycle."
             )
         self._moss_runtime = moss_runtime
+        self._source_path = source_path
         self._ghost_meta = ghost_meta
         self._ghost_instance: Ghost | None = None
         self._mindflow: Mindflow | None = None
@@ -85,13 +95,10 @@ class GhostRuntimeImpl(GhostRuntime):
         logger.debug("%s step 1/5: registering ghost providers", self._log_prefix)
         for provider in self._ghost_meta.providers():
             container.register(provider)
-        # GhostPlayground: manifests 可预先声明, 未声明则补充默认实现.
-        # 注册必须在 Matrix 启动前 (step 2), 否则依赖方 fetch 时可能尚未绑定.
-        if not container.bound(GhostPlayground):
-            logger.debug("%s step 1/5: registering default GhostPlayground provider", self._log_prefix)
-            container.register(GhostPlaygroundProvider(ghost_name=self._ghost_meta.name()))
         # 校验 IoC 容器中注册依赖是否能满足 Ghost 的需要.
         self._ghost_meta.contracts().validate(container)
+        if not container.bound(GhostWorkspace):
+            container.register(GhostWorkspaceProvider(self._source_path))
 
         # 2. MossRuntime.__aenter__ (Matrix 从 IoC 注入 LoggerItf 或 fallthrough 到 env.logger)
         logger.debug("%s step 2/5: entering MossRuntime", self._log_prefix)
@@ -415,3 +422,21 @@ class GhostRuntimeImpl(GhostRuntime):
             interpretation.observe,
         )
         return messages, interpretation.observe
+
+
+class GhostWorkspaceProvider(Provider[GhostWorkspace]):
+
+    def __init__(self, source_path: pathlib.Path | None) -> None:
+        self._source_path = source_path
+
+    def singleton(self) -> bool:
+        return True
+
+    def contract(self) -> Type[GhostWorkspace]:
+        return GhostWorkspace
+
+    def factory(self, con: IoCContainer) -> GhostWorkspace:
+        from ghoshell_moss.core.blueprint.matrix import Matrix
+        matrix = con.force_fetch(Matrix)
+        home_path = matrix.ghost_home.abspath()
+        return GhostWorkspace(home=home_path, source=self._source_path)

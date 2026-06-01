@@ -1,4 +1,3 @@
-from ghoshell_moss.contracts import Storage
 from ghoshell_moss.core.blueprint.session import (
     OutputBuffer, OutputItem
 )
@@ -7,23 +6,7 @@ from typing import Iterable
 import threading
 import time
 
-__all__ = ['SessionStorages', 'SimpleOutputBuffer']
-
-
-class SessionStorages:
-
-    def __init__(self, root_storage: Storage, session_scope: str, session_id: str):
-        self._root_storage = root_storage
-        self._session_scope = session_scope or 'default'
-        self._session_id = session_id or 'default'
-        # 可以整体删除的临时文件库.
-        self.tmp_storage = root_storage.sub_storage('tmp')
-        # scopes
-        self.scope_storage = root_storage.sub_storage('scopes')
-        self.session_storage = self.scope_storage.sub_storage(self._session_scope).sub_storage(
-            f"session-{session_id}")
-        self.session_tmp_storage = self.tmp_storage.sub_storage(self._session_scope).sub_storage(
-            f"session-{session_id}/tmp")
+__all__ = ['SimpleOutputBuffer']
 
 
 class SimpleOutputBuffer(OutputBuffer):

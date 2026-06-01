@@ -22,6 +22,7 @@ from ghoshell_moss.host.manifests.nuclei import (
     match_nucleus_infos,
 )
 from ghoshell_moss.core.blueprint.manifests import NucleusMetaInfo
+from ghoshell_moss.core.concepts.channel import Channel
 from ghoshell_moss.host import Host
 from ghoshell_common.helpers import generate_import_path
 from .utils import console, print_simple_table
@@ -306,7 +307,7 @@ def list_channels(
     """
     host = Host(mode=mode)
     channels = host.manifests.channels()
-    main_channel = channels.get("__main__")
+    main_channel = channels.get(Channel.MAIN_CHANNEL_NAME)
 
     if main_channel is None:
         console.print("[yellow]No __main__ channel discovered in manifests.[/yellow]")
@@ -334,20 +335,10 @@ def list_channels(
 
 def _display_main_channel_detail(channel, found_module: str):
     """展示 __main__ channel 的详情视图。"""
-    from ghoshell_moss.core.py_channel import PyChannel
-
     console.print(f"\n[bold cyan]__main__ Channel[/bold cyan]")
     console.print(f"[dim]Type:[/dim] {type(channel).__name__}")
     console.print(f"[dim]Description:[/dim] {channel.description() or '(none)'}")
     console.print(f"[dim]Discovered at:[/dim] {found_module}")
-
-    if isinstance(channel, PyChannel):
-        builder = channel.build
-        commands = list(builder.iter_commands()) if hasattr(builder, 'iter_commands') else []
-        children = list(builder.iter_channels()) if hasattr(builder, 'iter_channels') else []
-        console.print(f"[dim]Commands:[/dim] {len(commands)}")
-        console.print(f"[dim]Sub-channels:[/dim] {len(children)}")
-        # TODO: 未来可展示 commands 列表、states、modules 等更丰富的静态能力
 
 
 @manifest_app.command(name="contracts")

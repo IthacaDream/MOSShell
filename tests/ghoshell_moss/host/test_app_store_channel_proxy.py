@@ -12,7 +12,7 @@ from unittest.mock import MagicMock
 from ghoshell_moss.core.py_channel import PyChannel
 from ghoshell_moss.core.blueprint.app import AppInfo, AppWatcher
 from ghoshell_moss.bridges.zenoh_bridge import ZenohChannelProvider, ZenohProxyChannel
-from ghoshell_moss.host.app_store_channel import AppStoreChannelState
+from ghoshell_moss.channels.app_store_channel import AppStoreChannelState
 from ghoshell_moss.depends import depend_zenoh
 
 depend_zenoh()
@@ -246,7 +246,7 @@ async def test_start_timeout_zero_connects_via_tree(
 ):
     """timeout=0 且 provider 运行中: tree 路径 refresh → fetch → wait_connected 全通。"""
     from ghoshell_moss.core.concepts.channel import ChannelCtx
-    from ghoshell_moss.host.app_store_channel import build_apps_channel
+    from ghoshell_moss.channels.app_store_channel import build_apps_channel
 
     app_chan = PyChannel(name="test_group_test_app")
 
@@ -294,7 +294,7 @@ async def test_start_timeout_positive_expires(
 ):
     """timeout>0 且 provider 未启动: 超时返回 WARN。"""
     from ghoshell_moss.core.concepts.channel import ChannelCtx
-    from ghoshell_moss.host.app_store_channel import build_apps_channel
+    from ghoshell_moss.channels.app_store_channel import build_apps_channel
 
     mock_store = MagicMock()
     mock_store.list_apps.return_value = [mock_app]

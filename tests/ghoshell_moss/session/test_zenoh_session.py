@@ -118,6 +118,7 @@ class TestSessionWithZenoh:
         return MossSessionWithZenoh(
             session_scope=scope,
             session_root_storage=storage,
+            session_tmp_root_storage=storage.sub_storage('tmp'),
             logger=get_moss_logger(),
             zenoh_session=zenoh_sess,
             topic_service=topics,
@@ -378,6 +379,7 @@ class TestSessionStreamAsync:
         return MossSessionWithZenoh(
             session_scope=scope,
             session_root_storage=storage,
+            session_tmp_root_storage=storage.sub_storage('tmp'),
             logger=get_moss_logger(),
             zenoh_session=zenoh_sess,
             topic_service=topics,

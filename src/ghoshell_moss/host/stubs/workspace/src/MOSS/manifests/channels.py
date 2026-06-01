@@ -14,7 +14,7 @@
 from ghoshell_moss import new_shell_main_channel
 from ghoshell_moss.core.ctml.shell.ctml_main import inject_system_primitives
 from ghoshell_moss.core.speech import SpeechChannelModule
-from ghoshell_moss.host.app_store_channel import AppStoreChannel
+from ghoshell_moss.channels.app_store_channel import AppStoreChannel
 
 main = new_shell_main_channel(description="Default MOSS main channel with app store")
 

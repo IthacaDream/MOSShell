@@ -4,10 +4,9 @@ from typing import Callable, TYPE_CHECKING
 
 from anthropic.types.beta import BetaThinkingConfigDisabledParam
 from ghoshell_container import IoCContainer
-from ghoshell_moss.core.blueprint.ghost import Ghost, GhostMeta
+from ghoshell_moss.core.blueprint.ghost import GhostMeta, GhostWorkspace
 from ghoshell_moss.core.blueprint.mindflow import NucleusMeta
-from ghoshell_moss.contracts.workspace import Workspace
-from ghoshell_moss.contracts.system_prompter import SystemPrompter
+from ghoshell_moss.contracts import SystemPrompter
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.models import Model
 from pydantic_ai.providers import Provider
@@ -70,42 +69,48 @@ class AtomMeta(GhostMeta):
         """已加载的 soul 内容（由 _load_soul 或构造时直接传入)."""
         return self._soul_content or ""
 
-    def _load_soul(self, workspace_root: Path) -> None:
+    def _load_soul(self, ghost_workspace: GhostWorkspace) -> None:
         """从 workspace/souls/ 加载 soul 文件. soul_content 非 None 时跳过."""
         if self._soul_content is not None:
             return
 
-        path = self._soul_path
-        if path is None:
-            path = self._name
-        if isinstance(path, Path):
-            file = path
-        else:
-            file = workspace_root / "souls" / f"{path}.md"
-        if file.exists():
-            self._soul_content = file.read_text(encoding="utf-8")
+        file_path = None
+        filename = ''
+        if isinstance(self._soul_path, str):
+            filename = self._soul_path
+        elif isinstance(self._soul_path, Path):
+            pass
+        elif self._soul_path is None:
+            filename = 'soul.md'
+
+        if file_path is None and filename:
+            file_path = ghost_workspace.home.joinpath(filename)
+
+        if file_path and file_path.exists():
+            self._soul_content = file_path.read_text(encoding="utf-8")
 
     # ── agent ───────────────────────────────────────
 
-    def _build_instruction(self, container: IoCContainer) -> str:
-        system_prompter = container.get(SystemPrompter)
-        if system_prompter is None:
+    def build_instruction_from_ioc(self, container: IoCContainer) -> str:
+        moss_system_prompter = container.get(SystemPrompter)
+        if moss_system_prompter is None:
             instructions = []
         else:
-            instructions = [system_prompter.instruction()]
+            instructions = [moss_system_prompter.instruction()]
         instructions.append(self.soul_content)
         return "\n".join(instructions)
 
     def build_instruction(self, run_context: RunContext[IoCContainer]) -> str:
-        return self._build_instruction(run_context.deps)
+        return self.build_instruction_from_ioc(run_context.deps)
 
     def build_agent(self, container: IoCContainer) -> Agent[IoCContainer]:
         """创建 pydantic AI Agent. 不依赖 IoC 容器，可独立单测.
 
         model 为 None 时走 AnthropicModel + 环境变量.
         """
-        if workspace := container.get(Workspace):
-            self._load_soul(workspace.root_path())
+        ghost_workspace = container.get(GhostWorkspace)
+        if ghost_workspace is not None:
+            self._load_soul(ghost_workspace)
         model = self._model
         if model is None:
             model_name = os.environ.get("ANTHROPIC_MODEL")

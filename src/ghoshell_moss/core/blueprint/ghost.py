@@ -1,12 +1,15 @@
-from typing import AsyncIterable
+import pathlib
+from typing import AsyncIterable, Optional
 from ghoshell_container import IoCContainer, Contracts, Provider
 from typing_extensions import Self
 from abc import ABC, abstractmethod
 from ghoshell_moss.core.blueprint.mindflow import Mindflow, NucleusMeta, Articulator
 from ghoshell_moss.core.concepts.channel import Channel
+from ghoshell_moss.contracts import Storage
 from ghoshell_moss.message import Message
+from dataclasses import dataclass
 
-__all__ = ['Ghost', 'GhostMeta']
+__all__ = ['Ghost', 'GhostMeta', 'GhostWorkspace']
 
 
 class GhostMeta(ABC):
@@ -182,10 +185,10 @@ class Ghost(ABC):
     # it does not belong here.
 
     def on_articulate_exit(
-        self,
-        articulator: Articulator,
-        logos: str,
-        error: Exception | None,
+            self,
+            articulator: Articulator,
+            logos: str,
+            error: Exception | None,
     ) -> None:
         """Called after articulate() completes, success or failure.
 
@@ -244,6 +247,13 @@ class Ghost(ABC):
     # ── end observability hooks ────────────────────────────
 
 
+@dataclass(frozen=True)
+class GhostWorkspace:
+    """ Host 运行一个 Ghost 时为它准备的运行环境. 在 IoC 中可以获取. """
+
+    home: pathlib.Path  # host 为 ghost 分配的持久化存储区域.
+    source: Optional[pathlib.Path]  # ghost 源代码所处的环境.
+
 # ── 三层抽象 ──────────────────────────────────────────────
 #
 #   GhostPrototype   = type[GhostMeta]    # class，一族 ghost 的"型号"
@@ -252,4 +262,3 @@ class Ghost(ABC):
 #
 # 一个文件 = 一个 GhostMeta 实例 = 一个 Ghost 注册。
 # 系统先发现 Bootstrapper（理解元信息/契约），运行时通过 factory() 生成 Runtime。
-
