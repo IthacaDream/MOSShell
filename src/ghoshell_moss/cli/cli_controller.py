@@ -7,7 +7,6 @@ from prompt_toolkit.shortcuts import prompt
 from prompt_toolkit.styles import Style
 from typing import Iterable, Optional, List, Any
 from prompt_toolkit.completion import WordCompleter
-from pygments.lexer import default
 from rich.table import Table
 
 import typer.main

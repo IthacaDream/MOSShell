@@ -13,6 +13,7 @@ from pathlib import Path
 from enum import Enum
 import asyncio
 import frontmatter
+from pydantic_ai import Agent
 
 __all__ = ['Matrix', 'Cell', 'SystemPrompter', 'ScopesKey', 'MatrixLifecycleObject', 'Mode']
 

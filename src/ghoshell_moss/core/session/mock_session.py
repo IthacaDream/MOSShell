@@ -16,9 +16,9 @@ from ghoshell_moss.core.concepts.topic import TopicService
 from ghoshell_moss.core.blueprint.session import (
     Session, Signal, Role, OutputItem, OutputBuffer, Sample, StreamSubscriber,
 )
-from ghoshell_moss.core.session.zenoh_session import SimpleOutputBuffer
+from ghoshell_moss.core.session.utils import SimpleOutputBuffer, SessionStorages
 
-__all__ = ["MockSession"]
+__all__ = ["MockSession", "SimpleOutputBuffer", "SessionStorages"]
 
 
 class _MockStreamSubscriber(StreamSubscriber):
@@ -72,12 +72,12 @@ class MockSession(Session):
     """
 
     def __init__(
-        self,
-        session_scope: str = "mock_scope",
-        *,
-        session_id: str | None = None,
-        topics: TopicService | None = None,
-        storage: Storage | None = None,
+            self,
+            session_scope: str = "mock_scope",
+            *,
+            session_id: str | None = None,
+            topics: TopicService | None = None,
+            storage: Storage | None = None,
     ):
         from ghoshell_moss.message import unique_id
 
@@ -183,7 +183,7 @@ class MockSession(Session):
         return "/".join([self._stream_key_prefix, relative_key.strip("/")])
 
     def sub_stream(
-        self, relative_key: str, callback: Callable[[Sample], None],
+            self, relative_key: str, callback: Callable[[Sample], None],
     ) -> Callable[[], None]:
         self._stream_callbacks.setdefault(relative_key, []).append(callback)
 
@@ -209,7 +209,7 @@ class MockSession(Session):
             sub._push(sample)
 
     def get_stream(
-        self, relative_key: str, *, maxsize: int = 0,
+            self, relative_key: str, *, maxsize: int = 0,
     ) -> StreamSubscriber:
         full_key = self.stream_key_expr(relative_key)
         sub = _MockStreamSubscriber(full_key=full_key, relative_key=relative_key)

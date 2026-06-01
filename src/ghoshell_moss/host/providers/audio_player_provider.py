@@ -4,7 +4,7 @@ from ghoshell_moss.contracts.speech import StreamAudioPlayer
 from ghoshell_moss.contracts.logger import LoggerItf
 from ghoshell_moss.contracts.configs import ConfigType, ConfigStore
 from ghoshell_container import IoCContainer, Provider
-from ghoshell_moss.core.speech.player.miniaudio_player import MiniAudioStreamPlayer
+from ghoshell_moss.host.speech.player.miniaudio_player import MiniAudioStreamPlayer
 from pydantic import Field
 
 __all__ = ["AudioPlayerProvider", "AudioPlayerConfig"]
@@ -49,7 +49,7 @@ class AudioPlayerProvider(Provider[StreamAudioPlayer]):
 
         if conf.backend == "pyaudio":
             try:
-                from ghoshell_moss.core.speech.player.pyaudio_player import PyAudioStreamPlayer
+                from ghoshell_moss.host.speech.player.pyaudio_player import PyAudioStreamPlayer
             except ImportError:
                 raise ImportError(
                     "PyAudio backend selected but not installed. "

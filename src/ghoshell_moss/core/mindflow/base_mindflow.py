@@ -1,6 +1,6 @@
 from abc import abstractmethod
 import time
-from typing import Iterable, AsyncGenerator, AsyncIterator
+from typing import AsyncGenerator, AsyncIterator
 from typing_extensions import Self
 
 import janus

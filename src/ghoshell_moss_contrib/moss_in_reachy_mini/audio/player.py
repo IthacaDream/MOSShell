@@ -3,7 +3,7 @@ import time
 import numpy as np
 from ghoshell_moss.contracts import LoggerItf
 from ghoshell_moss.contracts.speech import AudioFormat
-from ghoshell_moss.core.speech.player.base_player import BaseAudioStreamPlayer
+from ghoshell_moss.core.speech.base_player import BaseAudioStreamPlayer
 from reachy_mini import ReachyMini
 
 

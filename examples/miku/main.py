@@ -9,8 +9,8 @@ import pygame
 from ghoshell_container import Container
 
 from ghoshell_moss.core.speech import Speech, make_baseline_tts_speech
-from ghoshell_moss.core.speech.player.pyaudio_player import PyAudioStreamPlayer
-from ghoshell_moss.core.speech.volcengine_tts import VolcengineTTS, VolcengineTTSConf
+from ghoshell_moss.host.speech.player.pyaudio_player import PyAudioStreamPlayer
+from ghoshell_moss.host.speech.volcengine_tts import VolcengineTTS, VolcengineTTSConf
 from ghoshell_moss_contrib.agent import ModelConf, SimpleAgent
 
 current_dir = os.path.dirname(os.path.abspath(__file__))

@@ -11,8 +11,8 @@ from ghoshell_moss.contracts import get_moss_logger, LoggerItf
 from ghoshell_moss.core.helpers import ThreadSafeEvent
 from ghoshell_moss.message import unique_id
 from pydantic import ValidationError
-from .suite_for_test import TopicServiceSuite
-from .key_expr import MOSSTopicExpr
+from ghoshell_moss.core.topic.suite_for_test import TopicServiceSuite
+from ghoshell_moss.core.topic.key_expr import MOSSTopicExpr
 import janus
 import asyncio
 import threading

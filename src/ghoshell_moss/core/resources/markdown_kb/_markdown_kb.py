@@ -27,8 +27,6 @@ from ghoshell_moss.contracts.resource import (
     ResourceInfo,
     ResourceItem,
     ResourceStorage,
-    Query, Recollection,
-    unpack_query,
 )
 
 __all__ = ["MarkdownInfo", "MarkdownItem", "MarkdownKnowledgeBase"]
@@ -180,13 +178,6 @@ class MarkdownKnowledgeBase(ResourceStorage[MarkdownInfo, str]):
                 if len(result) >= limit:
                     break
         return result
-
-    async def recall(self, query: Query) -> Recollection:
-        from ._agent import recall, recall_available
-        if not recall_available():
-            raise NotImplementedError("Recall required $ANTHROPIC_SMALL_FAST_MODEL ")
-        text, session_id = unpack_query(query)
-        return await recall(self, text)
 
     async def get(self, path: str) -> MarkdownItem | None:
         meta = self._by_path.get(path)

@@ -18,9 +18,9 @@ from ghoshell_moss.depends import depend_zenoh
 depend_zenoh()
 import zenoh
 
-from ghoshell_moss.core.session.zenoh_session import SimpleOutputBuffer, MossSessionWithZenoh
+from ghoshell_moss.host.session.zenoh_session import SimpleOutputBuffer, MossSessionWithZenoh
 from ghoshell_moss.core.blueprint.session import OutputItem, Sample
-from ghoshell_moss.core.topic.zenoh_topics import ZenohTopicService
+from ghoshell_moss.host.topics.zenoh_topics import ZenohTopicService
 from ghoshell_moss.message import Message
 from ghoshell_moss.contracts.logger import get_moss_logger
 from ghoshell_moss.contracts.workspace import LocalStorage

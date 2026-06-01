@@ -1,4 +1,4 @@
-from ghoshell_moss.core.blueprint.mindflow import Attention, Impulse, Priority
+from ghoshell_moss.core.blueprint.mindflow import Impulse, Priority
 from ghoshell_moss.core.mindflow.base_attention import AbsAttention
 import time
 

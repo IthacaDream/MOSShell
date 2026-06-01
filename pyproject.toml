@@ -7,9 +7,7 @@ license = { text = "Apache License 2.0" }
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "anthropic>=0.84.0",
     "anyio>=4.12.1",
-    "miniaudio>=0.67",
     "numpy>=2.0.0",
     "ghoshell-common>=0.5.0",
     "ghoshell-container>=0.3.1",
@@ -20,19 +18,31 @@ dependencies = [
     "python-dateutil>=2.9.0.post0",
     "python-frontmatter>=1.1.0",
     "python-ulid>=3.1.0",
-    "prompt-toolkit>=3.0.52",
-    "typer>=0.24.1",
+
 ]
 
 [project.optional-dependencies]
 zmq = ["zmq>=0.0.0", "aiozmq>=1.0.0", "psutil>=7.2.1"]
-mcp = [
-    "fastmcp>=3.1.1",
-]
-wss = ["websockets>=15.0.1"]
 redis = ["fakeredis>=2.32.1", "redis>=7.0.1"]
 # todo: pyaudio 的实现如果要依赖, 要考虑重新定义位置.
 audio = ["pulsectl>=24.12.0", "pyaudio>=0.2.14", "scipy>=1.15.3"]
+
+ghost = [
+    "pydantic-ai>=1.90.0",
+    "anthropic>=0.84.0",
+]
+
+host = [
+    "prompt-toolkit>=3.0.52",
+    "miniaudio>=0.67",
+    "typer>=0.24.1",
+    "circus>=0.19.0",
+    "eclipse-zenoh>=1.8.0",
+    "uv>=0.11.8",
+    "uvloop>=0.22.1",
+    "websockets>=15.0.1",
+    "fastmcp>=3.1.1",
+]
 
 # 所有测试性的依赖放一起. 注意, 由于 live2d-py 0.5.0 以上版本依赖 python 3.12, 所以需要设置本地 python
 #contrib = [
@@ -50,13 +60,7 @@ audio = ["pulsectl>=24.12.0", "pyaudio>=0.2.14", "scipy>=1.15.3"]
 #    "loadenv>=0.1.1",
 #    "pymupdf>=1.27.1",
 #]
-host = [
-    "circus>=0.19.0",
-    "eclipse-zenoh>=1.8.0",
-    "pydantic-ai>=1.90.0",
-    "uv>=0.11.8",
-    "uvloop>=0.22.1",
-]
+
 # reachy_mini SDK 依赖已移除。重量级依赖（pygobject/pycairo 等系统编译依赖）
 # 不应污染核心开发环境。reachy_mini 将以独立 app 方式提供，拥有独立 venv。
 # 详见: .ai_partners/features/workstreams/2026/05/reachymini-integration/FEATURE.md

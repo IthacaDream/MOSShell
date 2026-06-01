@@ -4,7 +4,7 @@ from typing_extensions import Self
 from abc import ABC, abstractmethod
 from pydantic import BaseModel, Field, AwareDatetime
 
-from ghoshell_moss.message import Message, Content, WithAdditional
+from ghoshell_moss.message import Message, WithAdditional
 from ghoshell_moss.message import unique_id
 from datetime import datetime
 from dateutil import tz

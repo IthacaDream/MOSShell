@@ -9,18 +9,11 @@ from pydantic import BaseModel, Field
 from ghoshell_moss.core.concepts.command import CommandMeta, Command, CommandTask, BaseCommandTask
 from ghoshell_moss.message import Message
 
-try:
-    from openai.types.shared_params import FunctionDefinition
-except ImportError:
-    FunctionDefinition = dict
-from anthropic.types import ToolParam
-
 if typing.TYPE_CHECKING:
-    try:
-        from pydantic_ai import Tool as PydanticTool, ToolReturn
-    except ImportError:
-        ToolReturn = None
-        PydanticTool = None
+    # support but not depend
+    from openai.types.shared_params import FunctionDefinition
+    from anthropic.types import ToolParam
+    from pydantic_ai import Tool as PydanticTool, ToolReturn
 
 CommandTaskCallback = Callable[[CommandTask], None]
 
@@ -63,10 +56,11 @@ class ToolMeta(BaseModel):
             },
         }
 
-    def to_openai_function_def(self) -> FunctionDefinition:
+    def to_openai_function_def(self) -> 'FunctionDefinition':
         """
         to openai function definition.
         """
+        from openai.types.shared_params import FunctionDefinition
         parameters = self.parameters.copy()
         return FunctionDefinition(
             name=self.name,
@@ -75,7 +69,8 @@ class ToolMeta(BaseModel):
             strict=self.strict,
         )
 
-    def to_anthropic_tool_param(self) -> ToolParam:
+    def to_anthropic_tool_param(self) -> 'ToolParam':
+        from anthropic.types import ToolParam
         return ToolParam(
             input_schema=self.parameters,
             name=self.name,
@@ -168,9 +163,9 @@ class CommandAsTool(Generic[R]):
         """
         adapt into pydantic tool
         """
-        from pydantic_ai import Tool as PydanticTool
+        from pydantic_ai import Tool
         meta = self.command.meta()
-        return PydanticTool.from_schema(
+        return Tool.from_schema(
             self.call,
             name=Command.make_unique_name(self.channel_path, meta.name),
             description=meta.description,

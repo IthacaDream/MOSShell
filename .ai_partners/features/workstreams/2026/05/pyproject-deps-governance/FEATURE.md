@@ -1,13 +1,13 @@
 ---
 created: 2026-05-25
 depends: []
-description: >-
-  pyproject.toml 依赖治理：pydantic-ai 从 [host] 拆到 [ghosts]，anthropic 类型懒加载，清理 markdown_kb recall agent
-milestone:
+description: pyproject.toml 依赖治理：pydantic-ai 从 [host] 拆到 [ghosts]，anthropic 类型懒加载，清理
+  markdown_kb recall agent
+milestone: null
 priority: P1
-status: draft
+status: completed
 title: Pyproject Deps Governance — 依赖分层治理
-updated: '2026-05-25'
+updated: '2026-06-01'
 ---
 
 # Pyproject Deps Governance

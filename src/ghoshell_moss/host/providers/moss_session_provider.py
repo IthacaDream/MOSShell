@@ -9,7 +9,7 @@ from ghoshell_moss.core.blueprint.environment import Environment
 
 depend_zenoh()
 import zenoh
-from ghoshell_moss.core.session.zenoh_session import MossSessionWithZenoh
+from ghoshell_moss.host.session.zenoh_session import MossSessionWithZenoh
 
 __all__ = [
     'WorkspaceSessionProvider',
