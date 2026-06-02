@@ -1,6 +1,6 @@
 ---
-title: How to register capabilities via manifests
-description: 在 MOSS 环境中注册新能力：providers、channels（含原语）、configs、nuclei、resources、topics 的声明方法。面向需要在 workspace 中添加能力的开发者（AI 和人类）。
+title: Register Capabilities via Manifests
+description: 在 MOSS 环境中注册新能力：providers、channels、configs、nuclei、resources、topics 的声明方法。面向需要在 workspace 中添加能力的开发者（AI 和人类）。
 ---
 
 # How to Register Capabilities via Manifests
@@ -140,7 +140,7 @@ local_image_storage_meta = LocalImageResourceMeta()
 
 ResourceStorageMeta 实例声明一个可寻址的资源数据集，以 `{scheme}:{host}` 为全局资源句柄。`factory()` 生产 `ResourceStorage`。
 
-深入：`moss howtos read for-moss-app-developer/how-to-add-a-resource-storage.md`
+深入：`moss howtos read host-dev/add-a-resource-storage.md`
 
 ## 注册 Topic（协议声明）
 

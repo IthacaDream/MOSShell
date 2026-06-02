@@ -1,5 +1,5 @@
 ---
-title: How to use IoC in commands
+title: Use IoC in Commands
 description: app 开发者如何在自己的 command 里通过 CommandCtx 获取 IoC 容器中的服务，以及在 Matrix 上下文中获取容器引用。覆盖获取、查看、注册的最小必要知识。
 ---
 

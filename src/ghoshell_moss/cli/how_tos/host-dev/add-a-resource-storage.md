@@ -1,5 +1,5 @@
 ---
-title: How to add a resource storage
+title: Add a Resource Storage
 description: 理解 Resource 体系并注册新的资源存储：Meta、Storage、Factory、声明、验证
 ---
 

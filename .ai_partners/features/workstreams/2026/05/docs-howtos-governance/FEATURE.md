@@ -1,9 +1,9 @@
 ---
 title: Docs & How-Tos Governance — 知识库清淤与文档路线图
-status: in-progress
+status: completed
 priority: P0
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-06-02
 depends: []
 milestone:
 description: >-
@@ -72,37 +72,21 @@ docs 体系已在 `ai-docs-topology` (P2) 和 `docs-cli-polish` (P2) 两个 feat
 - 创建了本 feature workstream
 - 与人类对齐了完整的文档路线图和 how-tos 清淤方案
 
-### 下一步（下一个会话或同一会话后续）
+### 2026-06-02: Howtos 清淤完成 (docs-quality-polish 执行)
 
-按优先级：
+执行由 docs-quality-polish feature (P1, 2026/06) 完成：
 
-1. **how-tos 治理**（可一次性完成）：
-   - 删除 `get-moss-design/what-is-workspace.md`
+1. **how-tos 治理** ✅：
+   - 删除 `get-moss-design/what-is-workspace.md` (ai-docs-workspace-mode 中完成)
    - 删除 `get-moss-design/how-ioc-container-work-in-moss.md`
-   - 展平 `for-moss-app-developer/` 下两篇到 how-tos 根目录
-   - 改造 `how-matrix-discovers-capabilities.md` 为 slim how-to
-   - 删除空子目录 `get-moss-design/` 和 `for-moss-app-developer/`
+   - 删除 `get-moss-design/how-matrix-discovers-capabilities.md` (原计划改造，审阅后判定过时无救)
+   - `for-moss-app-developer/` → `host-dev/` (目录改名，非展平)
+   - 6 篇文件名去 `how-to-` 前缀，标题去 "How to " 前缀
+   - 删除空 `get-moss-design/` 目录
 
-2. **glossary 迁移**：从 `how_tos/get-moss-design/glossary.md` 移到 `docs/glossary.md`，更新内部交叉引用路径
+2. **glossary 迁移** ✅：`how_tos/get-moss-design/glossary.md` → `docs/glossary.md`
 
-3. **docs 新文档撰写**（按 P0 优先级）：
-   - `what-is-moss.md` — 最高优
-   - `channel-and-command.md` — 需人类详细过
-   - `development-workflow.md` — 可独立完成大部分
-
-4. **已有文档修订**：
-   - `architecture-topology.md` 和 `workspace-and-mode.md` 中引用 `moss how-tos read get-moss-design/...` 的地方需要更新为新路径
-   - docs README 更新路线图
-
-### 交叉引用影响面
-
-删除/迁移 how-tos 文档后，以下文件中的引用需要更新：
-
-- `docs/workspace-and-mode.md` 末尾引用了 `get-moss-design/how-matrix-discovers-capabilities.md`、`get-moss-design/how-ioc-container-work-in-moss.md`、`get-moss-design/glossary.md`
-- `how-tos/get-moss-design/what-is-workspace.md` 引用了同目录其他三篇
-- `how-tos/how-to-make-how-to.md` 可能引用了子目录
-
-实施前先 grep 全量引用，避免死链。
+3. **docs 新文档撰写** → 移交 docs-quality-polish feature Phase 3-4
 
 ### 不做的事
 

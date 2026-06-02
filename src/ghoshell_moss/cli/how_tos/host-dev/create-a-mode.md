@@ -1,5 +1,5 @@
 ---
-title: How to create a mode
+title: Create a Mode
 description: 如何创建一个 MOSS mode 来隔离 app 权限、定制能力视图。覆盖创建、配置、添加 manifest、验证的完整流程。面向 app 开发者。
 ---
 

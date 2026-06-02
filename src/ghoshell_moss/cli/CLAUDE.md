@@ -153,8 +153,8 @@ moss-as-mcp = "ghoshell_moss.cli.moss_as_mcp:main"
   - `moss howtos recall <question>`: AI 语义召回 (需 `ANTHROPIC_SMALL_FAST_MODEL` 环境变量)
 - **贡献方式**: 见 `how_tos/how-to-make-how-to.md`。必须包含 YAML frontmatter (`title` + `description`), description 是给 AI 召回用的关键字段
 - **当前文档**:
-  - `for-moss-core-developer/`: 内核开发相关 (IoC 容器, Matrix 能力发现)
-  - `for-moss-app-developer/`: 应用开发相关 (ResourceStorage 添加)
+  - `host-dev/`: Host 环境内开发相关 (manifests 注册, IoC 使用, mode 创建, 资源存储, 环境探查, ROS2 集成)
+  - `how-to-make-how-to.md`: meta 文档，howtos 体系的编写规范
 
 ## 架构小贴士
 
