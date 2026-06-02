@@ -1,9 +1,9 @@
 ---
 title: Reachy Mini Integration — 完整 workspace 集成与测试体系
-status: in-progress
+status: completed
 priority: P1
 created: 2026-05-29
-updated: 2026-05-30
+updated: 2026-06-02
 depends: []
 milestone:
 description: >-
@@ -118,3 +118,39 @@ channel factory 失败 → `StatefulChannelRuntime.__init__()` 异常 → `CTMLS
 `.moss_ws/` 正式纳入 git 管理。这是一个长期手动维护的 workspace，不通过 stub 模板生成。
 
 根 `.gitignore` 移除 `.moss_ws/` 排除规则。
+
+## 2026-06-02 Session — 收尾审查 (review by deepseek-v4)
+
+逐项验证 05-29 列出的 8 条"下一步"，确认哪些已通过后续提交修复、哪些已弱化、哪些应拆为独立 feature。
+
+### 已解决
+
+| # | 条目 | 解决提交 |
+|---|------|----------|
+| 1 | Scope 语法异常 | 79349e3 (scope command 传递) + 35e299e (duplex ordering + cancel sync) |
+| 2 | 音频播放器阻塞/同步 | 35e299e (`__content__` 显式 `blocking=True`)；`say` 默认 `blocking=True`；`SpeechStream.say()` 内 `await wait_played()` 本质阻塞；32e901a (MiniAudioStreamPlayer.clear 中断) |
+| 6 | host extras 瘦身 | 5d36f66 (`pydantic-ai` + `anthropic` → `[ghost]` extras；speech/zenoh 从 core 迁 host) |
+| 7 | 运行时数据路径 | 79349e3 + 3e3e8c8 (`matrix.cell_workspace` 提供 cell 级隔离，落 `workspace.runtime()/cells/`) |
+
+### 已弱化
+
+| # | 条目 | 原因 |
+|---|------|------|
+| 8 | Mode import 诊断 | reachymini 已从 mode channel 迁移到 app 模式，不再依赖 mode 发现 |
+
+### 仍残留（minor）
+
+| # | 条目 | 说明 |
+|---|------|------|
+| 3 | ReachyMini() 构造即连接 | daemon 未启动时才暴露，不影响正常链路。后续改进：连接延迟到 `bootstrap()` |
+
+### 拆为独立 feature（框架层）
+
+| # | 条目 |
+|---|------|
+| 4 | Matrix 错误传播加固 |
+| 5 | 框架层 context 内容类型过滤（`allow_vision=False` 临时方案已在 32e901a 加入） |
+
+### 结论
+
+核心目标（workspace 集成 + app 独立 venv 隔离 + MCP 端到端验证）全部达成。残留的 #3 是 minor improvement，不影响收尾。#4/#5 属于框架层问题，应由各自 feature 跟踪。
