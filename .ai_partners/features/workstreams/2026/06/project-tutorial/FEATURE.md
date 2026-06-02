@@ -3,7 +3,7 @@ title: Project Tutorial — 项目认知入口与案例沉淀
 status: draft
 priority: P1
 created: 2026-06-02
-updated: 2026-06-02
+updated: '2026-06-02'
 depends: []
 milestone:
 description: >-
@@ -95,8 +95,65 @@ Tutorial 不是一次性产物。迭代模式：
 
 Tutorial 如需可运行源码，以同名 `.py` 文件放在同目录。不强制——如果代码已在 markdown 代码块中完整呈现，`.py` 是可选的。但当 tutorial 的代码较复杂或读者可能需要独立运行时，提供 `.py` 文件。
 
+## CTML 交互设计洞察 (2026-06-02 Reachy Mini 全链路验证)
+
+以下洞察来自 L2 tutorial 的实操验证——通过 MCP 控制 Reachy Mini，22 条 CTML 指令细粒度交替，四种音色切换，人类全程观看确认流畅度。
+
+### K8: 红线规则需要正反例旁路
+
+CTML 有容易踩的语法坑，目前靠模型试错发现：
+
+- `__main__:` 前缀不必要——main channel 的命令可直接写 `<say>...</say>`
+- `chunks__` 是标签体内容（`<say>文本</say>`），不是属性传参
+- CDATA 转义在 CTML 解析器中并非总是可用
+
+这些规则目前散布在 CLAUDE.md、moss start、实际报错中。未来应通过**独立的旁路 Channel** 提供正反例速查，模型在输出 CTML 前可快速校验。
+
+### K9: 语音动作交替的粒度设计
+
+细粒度交替（动作先行 → 语音紧随 → 下一动作 → 下一语音）远优于大块串行：
+
+- 动作启动后语音立即跟上，运动和说话重叠，无延时感
+- 每段语音控制在 1-2 句，与一个动作的 duration 匹配
+- 需要 prompt 引导模型采用这种交替模式，而非默认的"说完再做"
+
+不同类型的动作适合不同交替策略：舞蹈适合长语音段重叠，表情适合短语音快切，头部运动适合中等粒度。
+
+### K10: 常用动作 Token 速查表
+
+高频动作（微笑、点头、摇头等）的完整 CTML 冗长且消耗 token。未来可实现 token replacement 机制：
+
+```
+[笑]  → <apps.bodies_reachymini:emotion emoji="😊" />
+[点头] → <apps.bodies_reachymini:dance name="yeah_nod" />
+[睡]  → <apps.bodies_reachymini:switch_state name="asleep" />
+```
+
+在 prompt 中提供速查表，模型输出短 token，Shell 层做替换。这大幅降低模型输出延迟和 token 成本。
+
+### K11: CTML 序列的技能化存储
+
+长 CTML 序列（如自我介绍、欢迎仪式）可预先编排并存储为命名 skill，通过 hash 引用执行：
+
+```ctml
+<ctml:run skill="greeting" />
+```
+
+这比每次重新输出完整 CTML 更快、更可靠。适合固定流程（开机问候、休眠仪式、演示套路）。
+
+### K12: 音色-角色-动作三位一体的 prompt 设计
+
+语音音色、角色人格、动作风格三者需要在 Ghost 的 soul prompt 中统一设计：
+
+- 每种音色绑定一个角色片段（如"爽朗少年→舞蹈展示"）
+- prompt 中明确"你可以使用的声音列表及其适用场景"
+- 动作体系需要从 prompt 层面与角色绑定，而非每次由模型即兴组合
+
+这不是技术问题，是交互设计问题。未来每个 Ghost 应该有自己的人格-声音-动作 profile。
+
 ## Implementation Notes
 
 - 第一版不追求覆盖全部概念。3-5 个核心 case 即可建立足够的认知脚手架。
 - 内容格式建议 markdown，与项目其他文档一致。
 - 入口位置：README 中增加 "Tutorial" 章节，链接到 tutorial 目录。
+- L2 tutorial 中需补充：CTML 并行调度用例、红线规则速查、语音动作交替模式。

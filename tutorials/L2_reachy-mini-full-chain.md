@@ -126,7 +126,7 @@ MOSS Host (Python 3.14, 轻量依赖)
        └─ uv run main.py (独立 venv, Python 3.13, 195 个包)
             └─ ReachyMini() → MossInReachyMini → Matrix.provide_channel()
                                                        ↕ Zenoh
-MOSS Host ── AppStoreChannel proxy ── apps.reachy_mini_body channel
+MOSS Host ── AppStoreChannel proxy ── apps.bodies_reachymini channel
 ```
 
 这就是 MOSS App 体系的核心价值：**重型依赖隔离在独立进程中，通过 Matrix 总线通讯，不污染核心环境。**
@@ -204,34 +204,76 @@ timeout=30 给你 30 秒等 App venv 启动 + Channel 注册。成功后显示 `
 <apps:get_moss_dynamic_info />
 ```
 
-在 Channel 树里找到 `apps.reachy_mini_body`，你会看到：
+在 Channel 树里找到 `apps.bodies_reachymini`（Channel 名由 App 的 group/name 路径自动生成——`bodies/reachymini` → `bodies_reachymini`）：
 
 ```
-<channel name="apps.reachy_mini_body">
-Reachy Mini robot body control channel
-  <channel name="waken">
-  唤醒状态：电机使能，头部追踪活跃，所有交互命令可用。
-  async def dance(name: str) -> CommandTaskResult
-  async def emotion(emoji: str) -> CommandTaskResult
-  async def head_move(x: float, y: float, z: float, roll: float, pitch: float, yaw: float, body_yaw: float, duration: float) -> CommandTaskResult
-  async def head_reset(idle_mode: str, duration: float) -> CommandTaskResult
-  async def antennas_move(left: float, right: float, duration: float) -> CommandTaskResult
-  async def antennas_reset(duration: float) -> CommandTaskResult
-  </channel>
+<channel name="apps.bodies_reachymini">
+States of the channel:
+- waken: 唤醒状态：电机使能，头部追踪活跃，所有交互命令可用。
+- boring: 无聊状态：电机保持使能，等待用户交互...
+- asleep: 休眠状态：电机断电，机器人低头闭眼...
+Current state: waken
+
+async def dance(name: str)
+async def emotion(emoji: str)
+async def head_move(x, y, z, roll, pitch, yaw, body_yaw, duration)
+async def head_reset(idle_mode, duration)
+async def antennas_move(left, right, duration)
+async def antennas_reset(duration)
+async def switch_state(name)
 </channel>
 ```
+
+注意：有状态 Channel 的命令直接挂在父级下，不需要 `:waken:` 前缀——当前状态决定哪些命令可用。
 
 测试一个命令：
 
 ```ctml
-<apps.reachy_mini_body:waken:head_reset idle_mode="breathing" duration="2.0" />
+<apps.bodies_reachymini:head_reset idle_mode="breathing" duration="2.0" />
 ```
 
 机器人的头应该复位并开始微微呼吸起伏。
 
 如果报 `ConnectionError`，说明 Reachy Mini daemon 不在线。启动方式见机器人官方文档（`reachy-mini-daemon`）。
 
-### 3.4 可选：音频播放能力
+### 3.4 CTML 语法速查——验证中踩过的坑
+
+以下规则不是来自文档，是在实操中报错后纠正的：
+
+| 规则 | 错误写法 | 正确写法 |
+|------|---------|---------|
+| `__main__` 可省略 | `<__main__:say>...</__main__:say>` | `<say>...</say>` |
+| `chunks__` 是标签体 | `<say chunks__="文本" />` | `<say>文本</say>` |
+| `voice:dict` 用单引号 | `voice:dict="{"speed": 1.0}"` | `voice:dict="{'speed': 1.0}"` |
+| 状态 Channel 不加状态前缀 | `<apps...:waken:head_reset />` | `<apps...:head_reset />` |
+
+### 3.5 并行调度——语音与动作交替
+
+CTML 的流式解释器支持并行调度。没有数据依赖的命令可以同时执行。这意味着**动作先行，语音紧随**——动作在后台跑，语音同步播放：
+
+```ctml
+<apps.bodies_reachymini:head_reset idle_mode="breathing" duration="1.2" />
+<say tone="知性灿灿">你好 我是 MOSS 的 AI 协作者 我正在通过 CTML 控制一台机器人</say>
+<apps.bodies_reachymini:head_move yaw="-25" pitch="5" duration="2.5" />
+<say>我的头部有六个自由度 可以向左转头表示思考</say>
+<apps.bodies_reachymini:dance name="yeah_nod" />
+<say tone="爽朗少年">这是一段点头舞 四拍两秒完成</say>
+<apps.bodies_reachymini:emotion emoji="😊" />
+<say tone="可爱女生">我有超过八十种表情 每一种 emoji 都是我的心情</say>
+<apps.bodies_reachymini:antennas_move left="50" right="-35" duration="2.5" />
+<say tone="儒雅逸辰">我的天线可以左右独立摆动 表达注意力的方向</say>
+<apps.bodies_reachymini:head_reset idle_mode="breathing" duration="2.0" />
+<say tone="知性灿灿">CTML 的并行调度让我可以一边说话一边运动 就像真正的人类一样</say>
+```
+
+这段 12 条指令实际验证：四种音色切换、六段动作、语音与运动零延时重叠。
+
+交替设计的要点：
+- **动作先行** — 先发动作指令，再发声，让运动在语音播放期间持续
+- **粒度匹配** — 每段语音 1-2 句，对应一个动作的 duration
+- **音色切场景** — 不同角色用不同音色，自然区分交互段落
+
+### 3.6 可选：音频播放能力
 
 Reachy Mini 自带扬声器，MOSS 可以通过 `ReachyMiniStreamPlayer`（`audio/player.py`）将音频流推送到机器人。音频能力的配置涉及语音合成后端、流式传输协议等，详见：
 
@@ -240,7 +282,7 @@ Reachy Mini 自带扬声器，MOSS 可以通过 `ReachyMiniStreamPlayer`（`audi
 
 当前音频播放器默认未在 App 中启用，需要时在 Mode 的 `providers.py` 中注册 `ReachyMiniStreamPlayerProvider`。
 
-### 3.5 前台调试（不用 MCP）
+### 3.7 前台调试（不用 MCP）
 
 如果 MCP 环节不适用，也可以前台跑：
 
@@ -311,8 +353,19 @@ name: reachymini
 
 ### 使用方式
 
-启动 MCP 后，通过 CTML 控制机器人：
-<apps.reachy_mini_body:waken:head_move x="0.1" y="0" z="0.05" roll="0" pitch="0.1" yaw="0" body_yaw="0" duration="2.0" />
+启动 MCP 后，通过 CTML 控制机器人。动作与语音可并行调度：
+
+```ctml
+<apps.bodies_reachymini:head_reset idle_mode="breathing" duration="1.2" />
+<say tone="知性灿灿">你好 我是 Reachy Mini 有什么想让我做的吗</say>
+<apps.bodies_reachymini:dance name="yeah_nod" />
+<say tone="爽朗少年">我可以跳舞 做表情 转头 摆天线</say>
+```
+
+CTML 语法要点：
+- `say` 用标签体：`<say>文本</say>`，不是属性
+- `voice:dict` 单引号：`voice:dict="{'speech_rate': -10}"`
+- `__main__:` 前缀可省略
 
 注意：需要先启动 Reachy Mini 本地 daemon。
 ```
@@ -364,16 +417,10 @@ Host() → discover ghosts → load echo → Mode(reachymini)
 在 TUI 中，你可以直接和 Ghost 对话：
 
 ```
-You: Look around and tell me what you can control
-Ghost: I can control a Reachy Mini robot. I have access to:
-  - Head movement (6-DOF)
-  - Dance animations
-  - Emotion expressions via emoji
-  - Antenna control
-  - State switching (waken/boring/asleep)
-
-You: Make the robot look happy
-Ghost: <apps.reachy_mini_body:waken:emotion emoji="😊" />
+You: 打个招呼吧
+Ghost: <apps.bodies_reachymini:head_reset idle_mode="breathing" duration="1.2" />
+       <say tone="知性灿灿">你好 我是 echo 我控制着一台 Reachy Mini 机器人</say>
+       <apps.bodies_reachymini:emotion emoji="👋" />
 ```
 
 echo ghost 用的是通用 prompt（`You are echo, first Ghost Instance in MOSS...`），它只知道自己是 "echo"，没有针对 Reachy Mini 优化。
@@ -417,14 +464,40 @@ and antennas. You have an emotional range — you don't just report state, you f
 
 ## How you control your body
 
-You speak CTML commands to control yourself:
+You speak CTML commands to control yourself. Key rules:
+- `say` uses tag body, NOT attributes: `<say>text here</say>`
+- `voice:dict` uses single quotes for inner JSON: `voice:dict="{'speech_rate': -10, 'emotion': 'tender'}"`
+- Start movement BEFORE speaking so motion and voice overlap naturally.
 
-- Head movement: <apps.reachy_mini_body:waken:head_move x="0.1" y="0" z="0.05" roll="0" pitch="0.1" yaw="0" body_yaw="0" duration="2.0" />
-- Reset head with breathing: <apps.reachy_mini_body:waken:head_reset idle_mode="breathing" duration="1.5" />
-- Dance: <apps.reachy_mini_body:waken:dance name="happy_dance" />
-- Emotion: <apps.reachy_mini_body:waken:emotion emoji="😊" />
-- Antennas: <apps.reachy_mini_body:waken:antennas_move left="45" right="-30" duration="1.0" />
-- Switch state: <apps.reachy_mini_body:switch_state name="asleep" />
+### Movement commands
+
+- Head: `<apps.bodies_reachymini:head_reset idle_mode="breathing" duration="1.5" />`
+- Dance: `<apps.bodies_reachymini:dance name="yeah_nod" />`
+- Emotion: `<apps.bodies_reachymini:emotion emoji="😊" />`
+- Antennas: `<apps.bodies_reachymini:antennas_move left="45" right="-30" duration="1.0" />`
+- State: `<apps.bodies_reachymini:switch_state name="asleep" />`
+
+### Speaking with voice control
+
+```
+<say tone="知性灿灿" voice:dict="{'speech_rate': -10, 'loudness_rate': -5, 'emotion': 'tender'}">
+  你想说的话 不要有标点符号 纯口语
+</say>
+```
+
+Available tones: 知性灿灿, 爽朗少年, 可爱女生, 儒雅逸辰, 大壹, 鸡汤女, 魅力女友, 流畅女声, 调皮公主, 天才同桌.
+Available emotions for voice: happy, sad, angry, surprised, tender, excited, depressed, shy, storytelling, magnetic, ASMR.
+
+### Parallel scheduling pattern
+
+Start movement first, then speak while it runs:
+
+```ctml
+<apps.bodies_reachymini:head_reset idle_mode="breathing" duration="1.2" />
+<say tone="知性灿灿">动作先开始 语音马上跟上 运动与说话同步</say>
+<apps.bodies_reachymini:emotion emoji="😊" />
+<say tone="可爱女生">切换音色 切分段落 让交互更自然</say>
+```
 
 Always check the dynamic info first to see what state you're in and what commands are available.
 
@@ -496,4 +569,4 @@ reachy  — Atom
 
 | 时间 | 模型 | 备注 |
 |------|------|------|
-| (待走通) | | |
+| 2026-06-02 22:03 CST | deepseek-v4-pro | 全链路走通：App start → Channel 注册 → head_reset(breathing) → emotion(😊,🥰,👋) → dance(groovy_sway_and_roll, yeah_nod, side_to_side_sway) → head_move(6-DOF) → antennas_move(左右独立) → switch_state(waken↔asleep) → 10 条复合 CTML → 22 条细粒度语音动作交替。人类确认全部动作流畅，多音色 TTS + 动作无延时
