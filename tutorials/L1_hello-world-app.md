@@ -137,7 +137,7 @@ async def add(a: float, b: float) -> float
 
 ## 相关文档
 
-- `moss docs read model-oriented-application-system.md` — App 体系完整论述
+- `moss docs read app-system.md` — App 体系完整论述
 - `moss codex blueprint channel_builder` — Channel 构建 API
 - `.moss_ws/apps/CLAUDE.md` — App 开发指南
 - `.moss_ws/apps/bodies/reachymini/` — 完整的复杂 App 示例
