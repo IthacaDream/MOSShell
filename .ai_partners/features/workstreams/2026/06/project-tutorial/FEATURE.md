@@ -1,13 +1,14 @@
 ---
-title: Project Tutorial — 项目认知入口与案例沉淀
-status: draft
-priority: P1
 created: 2026-06-02
-updated: '2026-06-02'
 depends: []
-milestone:
-description: >-
-  面向人类长期记忆的项目认知入口。以叙事性案例而非任务导向的方式，帮助理解 MOSS 的设计哲学、核心概念与实操模式。
+description: 面向人类长期记忆的项目认知入口。以叙事性案例而非任务导向的方式，帮助理解 MOSS 的设计哲学、核心概念与实操模式。
+milestone: null
+priority: P1
+status: in-progress
+status_note: 'L2 tutorial validated: full chain walkthrough, CTML parallel scheduling
+  confirmed, K8-K12 interaction design insights recorded'
+title: Project Tutorial — 项目认知入口与案例沉淀
+updated: '2026-06-02'
 ---
 
 # Project Tutorial — 项目认知入口与案例沉淀
