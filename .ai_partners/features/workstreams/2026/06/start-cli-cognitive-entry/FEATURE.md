@@ -1,14 +1,14 @@
 ---
-title: Moss Start — CLI Cognitive Entry
-status: awaiting_validation
-priority: P0
 created: 2026-06-02
-updated: 2026-06-02
 depends: []
-milestone:
-description: >-
-  moss start 命令实现 + start.md 认知入口文档 + CLAUDE.md 重写。
-  设计原理记录在 cli/.design/2026-06-02-start-cli-cognitive-entry.md。
+description: moss start 命令实现 + start.md 认知入口文档 + CLAUDE.md 重写。 设计原理记录在 cli/.design/2026-06-02-start-cli-cognitive-entry.md。
+milestone: null
+priority: P0
+status: completed
+status_note: 15/15 验收通过，CLAUDE.md 重写、get-interface 提示修正、docs/how-tos 发现提示、环境准备去重，README.md
+  蓝本已保存
+title: Moss Start — CLI Cognitive Entry
+updated: '2026-06-02'
 ---
 
 # Moss Start — CLI Cognitive Entry

@@ -304,6 +304,10 @@ Two knowledge systems for the MOSS project itself:
 
 There is no fixed order. Pick the entry point that matches your current
 goal — task execution or system comprehension.
+
+**Before diving into source code or tests to answer a question, run `moss docs list`
+and `moss how-tos list` first.** Much of the knowledge you need may already be
+written. A 2-second list scan prevents wasted exploration.
 ---
 
 ## User Stories

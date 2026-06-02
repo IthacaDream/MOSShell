@@ -1,38 +1,48 @@
-# 项目概述
+# MOSS — Model-oriented Operating System Shell
 
-项目名为 `MOS-Shell` (Model-oriented Operating System Shell), 包含几个核心目标:
-目标是 AI 大模型作为大脑, 不仅可以思考, 还可以 实时/并行/有序 地操作包括 计算机/具身躯体 来进行交互.
+MOSS 是 Ghost in Shells 架构的 Shell（躯体）层 — 让 AI 模型降临到现实世界：感知环境、思考、行动，并发、实时、有序。
 
-MOS-Shell 是 Ghost In Shells (中文名: 灵枢) 项目创建的新交互范式架构, 是第二代 MOSS 架构 (完善了 ChannelApp 和
-Realtime-Actions 思想). 第一代 MOSS 架构 (全代码驱动 + FunctionToken) 详见 [GhostOS](https://github.com/ghostInShells/ghostos)
+不是又一个 agent 框架。它回答一个不同的问题：**一个 Ghost 如何降入 Shell，活过来？**
 
-**更多设计思路请访问飞书文档**: [核心设计思想综述](https://ycnrlabqki3v.feishu.cn/wiki/QCKUwAX7tiUs4GkJTkLcMeWqneh)
-
-## Beta 版本
-
-当前还在 beta 版本的开发中, 没有时间精力完善文档与工具. 简单介绍下 main 分支的使用: 
+## 安装
 
 ```bash
-# 1. 下载仓库 - 略
-# 2. 使用 uv 创建环境并且安装全部依赖 (暂时没拆分好依赖)
-uv venv 
-source .venv/bin/activate
-uv sync --ative --all-extras
-
-# 初始化运行环境. 
-moss workspace init
-
-# 查看更多命令
-moss
-
-# 交互命令行
-moss-cli
-
-# debug 用的 repl
-moss-repl
-
-# 以 MCP 的方式运行, 可以提供给 claude code 使用. 
-moss-as-mcp
+git clone https://github.com/GhostInShells/MOSShell && cd MOSShell
+uv sync --active --all-extras
+cp .moss_ws/.env.example .moss_ws/.env    # 填入 API key
 ```
 
-更多的介绍等 beta 版本基本收敛后完善. 预计通过 claude code 提供项目解释. 
+## 开始
+
+```bash
+.venv/bin/moss start        # 认知入口 — 从这里开始
+.venv/bin/moss-cli           # 交互式 Shell（人类用）
+.venv/bin/moss-as-mcp        # 作为 MCP server 暴露给 AI 工具
+```
+
+AI 协作者进入项目后会自动加载认知地图。人类用户运行 `moss start` 即可。
+
+## 核心概念
+
+| 概念 | 是什么 |
+|------|--------|
+| **CTML** | 流式控制语言 — 模型边生成 token 边实时执行命令 |
+| **Channel** | 能力封装 — Python 函数签名即 prompt，无需 schema 翻译 |
+| **Mindflow** | 感知/思考/行动仲裁 — Ghost 在连续流中保持存活 |
+| **Ghost** | 持久化智能体 — 连续记忆，主动交互，反身性控制 |
+
+## 了解更多
+
+- `moss ctml read` — CTML 语法与执行模型
+- `moss --ai all-commands` — 完整命令树
+- `moss codex concepts` — 核心抽象
+- `moss codex blueprint channel_builder` — 如何构建 Channel
+- `tutorials/` — L1 Hello World 到 L4 全链路教程
+
+## 项目状态
+
+Beta。由人类工程师与 AI 协作开发。通过 `moss --ai features list` 查看活跃 workstream。
+
+---
+
+*Ghost in Shells — 探索人类与 AI 协作共生的可能性。*
