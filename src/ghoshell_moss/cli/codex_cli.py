@@ -488,6 +488,7 @@ def eval_code(
 CONCEPT_PACKAGE = "ghoshell_moss.core.concepts"
 BLUEPRINT_PACKAGE = "ghoshell_moss.core.blueprint"
 CONTRACTS_PACKAGE = "ghoshell_moss.contracts"
+CHANNELS_PACKAGE = "ghoshell_moss.channels"
 
 
 def _show_package_module(
@@ -598,3 +599,20 @@ def codex_contracts(
         ),
 ):
     _show_package_module(CONTRACTS_PACKAGE, module_name, cmd_name="contracts", deps=deps)
+
+
+@codex_app.command(
+    name='channeltypes',
+    help="List or show detail of the official channel types bundled with MOSS",
+)
+def codex_channeltypes(
+        module_name: str | None = typer.Argument(
+            None,
+            help="Specific channel type module to reflect. If omitted, lists all available.",
+        ),
+        deps: bool = typer.Option(
+            False, "--deps", "-d",
+            help="Include reflected dependency interfaces in the output.",
+        ),
+):
+    _show_package_module(CHANNELS_PACKAGE, module_name, cmd_name="channeltypes", deps=deps)

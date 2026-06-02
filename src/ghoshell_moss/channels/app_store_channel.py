@@ -1,3 +1,12 @@
+"""App 生命周期管理：发现、启动、停止独立进程应用 | 系统管理 | active
+
+Example:
+    from ghoshell_moss import new_shell_main_channel
+    from ghoshell_moss.channels.app_store_channel import AppStoreChannel
+    main = new_shell_main_channel()
+    main.import_channels(AppStoreChannel(name='apps'))
+"""
+
 import asyncio
 from ghoshell_moss.core.concepts.channel import Channel, ChannelName, ChannelRuntime, ChannelCtx
 from ghoshell_moss.core.concepts.command import Command
@@ -126,7 +135,7 @@ class AppStoreChannelState(ChannelState):
 
         self._own_commands = {
             'start': PyCommand(start),
-            'list_apps': PyCommand(list_apps),
+            'list_apps': PyCommand(list_apps, always_observe=True),
             'stop': PyCommand(stop),
         }
 

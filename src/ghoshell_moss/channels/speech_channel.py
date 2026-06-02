@@ -1,3 +1,10 @@
+"""语音交互：整合 TTS 与音频播放器 | 交互能力 | beta
+
+Example:
+    from ghoshell_moss.channels.speech_channel import SpeechChannel
+    chan = SpeechChannel(name='speech', description='语音交互通道', speech=tts_speech)
+"""
+
 from typing import Optional
 
 from ghoshell_container import IoCContainer

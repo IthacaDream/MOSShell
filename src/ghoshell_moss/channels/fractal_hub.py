@@ -1,3 +1,12 @@
+"""分形通讯桥接：连接外部 MOSS 运行时 | 通讯桥接 | active
+
+Example:
+    from ghoshell_moss import new_shell_main_channel
+    from ghoshell_moss.channels.fractal_hub import matrix_fractal_hub_channel_factory
+    main = new_shell_main_channel()
+    main.import_channels(matrix_fractal_hub_channel_factory())
+"""
+
 from typing import Callable
 from ghoshell_container import IoCContainer
 from ghoshell_moss.core.concepts.channel import Channel

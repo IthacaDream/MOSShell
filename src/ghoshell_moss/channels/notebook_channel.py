@@ -1,3 +1,12 @@
+"""文件系统笔记本：读写追加列表删除 | 认知模块 | beta
+
+Example:
+    from ghoshell_moss import new_shell_main_channel
+    from ghoshell_moss.channels.notebook_channel import new_notebook_channel
+    main = new_shell_main_channel()
+    main.import_channels(new_notebook_channel('/tmp/notes'))
+"""
+
 import os
 from pathlib import Path
 
@@ -81,7 +90,7 @@ def new_notebook_channel(
         path.write_text(text__, encoding="utf-8")
         return f"Wrote {name} ({len(text__)} chars)"
 
-    @chan.build.command()
+    @chan.build.command(always_observe=True)
     async def read(name: str) -> str:
         """读取一页笔记.
 
@@ -105,7 +114,7 @@ def new_notebook_channel(
             f.write(text__)
         return f"Appended to {name} ({len(text__)} chars)"
 
-    @chan.build.command()
+    @chan.build.command(always_observe=True)
     async def list_pages() -> list[str]:
         """列出所有笔记页的文件路径."""
         pages = []

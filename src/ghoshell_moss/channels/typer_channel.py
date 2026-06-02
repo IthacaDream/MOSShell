@@ -1,9 +1,19 @@
+"""包装 Typer CLI 为 Channel | 集成 | alpha
+
+Example:
+    from ghoshell_moss import new_shell_main_channel
+    from ghoshell_moss.channels.typer_channel import build_typer_skill_channel
+    import typer
+    app = typer.Typer()
+    main = new_shell_main_channel()
+    main.import_channels(build_typer_skill_channel(
+        name='my_cli', typer_app=app,
+        module_path='my_package.cli', experience_path='/tmp/exp.md'))
+"""
+
 from ghoshell_moss.core.blueprint.channel_builder import new_channel, MutableChannel
 from ghoshell_moss.message import Message
 from typer import Typer
-
-
-# defined by gemini 3 but not test yet.
 
 def build_typer_skill_channel(
         name: str,
@@ -46,7 +56,8 @@ def build_typer_skill_channel(
     # --- 3. 唯一的执行入口 ---
     @chan.build.command(
         name="exec",
-        doc="Execute a CLI command within this skill context."
+        doc="Execute a CLI command within this skill context.",
+        always_observe=True,
     )
     async def exec_command(cmd: str) -> str:
         """

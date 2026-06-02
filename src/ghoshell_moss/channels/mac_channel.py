@@ -1,3 +1,12 @@
+"""macOS JXA 脚本执行控制 | 系统控制 | alpha
+
+Example:
+    from ghoshell_moss import new_shell_main_channel
+    from ghoshell_moss.channels.mac_channel import new_mac_control_channel
+    main = new_shell_main_channel()
+    main.import_channels(new_mac_control_channel())
+"""
+
 import asyncio
 from typing import Any, Optional
 
@@ -95,5 +104,5 @@ def new_mac_control_channel(
         blocking=True,
     )
 
-    mac_jxa_channel.build.command()(run)
+    mac_jxa_channel.build.command(always_observe=True)(run)
     return mac_jxa_channel
