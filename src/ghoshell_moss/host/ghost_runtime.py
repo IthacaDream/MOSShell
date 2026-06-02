@@ -134,6 +134,10 @@ class GhostRuntimeImpl(GhostRuntime):
             )
         # todo: hook — GhostRuntimeLifecycleHook.on_stopped(self)
 
+    def pause(self, toggle: bool = True) -> None:
+        if self._mindflow is not None:
+            self._mindflow.pause(toggle)
+
     def close(self) -> None:
         logger = self.moss.logger
         logger.debug("%s closing moss runtime", self._log_prefix)

@@ -544,6 +544,7 @@ class CTMLShell(MOSShell[PrimeChannel]):
         done = await asyncio.gather(
             self._speech.clear(),
             self._main_runtime.tree.clear(self._main_runtime),
+            self.stop_interpretation(),
             return_exceptions=True,
         )
         for t in done:

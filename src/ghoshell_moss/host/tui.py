@@ -467,6 +467,7 @@ class MossHostTUI(Generic[RUNTIME], ABC):
                 "traceback.item": "cyan",
             })
         )
+        self._paused = False
         self._main_console_output = ConsoleOutput("", lambda: True, self._renderable_queue, self.clear_console)
         self._dummy_completer = DummyCompleter()
 
@@ -557,6 +558,14 @@ class MossHostTUI(Generic[RUNTIME], ABC):
         """由子类实现，提供特定 Runtime 的业务介绍。"""
         return None
 
+    def _on_emergency_pause(self) -> None:
+        """急停 hook — 子类 override 实现具体 pause/resume 逻辑."""
+        pass
+
+    def _prompt_status(self) -> str:
+        """返回 prompt 前的状态标记。子类 override 如返回 '[PAUSED] '."""
+        return ""
+
     def farewell(self) -> None:
         """要在界面里输出告别信息. """
         self._direct_print("good bye")
@@ -597,6 +606,11 @@ class MossHostTUI(Generic[RUNTIME], ABC):
         @kb.add('c-o')
         def expand_panels(event) -> None:
             self.current_state().console.replay_recent(force_expand=True)
+
+        @kb.add('c-g')
+        def emergency_pause(event) -> None:
+            if self._event_loop:
+                self._event_loop.call_soon_threadsafe(self._on_emergency_pause)
 
         return kb
 
@@ -732,7 +746,7 @@ class MossHostTUI(Generic[RUNTIME], ABC):
         while not self._closing_event.is_set():
             with patch_stdout.patch_stdout(raw=True):
                 item = await self._prompt_session.prompt_async(
-                    message=lambda: f' {self._current_state_name}  ❯ ',
+                    message=lambda: f'{self._prompt_status()}{self._current_state_name}  ❯ ',
                     style=self._style,
                     key_bindings=self.kb,
                     multiline=True,

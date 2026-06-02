@@ -329,6 +329,10 @@ class GhostRuntime(ABC):
         """逆序清理: ghost.__aexit__ → moss.__aexit__"""
         pass
 
+    def pause(self, toggle: bool = True) -> None:
+        """急停: 级联暂停 mindflow，attention abort 自然中断 articulate/action 循环."""
+        pass
+
     def close(self) -> None:
         """发送关闭信号. 委托给 MossRuntime."""
         self.moss.close()

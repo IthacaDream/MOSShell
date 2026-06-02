@@ -128,6 +128,15 @@ class GhostTUI(MossHostTUI[GhostRuntime]):
     def _get_runtime(self) -> GhostRuntime:
         return self.host.run_ghost(self.host.env.ghost_name)
 
+    def _on_emergency_pause(self) -> None:
+        self._paused = not self._paused
+        self.runtime.pause(self._paused)
+
+    def _prompt_status(self) -> str:
+        if self._paused:
+            return '\033[1;31m[PAUSED]\033[0m '
+        return ""
+
     def _get_custom_intro(self) -> str | None:
         from rich.text import Text
         return Text(
