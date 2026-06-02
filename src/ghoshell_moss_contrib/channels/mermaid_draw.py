@@ -1,7 +1,7 @@
 import urllib.parse
 import webbrowser
 
-from ghoshell_moss import PyChannel
+from ghoshell_moss.core import PyChannel
 
 __all__ = ["new_mermaid_chan"]
 

@@ -1,12 +1,15 @@
-from typing import AsyncIterable
-from ghoshell_container import IoCContainer, Contracts
+import pathlib
+from typing import AsyncIterable, Optional
+from ghoshell_container import IoCContainer, Contracts, Provider
 from typing_extensions import Self
 from abc import ABC, abstractmethod
-from ghoshell_moss.core.blueprint.mindflow import Logos, Mindflow, Nucleus, NucleusFactory, Articulator
+from ghoshell_moss.core.blueprint.mindflow import Mindflow, NucleusMeta, Articulator
 from ghoshell_moss.core.concepts.channel import Channel
+from ghoshell_moss.contracts import Storage
 from ghoshell_moss.message import Message
+from dataclasses import dataclass
 
-__all__ = ['Ghost', 'GhostMeta']
+__all__ = ['Ghost', 'GhostMeta', 'GhostWorkspace']
 
 
 class GhostMeta(ABC):
@@ -26,7 +29,7 @@ class GhostMeta(ABC):
         pass
 
     @abstractmethod
-    def nuclei_manifests(self) -> list[NucleusFactory]:
+    def nuclei_metas(self) -> list[NucleusMeta]:
         """
         返回可以自解释, 但依赖运行时的 Nucleus Meta
         """
@@ -73,6 +76,13 @@ class GhostMeta(ABC):
         return Contracts([
 
         ])
+
+    def providers(self) -> list[Provider]:
+        """
+        ghost 可以提供自身所需的依赖, 在启动前完成注册.
+        如果环境中有注册 container.bound(contract) is True, 则优先用 moss 环境里的注册.
+        """
+        return []
 
     @abstractmethod
     def factory(self, container: IoCContainer) -> "Ghost":
@@ -130,16 +140,6 @@ class Ghost(ABC):
         """
         return None
 
-    def nuclei(self) -> list[Nucleus]:
-        """
-        返回 ghost 的认知模块
-        可以基于不同的 signal 产生 impulse, 驱动 Mindflow 运转, 生成 Attention,
-        最后通过 articulator 调用 ghost 的 articulate 函数.
-
-        这些 Nuclei 会注册到系统的 mindflow 中.
-        """
-        return []
-
     def mindflow(self) -> Mindflow | None:
         """
         Ghost 定义自身的 Mindflow. 如果返回 None 的话, 会使用 MOSS 架构提供的默认 mindflow 实现.
@@ -167,6 +167,92 @@ class Ghost(ABC):
         """结束自身生命周期."""
         pass
 
+    # ── observability hooks ────────────────────────────────
+    #
+    # Two prefix conventions, one purpose: let debuggers see what the ghost sees.
+    #
+    #   on_*      — event callback. Pushed by GhostRuntime when something happens.
+    #               Default no-op. Ghost authors override to record internal state.
+    #   inspect_* — state query. Pulled by REPL / scripts / GhostRuntime itself.
+    #               Ghost authors override to expose internals.
+    #
+    # These are NOT lifecycle hooks. Lifecycle hooks (born / wake / sleep / die)
+    # will carry semantic weight for ghost state transitions. Observability hooks
+    # are purely diagnostic — removing them changes no behavior.
+    #
+    # Naming is deliberately constrained to these two prefixes. Before adding a
+    # new hook, ask: is it an event (on_*) or a query (inspect_*)? If neither,
+    # it does not belong here.
+
+    def on_articulate_exit(
+            self,
+            articulator: Articulator,
+            logos: str,
+            error: Exception | None,
+    ) -> None:
+        """Called after articulate() completes, success or failure.
+
+        logos is the full concatenated model output from one articulate cycle.
+        error is non-None if articulation raised. Together with the articulator's
+        moment, this is enough to replay the cycle for deterministic reproduction.
+        """
+
+    def inspect_state(self) -> dict:
+        """Ghost internal runtime state snapshot.
+
+        No fixed schema — each ghost prototype decides what to expose.
+        Suitable for counters, mode flags, cache sizes, anything that lives
+        inside the ghost instance and helps diagnose misbehavior.
+        """
+        return {}
+
+    def inspect_context(self) -> dict:
+        """Last articulate context window snapshot.
+
+        Returns the messages actually sent to the model in the most recent
+        articulate() call, as a serializable dict. Lets the debugger see
+        exactly what the model saw in a given cycle.
+
+        Recommended structure (but not enforced):
+            {
+                "system": str,          # system prompt assembled for that cycle
+                "messages": [...]       # conversation history / percepts as dicts
+            }
+
+        Default returns {}. Ghost authors override in on_articulate_exit()
+        by capturing and storing the context before the model call.
+        """
+        return {}
+
+    def inspect_controller(self) -> object | None:
+        """Return a controller object to expose in the TUI REPL, or None.
+
+        When non-None, GhostRuntime will register this object under the key
+        "ghost" in the REPLRegistrar tool_objects dict. Every public method
+        becomes a /ghost.<method>() command in the TUI.
+
+        Ghost authors should narrow the return type in their subclass:
+
+            def inspect_controller(self) -> "MyGhostController | None":
+                return self._controller
+
+        This makes the subclass fully introspectable without inheriting any
+        fixed controller interface from the ABC.
+
+        Not called in non-TUI contexts (scripts, tests). Returning a controller
+        has no side effects outside the TUI session.
+        """
+        return None
+
+    # ── end observability hooks ────────────────────────────
+
+
+@dataclass(frozen=True)
+class GhostWorkspace:
+    """ Host 运行一个 Ghost 时为它准备的运行环境. 在 IoC 中可以获取. """
+
+    home: pathlib.Path  # host 为 ghost 分配的持久化存储区域.
+    source: Optional[pathlib.Path]  # ghost 源代码所处的环境.
 
 # ── 三层抽象 ──────────────────────────────────────────────
 #
@@ -176,4 +262,3 @@ class Ghost(ABC):
 #
 # 一个文件 = 一个 GhostMeta 实例 = 一个 Ghost 注册。
 # 系统先发现 Bootstrapper（理解元信息/契约），运行时通过 factory() 生成 Runtime。
-

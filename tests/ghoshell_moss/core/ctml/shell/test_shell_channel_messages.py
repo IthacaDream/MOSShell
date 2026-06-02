@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from ghoshell_moss import PyChannel
+from ghoshell_moss.core import PyChannel
 from ghoshell_moss.message import Message
 
 

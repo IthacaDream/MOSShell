@@ -10,16 +10,6 @@ from datetime import datetime
 from dateutil import tz
 from .contents import ContentModel, Content, Text, Base64Image
 from ulid import ULID
-import ghoshell_common
-
-
-def _ulid_gen() -> str:
-    return str(ULID())
-
-
-# patch uuid to ulid
-ghoshell_common.helpers.uuid = _ulid_gen
-from ghoshell_common.helpers import uuid
 
 __all__ = [
     "AdditionType",
@@ -29,6 +19,7 @@ __all__ = [
     "Message",
     "MessageMeta",
     "WithAdditional",
+    "unique_id",
 ]
 
 # 实现一个消息协议容器. 这个容器经过了几个阶段的改造:
@@ -50,6 +41,12 @@ Additional = Optional[dict[str, Any]]
 这样可以从弱类型容器中, 拿到一个强类型的数据结构, 但又不需要提前定义它. 
 这个数据不对 AI 暴露, 属于 Ghost In Shells 架构自身定义的交互数据. 
 """
+
+default_unique_id_gen = lambda: str(ULID())
+
+
+def unique_id() -> str:
+    return default_unique_id_gen()
 
 
 class HasAdditional(Protocol):
@@ -185,7 +182,7 @@ class MessageMeta(BaseModel):
         description="当 Message 使用 meta 生成 xml 结构时, 用于包括 content 的 xml 标记. 如果为空, 意味着不包裹."
     )
     id: str = Field(
-        default_factory=uuid,
+        default_factory=unique_id,
         description="消息的全局唯一 ID",
     )
     role: str | None = Field(
@@ -357,7 +354,7 @@ class Message(BaseModel, WithAdditional):
         elif isinstance(item, ContentModel):
             _content = item.to_content()
         elif isinstance(item, Image.Image):
-            _content = Base64Image.from_pil_image(item)
+            _content = Base64Image.from_pil_image(item).to_content()
         elif isinstance(item, BaseModel):
             serialized = item.model_dump_json(indent=0, ensure_ascii=False, exclude_none=False)
             _content = Text.new_content(serialized)
@@ -424,21 +421,29 @@ class Message(BaseModel, WithAdditional):
         tag = self.meta.tag
         # 没有 tag 的情况下, 认为不包裹消息.
         if not with_meta or not tag:
-            yield from self.iter_contents(join_text=join_text)
+            if join_text:
+                yield from self.join_contents(self.contents)
+            else:
+                yield from self.contents
             return
 
         attrs = self.meta.gen_attributes_str(timestamp=timestamp)
         attr_str = ''
         if attrs:
             attr_str = ' ' + attrs
-        yield Text.new(f'<{tag}{attr_str}>\n').to_content()
-        yield from self.iter_contents(join_text=join_text)
-        yield Text.new(f'\n</{tag}>').to_content()
+        contents = [Text.new_content(f'<{tag}{attr_str}>\n')]
+        contents.extend(self.contents)
+        contents.append(Text.new_content(f'</{tag}>\n'))
+        if join_text:
+            yield from self.join_contents(self.contents)
+        else:
+            yield from contents
 
-    def iter_contents(self, join_text: bool = True) -> Iterable[Content]:
+    @classmethod
+    def join_contents(cls, contents: Iterable[Content]) -> Iterable[Content]:
         last_text: Content | None = None
-        for content in self.contents:
-            if join_text and Text.match(content):
+        for content in contents:
+            if Text.match(content):
                 if last_text is None:
                     last_text = content.copy()
                 else:
@@ -480,9 +485,13 @@ class Message(BaseModel, WithAdditional):
         """以 string 为主的 content 显示. """
         if 'text' in content:
             return content['text'] or ''
-        else:
-            content_type = content['type']
-            return f'<content type="{content_type}"/>'
+        content_type = content.get('type', 'unknown')
+        source = content.get('source', {}) or {}
+        if content_type == 'image' and source:
+            media = source.get('media_type', '?')
+            data_len = len(source.get('data', '') or '')
+            return f'<content type="image" media_type="{media}" base64_size="{data_len}"/>'
+        return f'<content type="{content_type}"/>'
 
     def to_content_string(self) -> str:
         blocks = []

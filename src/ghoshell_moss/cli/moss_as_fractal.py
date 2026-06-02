@@ -12,7 +12,8 @@ from datetime import datetime
 
 import click
 
-from ghoshell_moss.host import Host, FractalCellProvider
+from ghoshell_moss.host import Host
+from ghoshell_moss.core.blueprint.fractal import FractalCellProvider
 from ghoshell_moss.core.blueprint.environment import Environment
 
 

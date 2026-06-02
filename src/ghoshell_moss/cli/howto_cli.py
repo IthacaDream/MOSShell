@@ -13,7 +13,7 @@ All reads go through MarkdownKnowledgeBase (the ResourceStorage).
 import asyncio
 import typer
 from pathlib import Path
-from .utils import console, print_error, print_info, print_simple_table, show_status
+from .utils import console, print_error, print_info, print_simple_table
 
 HOW_TO_ROOT = Path(__file__).resolve().parent / "how_tos"
 
@@ -35,7 +35,7 @@ def load_markdown_knowledge_base(_path: Path):
 kb = load_markdown_knowledge_base(HOW_TO_ROOT)
 
 howto_app = typer.Typer(
-    name="how-tos",
+    name="howtos",
     # Use README first line as help, falling back to a default
     help=[m.description for m in kb.metas if m.path == "README.md"][0]
     if any(m.path == "README.md" for m in kb.metas)
@@ -51,7 +51,7 @@ def list_docs(
         limit: int = typer.Option(50, "--limit", "-n", help="Max results"),
 ):
     """List how-to documents from the knowledge base."""
-    metas = asyncio.run(kb.list_metas(query=query, limit=limit if limit >= 0 else 9999))
+    metas = asyncio.run(kb.list_infos(query=query, limit=limit if limit >= 0 else 9999))
 
     if not metas:
         print_info("No how-to documents found.")
@@ -83,39 +83,6 @@ def list_docs(
     )
 
 
-@howto_app.command(name="recall")
-def recall(
-        query: str = typer.Argument(help="recall how-tos by agent with pydantic ai and anthropic api"),
-):
-    """Ask a question via the recall agent (requires ANTHROPIC_SMALL_FAST_MODEL)."""
-    from ghoshell_moss.core.resources.markdown_kb import recall_available
-
-    if not recall_available():
-        print_error("ANTHROPIC_SMALL_FAST_MODEL not set.")
-        print_info("Set ANTHROPIC_BASE_URL, ANTHROPIC_API_KEY, and ANTHROPIC_SMALL_FAST_MODEL to enable.")
-        raise typer.Exit(code=1)
-
-    with show_status("recalling how-to documents..."):
-        result = asyncio.run(kb.recall((query, None)))
-
-    console.print(f"[bold]Q:[/bold] {query}\n")
-
-    if result.done:
-        if result.locators:
-            console.print(f"[bold green]Matched {len(result.locators)} document(s):[/bold green]")
-            for loc in result.locators:
-                console.print(f"  {loc}")
-            console.print(f"\n[dim]Reasoning: {result.reasoning}[/dim]")
-        else:
-            console.print("[yellow]No matching documents found.[/yellow]")
-    else:
-        console.print(f"[bold yellow]Need clarification:[/bold yellow] {result.prompt}")
-        if result.choices:
-            console.print()
-            for c in result.choices:
-                console.print(f"  - {c}")
-
-
 @howto_app.command(name="read")
 def read_doc(
         path: str = typer.Argument(help="Document path, e.g. 'how-to-make-how-to.md'"),
@@ -125,7 +92,7 @@ def read_doc(
     item = asyncio.run(kb.get(path))
     if item is None:
         print_error(f"Document not found: {path}")
-        print_info("Use 'moss how-tos list' to see available documents.")
+        print_info("Use 'moss howtos list' to see available documents.")
         raise typer.Exit(code=1)
 
     text = asyncio.run(item.get())

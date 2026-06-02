@@ -15,9 +15,11 @@ from rich.box import ROUNDED, DOUBLE, HEAVY, SIMPLE
 from rich.style import Style
 
 from ghoshell_moss.host import Host
+from ghoshell_moss.core.codex.discover import ScanError
 
 __all__ = [
     'console',
+    'display_scan_errors',
     'print_host_mode_info',
     'echo',
     'print_success',
@@ -65,7 +67,8 @@ def _ai_print(*args, **kwargs) -> None:
         if isinstance(arg, str):
             parts.append(_strip_markup(arg))
         elif isinstance(arg, RichSyntax):
-            parts.append(arg.code.rstrip())
+            if arg.code is not None:
+                parts.append(arg.code.rstrip())
         elif isinstance(arg, (Panel, Table)):
             parts.append(_renderable_to_plain(arg))
         else:
@@ -334,3 +337,28 @@ def _print_ai_table(
     for row in clean_data:
         row_line = "| " + " | ".join(row) + " |"
         click.echo(row_line)
+
+
+def display_scan_errors(errors: list[ScanError]) -> None:
+    """Display non-fatal scan errors discovered during environment scanning."""
+    if not errors:
+        return
+
+    if _ai_mode:
+        console.print(f"\n[WARN] {len(errors)} discovery error(s):")
+        error_data = [
+            [err.module_path, err.stage, f"{type(err.exception).__name__}: {err.exception}"]
+            for err in errors
+        ]
+        print_simple_table(data=error_data, headers=["Module", "Stage", "Error"])
+        return
+
+    console.print(f"\n[yellow]Warning: {len(errors)} discovery error(s):[/yellow]")
+    error_data = [
+        [err.module_path, err.stage, f"{type(err.exception).__name__}: {err.exception}"]
+        for err in errors
+    ]
+    print_simple_table(
+        data=error_data,
+        headers=["Module", "Stage", "Error"],
+    )

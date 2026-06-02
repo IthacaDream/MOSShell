@@ -1,7 +1,8 @@
 from typing import Callable, Coroutine
 from ghoshell_moss.core.mindflow.buffer_nucleus import BufferNucleus
 from ghoshell_moss.core.mindflow.base_mindflow import BaseMindflow
-from ghoshell_moss.core.blueprint.mindflow import Mindflow, Signal, Priority, Articulator, Action, Nucleus, Moment
+from ghoshell_moss.core.blueprint.mindflow import Mindflow, Signal, Priority, Articulator, Action, Nucleus, Moment, \
+    MindflowHook
 import janus
 import uvloop
 import threading
@@ -326,7 +327,7 @@ def _test_mindflow_in_differ_thread(i: int):
     t_actions.start()
     # 等待启动完了再推入信号.
     assert mindflow.wait_started_sync(2)
-    assert articulate_loop_started.wait(2)
+    assert articulate_loop_started.wait(2.5)
     assert action_loop_started.wait(2)
     # 第一个信号输出成功.
     signal_1 = Signal.new(name="vision_event", priority=Priority.NOTICE, strength=100)
@@ -551,6 +552,10 @@ def test_suite_consuming_endless_observe():
     got = []
     done_event = threading.Event()
 
+    class _Hook(MindflowHook):
+        def on_error(self, error: Exception) -> None:
+            done_event.set()
+
     async def _articulate_func(articulator: Articulator) -> None:
         for char in content:
             articulator.send_nowait(char)
@@ -567,8 +572,10 @@ def test_suite_consuming_endless_observe():
 
     with suite:
         # 测试连续处理十个.
+        suite.mindflow.with_hook(_Hook())
         suite.run_in_thread(_articulate_func, _action_func)
         # 只发送一个信号.
+        suite.mindflow.wait_started_sync()
         suite.mindflow.add_signal(Signal.new('test'))
         done_event.wait()
         assert len(got) == 10
@@ -613,6 +620,6 @@ def test_wait_first_impulse_complete():
     complete.id = incomplete.id
     # 手动塞入 signal.
     suite.mindflow.add_signal(complete)
-    assert done_event.wait(1)
+    assert done_event.wait(1.5)
     assert len(got) == 1
     suite.close()

@@ -1,3 +1,6 @@
+"""
+how to build a channel
+"""
 # # Blueprint
 # about how to build channel for MOSShell.
 # the path of this module is ghoshell_moss.core.blueprint.channel_builder
@@ -6,27 +9,33 @@ from abc import ABC, abstractmethod
 
 from PIL import Image
 from typing import Union, Callable, Coroutine, Any, Optional, TypeVar, AsyncIterable
+
+from ghoshell_container import IoCContainer
 from typing_extensions import Self
 
+from ghoshell_moss.core import ChannelRuntime
 from ghoshell_moss.message import Message
-from ghoshell_moss.core.concepts.command import Command, Observe
+from ghoshell_moss.core.concepts.command import Command, Observe, ObserveError
 from ghoshell_moss.core.concepts.channel import Channel
 from ghoshell_moss.core.blueprint.mindflow import Signal
 import asyncio
 
 __all__ = [
-    "Channel",
+    "Channel", "ChannelFactory",
     "CommandFunction", "MessageFunction", "StringType", "LifecycleFunction",
     "Message",
     "MessageType",
     "Builder",
     "MutableChannel",
     "new_channel", "new_command",
+    "CommandUtil",
+    "Observe", "ObserveError",
+
+    # 作为示例用的实现风格.
+    "ChannelInterface", "ChannelCreator",
 ]
 
-"""
-how to build a channel
-"""
+ChannelFactory = Callable[[IoCContainer], Channel | None]
 
 CommandFunction = Union[Callable[..., Coroutine], Callable[..., Any]]
 """
@@ -70,17 +79,30 @@ INSTANCE = TypeVar("INSTANCE", bound=object)
 
 class CommandUtil:
     """
-    use it in command to get runtime ctx
+    在 Command 内部使用的工具, 仅在 Command 被执行时可以使用.
+    通过 contextlib ctx 获取调用者能力.
+    包含各种 Command 函数内需要的常用 API.
     """
 
     @classmethod
-    def get_contract(cls, contract: type[INSTANCE]) -> INSTANCE:
+    def force_get_contract(cls, contract: type[INSTANCE]) -> INSTANCE:
         """
-        get contract from ioc Container.
-        but you must know what contract is registered.
+        force get contract from ioc Container.
+        raise Error if the contract is not registered.
+        combine with moss manifests to know existing contracts
         """
+        # dig deeper only when necessary
         from ghoshell_moss.core.concepts.channel import ChannelCtx
         return ChannelCtx.get_contract(contract)
+
+    @classmethod
+    def get_contract(cls, contract: type[INSTANCE]) -> INSTANCE | None:
+        """
+        if contract is not registered, return None
+        """
+        from ghoshell_moss.core.concepts.channel import ChannelCtx
+        runtime = ChannelCtx.runtime()
+        return runtime.container.get(contract)
 
     @classmethod
     def logger(cls):
@@ -101,16 +123,84 @@ class CommandUtil:
         raise ObserveError(value)
 
     @classmethod
-    def send_signal(cls, signal: str | Signal) -> None:
-        """在 command 内发送信号给自己的大脑. 构成自驱循环."""
+    def send_signal(cls, signal: Signal) -> None:
+        """
+        在 command 内发送信号给自己的大脑. 构成自驱循环.
+        需要发送不同类型的 Signal, 可参考服务发现的 SignalMeta 协议.
+        """
         from ghoshell_moss.core.blueprint.session import Session
-        session = cls.get_contract(Session)
-        if isinstance(signal, str):
-            session.add_input_signal(signal)
-        elif isinstance(signal, Signal):
+        session = cls.force_get_contract(Session)
+        if isinstance(signal, Signal):
             session.add_signal(signal)
         else:
             raise TypeError(f"only Signal or str is accepted")
+
+    @classmethod
+    def create_task(cls, coroutine) -> asyncio.Task:
+        """
+        create an asyncio task in channel lifecycle.
+        useful for some task going on after command itself done
+        """
+        from ghoshell_moss.core.concepts.channel import ChannelCtx
+        runtime = ChannelCtx.runtime()
+        return runtime.create_asyncio_task(coroutine)
+
+    @classmethod
+    def is_task_done(cls) -> bool:
+        """
+        判断触发当前 command 执行的 task 是否已经完成.
+        方便同步函数里做状态清理.
+        """
+        from ghoshell_moss.core.concepts.channel import ChannelCtx
+        task = ChannelCtx.task()
+        return task.done()
+
+    @classmethod
+    def get_task_context(cls) -> dict[str, Any]:
+        """
+        返回 task 创建时从环境传入的参数.
+        """
+        from ghoshell_moss.core.concepts.channel import ChannelCtx
+        task = ChannelCtx.task()
+        return task.context
+
+    @classmethod
+    def send_input_signal(cls, content: str, *, description: str = '') -> None:
+        """发送标准的请求信号给 ghost. """
+        from ghoshell_moss.core.blueprint.session import Session
+        session = cls.force_get_contract(Session)
+        session.add_input_signal(content, description=description)
+
+    @classmethod
+    async def create_signal_task(
+            cls,
+            *,
+            closure: Callable[[], Coroutine[None, None, Signal | str]],
+    ) -> None:
+        """
+        在 Command 内创建一个异步的 Signal 回调 task, 不阻塞 Command 返回.
+        当 closure 异步执行完毕后, 结果的 Signal 会发送给 ghost.
+        """
+        from ghoshell_moss.core.concepts.channel import ChannelCtx
+        task = ChannelCtx.task()
+        caller = task.caller_name()
+        task_ctx = task.context
+
+        async def _send_signal_after_task_done() -> None:
+            nonlocal closure, task_ctx, caller
+            signal = await closure()
+            if isinstance(signal, Signal):
+                cls.send_signal(signal)
+            elif isinstance(signal, str):
+                cls.send_input_signal(signal)
+            else:
+                cls.logger().error(
+                    "signal task returns invalid signal type: %s, task %s, task context %s,",
+                    signal, caller, task_ctx
+                )
+
+        runtime = ChannelCtx.runtime()
+        runtime.create_asyncio_task(_send_signal_after_task_done())
 
 
 def new_command(
@@ -125,6 +215,8 @@ def new_command(
         blocking: bool = True,
         call_soon: bool = False,
         priority: int = 0,
+        always_observe: bool = False,
+        timeout: Optional[float] = None,
 ) -> Command:
     """
     定义一个 Command. 逻辑与 Builder.command 相同.
@@ -140,20 +232,27 @@ def new_command(
         blocking=blocking,
         call_soon=call_soon,
         priority=priority,
+        always_observe=always_observe,
+        timeout=timeout,
     )
-
-
-# special kind of content function
-async def __content__(chunks__) -> None:
-    pass
 
 
 class Builder(ABC):
     """
     用来动态构建一个 Channel 的通用接口.
+
+    Builder 有唯一 id. builder 是有副作用的.
+    一个实例应该只使用一次.
     """
 
     # ---- decorators ---- #
+    @abstractmethod
+    def name(self) -> str:
+        pass
+
+    @abstractmethod
+    def description(self) -> str:
+        pass
 
     @abstractmethod
     def available(self, func: Callable[[], bool]) -> Callable[[], bool]:
@@ -211,20 +310,20 @@ class Builder(ABC):
 
     def content_command(
             self,
-            func: Callable[[AsyncIterable[str]], Coroutine[None, None, None]],
+            func: Callable[[AsyncIterable[str]], Coroutine[None, None, None | str]],
             doc: Optional[str] = None,
             override: bool = True,
     ) -> Command[None]:
         """
         register a special function for channel's content method.
         """
-        from ghoshell_moss.core.ctml.v1_0.constants import CONTENT_COMMAND_NAME
-        name = CONTENT_COMMAND_NAME or '__content__'
+        name = ChannelRuntime.__content__.__name__
         return self.command(
             name=name,
+            # 允许覆盖说明.
             doc=doc,
             # use __content__ as interface, override the docstring if need.
-            interface=__content__,
+            interface=ChannelRuntime.__content__,
             override=override,
             return_command=True,
         )(func)
@@ -258,6 +357,8 @@ class Builder(ABC):
             call_soon: bool = False,
             priority: int = 0,
             return_command: bool = False,
+            always_observe: bool = False,
+            timeout: float | None = None,
     ) -> Callable[[CommandFunction], CommandFunction | Command]:
         """
         decorator
@@ -293,8 +394,10 @@ class Builder(ABC):
                 高级功能, 不理解的情况下请不要改动它.
 
         :param return_command: 为真的话, 返回的不是原函数, 而是一个可以视作该函数的 Command 对象. 通常用于测试.
-        CommandFunction 最佳实践是:
+        :param always_observe: 为 True 的话, 不需要特别声明, command 的返回值总是会标记需要下一轮观察思考.
+        :param timeout: if not None, set default timeout for the command.
 
+        CommandFunction 最佳实践是:
         >>> # 原始函数是 async, 从而有能力根据真实运行的时间, 阻塞 Channel 后续命令.
         >>> # 参数和返回值有明确的类型约束, 类型约束也是 prompt 的一部分.
         >>> # 使用可序列化对象作为入参和出参
@@ -303,7 +406,12 @@ class Builder(ABC):
         >>>     '''有清晰的说明'''
         >>>     try
         >>>         # 执行逻辑, 不能有线程阻塞, 否则会阻塞全局.
+        >>>         # CommandUtil.create_task
         >>>         ...
+        >>>         # return None # 仅表示执行结束, 不需要特别观察
+        >>>         # return Any  # 返回讯息反馈给上下文, 但不需要触发 Re-Act. 或配置 always_observe 使之触发思考.
+        >>>         # return CommandUtil.observe('xxx')  记模型需要观察和思考的结果, 会触发 Re-Act.
+        >>>         # raise CommandUtil.raise_observe(...)  中断所有的行动, 立刻触发思考.
         >>>     except asyncio.CancelledError:
         >>>         # 命令可以被调度层正常取消, 有取消的行为. 通常 AI 可以随时取消一个运行的 Command.
         >>>         ...
@@ -313,6 +421,9 @@ class Builder(ABC):
         >>>     finally:
         >>>         # 有运行结束逻辑.
         >>>         ...
+
+        async 函数支持 cancel 生命周期, 所以 command 是一个拥有 done / cancel / exception 完整语义的单元.
+        如果用同步函数定义, 需要通过 CommandUtil.is_task_done 来管理中间中断和清空状态逻辑, 避免阻塞行为因为同步函数未完成而冲突.
         """
         pass
 
@@ -329,7 +440,7 @@ class Builder(ABC):
         >>>     # 可以获取执行这个 command 的真实 runtime
         >>>     try
         >>>         # 通过全局的 IoC 容器获取依赖, 可以拿到运行时的依赖注入.
-        >>>         contract = CommandUtil.get_contract(...)
+        >>>         contract = CommandUtil.force_get_contract(...)
         >>>         ...
         >>>     except asyncio.CancelledError:
         >>>         # 生命周期函数随时会被 Channel Runtime 调度取消
@@ -368,13 +479,14 @@ class Builder(ABC):
     @abstractmethod
     def with_binding(self, contract: type[INSTANCE], instance: INSTANCE) -> Self:
         """
-        注册一个依赖, 在 Channel 实例化时完成注入, 不会污染其它 channel. 可以通过 CommandCtx.get_contract 获取.
+        注册一个依赖, 在 Channel 实例化时注入 IoC 容器.
+       可以通过 CommandCtx.get_contract 获取.
         依赖注入完全是可选的, 可以通过模块实例化/全局工厂等替代.
         """
         pass
 
     @abstractmethod
-    def with_factory(
+    def with_contract_factory(
             self,
             contract: type[INSTANCE],
             factory: Callable[[...], INSTANCE],
@@ -383,12 +495,16 @@ class Builder(ABC):
             override: bool = False,
     ) -> Self:
         """
-        注册一个依赖的工厂方法. 这个工厂方法如果有入参, 会被 IoC 容器自动注入执行.
+        注册一个依赖的工厂方法.
+        这个工厂方法当 Channel 实例化 Runtime 时, 会把 contract 的工厂函数注册到 IoC 容器.
         """
         pass
 
     @abstractmethod
-    def import_channels(self, *children: Channel | tuple[Channel, _ChannelName]) -> Self:
+    def import_channels(
+            self,
+            *children: Channel | ChannelFactory | tuple[Channel | ChannelFactory, _ChannelName],
+    ) -> Self:
         """
         add sustain channels to the channel.
         """
@@ -400,7 +516,10 @@ class MutableChannel(Channel, ABC):
     一个约定, 用来描述拥有动态构建能力的 Channel.
     """
 
-    def import_channels(self, *children: Channel | tuple[Channel, _ChannelName]) -> Self:
+    def import_channels(
+            self,
+            *children: Channel | ChannelFactory | tuple[Channel | ChannelFactory, _ChannelName],
+    ) -> Self:
         """
         添加子 Channel 到当前 Channel. 形成树状关系.
         效果可以比较 python 的 import module as name
@@ -431,36 +550,15 @@ class MutableChannel(Channel, ABC):
         pass
 
 
-class ChannelInterfaceExample(ABC):
-    """
-    一个 Channel 开发的范式的例子.
-    通过独立的抽象类, 定义了若干个函数, 而这些函数通过 build 注册了依赖关系.
-    这样, 可以把设计一个 Channel, 与实现它分成两个明确的步骤. 设计本身是独立的.
-    """
-
-    @abstractmethod
-    async def example_command(self) -> str:
-        """
-        docstring
-        """
-        pass
-
-    @abstractmethod
-    def as_channel(self, name: str, description: str) -> Channel:
-        channel = new_channel(name=name, description=description)
-        # 注册自身的 command.
-        channel.build.command(interface=ChannelInterfaceExample.example_command)(self.example_command)
-        return channel
-
-
-def new_channel(name: str, description: str = "") -> MutableChannel:
+def new_channel(name: str, description: str = "", uid: str | None = None) -> MutableChannel:
     """
     Create a new Mutable/Stateful Channel object with builder.
     Able to define all kinds of channels.
     Use this tool to build your own channel object.
     """
     from ghoshell_moss.core.py_channel import PyChannel
-    return PyChannel(name=name, description=description)
+    # if uid is None, auto generate uuid for it.
+    return PyChannel(name=name, description=description, uid=uid)
 
 
 async def provide_channel_as_app(channel: Channel) -> None:
@@ -477,3 +575,80 @@ async def provide_channel_as_app(channel: Channel) -> None:
     # 则应该阅读 Matrix 抽象.
     async with _matrix as m:
         await m.provide_channel(channel)
+
+
+class ChannelCreator(ABC):
+    """
+    示例, 如果不用 new_channel 等面向组合风格创建 Channel
+    仍然可以用这种面向对象的风格来创建.
+    """
+
+    @classmethod
+    @abstractmethod
+    def factory(cls, container: IoCContainer) -> Channel:
+        """创建 channel 的函数本身可以注册到 channel. """
+        pass
+
+
+class ChannelInterface(ChannelCreator, ABC):
+    """
+    面向对象更激进的 Channel 实现风格.
+    不仅定义 factory, 还提前定义好函数.
+    """
+
+    @classmethod
+    @abstractmethod
+    def new(cls, container: IoCContainer) -> Self:
+        """确保可以在 ioc 中实例化自己. """
+        pass
+
+    @abstractmethod
+    def as_channel(self) -> Channel:
+        """实例化后的自己, 可以生产 channel 对象."""
+        pass
+
+    @classmethod
+    def factory(cls, container: IoCContainer) -> Channel:
+        self_instance = cls.new(container)
+        return self_instance.as_channel()
+
+
+if __name__ == "__build_channel_by_channel_interface_example__":
+    # 通过 ChannelCreator 的风格创建面向对象的抽象/实现的方式.
+    main = new_channel(name="__main__")
+
+
+    class FooInterface(ChannelInterface):
+
+        @abstractmethod
+        async def foo(self) -> str:
+            pass
+
+        @classmethod
+        @abstractmethod
+        def new(cls, container: IoCContainer) -> Self:
+            pass
+
+        def as_channel(self) -> Channel:
+            channel = new_channel(name="foo")
+            channel.build.command(
+                interface=FooInterface.foo,
+            )(self.foo)
+            return channel
+
+
+    class FooImpl(FooInterface):
+
+        def __init__(self, c: IoCContainer):
+            self.c = c
+
+        async def foo(self) -> str:
+            return self.c.name
+
+        @classmethod
+        def new(cls, container: IoCContainer) -> Self:
+            return cls(container)
+
+
+    # 直接将工厂方法注入到通道中.
+    main.import_channels(FooImpl.factory)

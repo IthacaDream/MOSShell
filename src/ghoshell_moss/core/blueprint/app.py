@@ -3,10 +3,10 @@ from typing import Iterable, Optional
 from typing_extensions import Self
 from pathlib import Path
 from pydantic import BaseModel, Field
-from enum import StrEnum
+from enum import Enum
+from .matrix import Cell
 import frontmatter
 import fnmatch
-
 __all__ = [
     'AppInfo',
     'AppWatcher',
@@ -50,7 +50,7 @@ class AppWatcher(BaseModel):
     )
 
 
-class AppState(StrEnum):
+class AppState(str, Enum):
     STOPPED = 'stopped'
     STARTING = 'starting'
     RUNNING = 'running'
@@ -104,7 +104,7 @@ class AppInfo(BaseModel):
 
     @classmethod
     def make_address(cls, fullname: str) -> str:
-        return f"apps/{fullname}"
+        return Cell.make_address("app", fullname)
 
     @classmethod
     def make_fullname(cls, group: str, name: str) -> str:
@@ -286,7 +286,7 @@ class AppStore(ABC):
         pass
 
     @abstractmethod
-    async def get_apps_context(self) -> str:
+    async def get_apps_context(self, refresh: bool = False) -> str:
         """
         通过文本描述目前 apps 的状态. 包含:
         1. 发现的所有 apps, 他们的名称/ address 和描述. 不包含路径信息.

@@ -4,7 +4,7 @@ from typing import Optional, Callable, Coroutine
 
 import numpy as np
 from ghoshell_common.contracts import LoggerItf
-from ghoshell_common.helpers import uuid
+from ghoshell_moss.message import unique_id
 
 from ghoshell_moss.contracts.speech import (
     TTS,
@@ -169,7 +169,7 @@ class BaseTTSSpeech(TTSSpeech):
         return self._player
 
     def new_stream(self, *, batch_id: Optional[str] = None) -> SpeechStream:
-        batch_id = batch_id or uuid()
+        batch_id = batch_id or unique_id()
         tts_batch = self._tts.new_batch(batch_id=batch_id)
         return self.new_tts_stream(tts_batch)
 

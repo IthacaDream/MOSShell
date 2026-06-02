@@ -16,15 +16,16 @@ from ghoshell_moss.host.manifests.configs import (
 )
 from ghoshell_moss.host.manifests.resource_storages import (
     match_resource_storage_metas,
-    ResourceStorageMetaInfo,
+    ResourceStorageInfo,
 )
 from ghoshell_moss.host.manifests.nuclei import (
     match_nucleus_infos,
 )
 from ghoshell_moss.core.blueprint.manifests import NucleusMetaInfo
+from ghoshell_moss.core.concepts.channel import Channel
 from ghoshell_moss.host import Host
 from ghoshell_common.helpers import generate_import_path
-from .utils import console, print_simple_table
+from .utils import console, display_scan_errors, print_simple_table
 import inspect
 
 manifest_app = typer.Typer(
@@ -57,6 +58,7 @@ def list_providers(
     Explore and inspect providers discovered in the MOSS workspace.
     """
     host = Host(mode=mode)
+    display_scan_errors(host.scan_errors)
     # 1. 执行发现逻辑
     # 默认从 MOSS.manifests.providers 扫描，这是我们在 Environment 中约定的路径
     all_providers = host.manifests.providers()
@@ -139,6 +141,7 @@ def list_topics(
     Introspect and discover event topics available in the MOSS ecosystem.
     """
     host = Host(mode=mode)
+    display_scan_errors(host.scan_errors)
     # 1. 发现
     all_topics = host.manifests.topics()
 
@@ -224,6 +227,7 @@ def list_configs(
     Explore and manage environment configurations in MOSS.
     """
     host = Host(mode=mode)
+    display_scan_errors(host.scan_errors)
     all_configs = host.manifests.configs()
 
     # 2. 匹配逻辑 (支持简单模糊匹配)
@@ -302,90 +306,43 @@ def list_channels(
         json_out: bool = typer.Option(False, "--json", help="Output as raw JSON for AI.")
 ):
     """
-    List and inspect available communication channels.
+    Inspect the __main__ channel discovered from MOSS manifests.
     """
     host = Host(mode=mode)
+    display_scan_errors(host.scan_errors)
     channels = host.manifests.channels()
+    main_channel = channels.get(Channel.MAIN_CHANNEL_NAME)
 
-    # 过滤
-    results = {name: c for name, c in channels.items() if search.lower() in name.lower()}
+    if main_channel is None:
+        console.print("[yellow]No __main__ channel discovered in manifests.[/yellow]")
+        return
+
+    if search and search.lower() not in "__main__":
+        console.print(f"[yellow]Only __main__ channel exists. No match for: '{search}'[/yellow]")
+        return
+
+    # 发现位置
+    source = getattr(host.manifests, 'main_channel_source', lambda: None)()
+    found_at = source or "unknown"
 
     if json_out:
-        # 给 AI 返回纯净数据
-        data = {name: {"name": name, "desc": c.description(), "type": str(type(c))}
-                for name, c in results.items()}
+        data = {
+            "name": "__main__",
+            "type": str(type(main_channel)),
+            "description": main_channel.description(),
+            "found_module": found_at,
+        }
         console.json(data=data)
         return
-    _display_channel_table(results, is_filtered=bool(search))
+    _display_main_channel_detail(main_channel, found_at)
 
 
-def _display_channel_table(channels: dict, is_filtered: bool):
-    # 准备表格数据
-    table_data = []
-    for name, c in channels.items():
-        table_data.append([
-            f"[green]{name}[/green]",
-            f"[dim]{type(c).__name__}[/dim]",
-            c.description().split('\n')[0] if c.description() else ""
-        ])
-
-    # 使用简洁表格显示
-    print_simple_table(
-        data=table_data,
-        headers=["Channel Name", "Type", "Description"],
-        title="MOSS Channels",
-        column_styles=["green", "dim", ""],
-        title_style="bold cyan",
-    )
-
-    if not is_filtered:
-        console.print("\n[dim]Hint: Use [bold]moss manifest channels <name>[/bold] to see full detail.[/dim]")
-
-
-@manifest_app.command(name="primitives")
-def list_primitives(
-        search: str = typer.Argument("", help="Search pattern for command name."),
-        json_out: bool = typer.Option(False, "--json", help="Output as raw JSON for AI."),
-        json_schema: bool = typer.Option(False, "--json-schema", help="Output with json schema")
-):
-    """
-    Explore MOSS Primitives (Commands).
-    """
-    host = Host()
-    primitives = host.manifests.primitives()
-
-    results = {name: cmd for name, cmd in primitives.items() if search.lower() in name.lower()}
-
-    if json_out:
-        # AI 模式只返回核心元数据和 Schema
-        data = {name: {
-            "name": cmd.meta().name,
-            "description": cmd.meta().description,
-            "params": cmd.meta().json_schema
-        } for name, cmd in results.items()}
-        console.print_json(data=data)
-        return
-    if len(primitives) == 0:
-        console.print("no primitive found")
-        return
-    for key, cmd in results.items():
-        _display_command_detail(cmd, json_schema)
-
-
-def _display_command_detail(cmd, with_json_schema: bool):
-    meta = cmd.meta()
-    console.print(f"\n[bold green]==== Command:[/bold green] {meta.name} ====")
-    console.print(f"[dim]Dynamic: {cmd.is_dynamic()}[/dim]\n")
-
-    # 重点展示接口定义
-    console.print(f"[dim]Interface:[/dim]\n")
-    console.print(Syntax(cmd.meta().interface, 'python'))
-
-    # 展示 JSON Schema
-    if with_json_schema and meta.json_schema is not None:
-        console.print("\n[bold]Arguments Schema:[/bold]")
-        console.print_json(data=meta.json_schema)
-    console.print("")
+def _display_main_channel_detail(channel, found_module: str):
+    """展示 __main__ channel 的详情视图。"""
+    console.print(f"\n[bold cyan]__main__ Channel[/bold cyan]")
+    console.print(f"[dim]Type:[/dim] {type(channel).__name__}")
+    console.print(f"[dim]Description:[/dim] {channel.description() or '(none)'}")
+    console.print(f"[dim]Discovered at:[/dim] {found_module}")
 
 
 @manifest_app.command(name="contracts")
@@ -401,6 +358,7 @@ def list_contracts(
     Introspect bound contracts in the MOSS IOC container.
     """
     host = Host(mode=mode)  # 根据需要传入 mode
+    display_scan_errors(host.scan_errors)
     # 获取所有注册的 contracts
     all_contracts = list(host.matrix().container.contracts(recursively=True))
     all_contracts_info = []
@@ -486,6 +444,7 @@ def list_ctml_versions(
     list the environment provided ctml versions.
     """
     host = Host(mode=mode)
+    display_scan_errors(host.scan_errors)
     for version, version_info in host.manifests.ctml_versions().items():
         console.print("%s: %s" % (version, version_info.file))
 
@@ -512,10 +471,11 @@ def list_resources(
     scheme, host, description, and where it was found.
     """
     host = Host(mode=mode)
+    display_scan_errors(host.scan_errors)
     resource_storage_items = host.manifests.resource_storage_manifests()
 
     # collect metas
-    all_metas = [item.meta for item in resource_storage_items]
+    all_metas = [item.info for item in resource_storage_items]
 
     if search:
         metas_dict = {m.path: m for m in all_metas}
@@ -545,7 +505,7 @@ def list_resources(
     _display_resource_storage_table(results)
 
 
-def _display_resource_storage_table(metas: list[ResourceStorageMetaInfo]):
+def _display_resource_storage_table(metas: list[ResourceStorageInfo]):
     """展示发现的 ResourceStorage Meta"""
     table_data = []
     for info in sorted(metas, key=lambda x: x.path):
@@ -589,6 +549,7 @@ def list_nuclei(
     name, description, signal_names, and where it was found.
     """
     host = Host(mode=mode)
+    display_scan_errors(host.scan_errors)
     all_nuclei = host.manifests.nuclei()
 
     if search:
@@ -637,3 +598,20 @@ def _display_nuclei_table(metas: list[NucleusMetaInfo]):
     )
 
     console.print(f"\n[dim]Total: {len(metas)} nucleus factories discovered.[/dim]")
+
+
+@manifest_app.command(name="explain")
+def explain_manifests(
+        mode: str | None = typer.Option(
+            default=None,
+            help="set specific mode"
+        ),
+):
+    """
+    用自然语言自描述当前环境 manifest 的结构与含义。
+    这是 manifest 体系的唯一真相入口。
+    """
+    host = Host(mode=mode)
+    display_scan_errors(host.scan_errors)
+    explanation = host.manifests.explain()
+    console.print(explanation)

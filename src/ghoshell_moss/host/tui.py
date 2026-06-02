@@ -28,12 +28,16 @@ import sys
 import threading
 import json
 import os
+import janus
 from queue import Queue, Empty
 from rich.panel import Panel
 from rich.table import Table
 from rich.console import Group
 
-__all__ = ["TUIState", "MossHostTUI", 'Runtime', "RUNTIME", "ConsoleOutput"]
+__all__ = [
+    "TUIState", "MossHostTUI", 'Runtime', "RUNTIME", "ConsoleOutput",
+    "Renderable", "OutputItem", "LiveStreamSink",
+]
 
 from prompt_toolkit.styles import Style
 
@@ -88,6 +92,125 @@ class Runtime(Protocol):
 
 RUNTIME = TypeVar("RUNTIME", bound=Runtime)
 
+
+class LiveStreamSink:
+    """跨 asyncio/sync 边界的流式文本输出槽.
+
+    asyncio 侧: await send(delta) / send_nowait(delta) → janus async_q
+    渲染线程: render(console) 被 _direct_print 通过 duck-type 调用
+
+    首次 render 进入 live 模式: 实时消费 janus queue 并攒 Segment buffer,
+    粘字符串聚合减少 console.print 调用次数.
+    后续 render 直接回放 buffer (支持 re-render / state 切换后重建).
+    """
+
+    def __init__(
+            self,
+            rich_print_kwargs: dict[str, Any] | None = None,
+    ):
+        self._queue = janus.Queue[str | None]()
+        self._rich_print_kwargs = rich_print_kwargs or {}
+        self._committed = False
+        self._render_count = 0
+        self._buffer: list[str] = []
+
+    async def __aenter__(self):
+        return self
+
+    async def send(self, delta: str) -> None:
+        if self._committed:
+            return
+        try:
+            await self._queue.async_q.put(delta)
+        except janus.AsyncQueueShutDown:
+            pass
+
+    def send_nowait(self, delta: str) -> None:
+        if self._committed:
+            return
+        try:
+            self._queue.sync_q.put_nowait(delta)
+        except janus.SyncQueueShutDown:
+            pass
+
+    def commit(self) -> None:
+        """标记流结束，发送 None sentinel 通知渲染端."""
+        if self._committed:
+            return
+        self._committed = True
+        try:
+            self._queue.sync_q.put_nowait(None)
+        except janus.SyncQueueShutDown:
+            pass
+
+    async def close(self) -> None:
+        """安全关闭: 确保 committed + sentinel 入队后排空."""
+        if not self._committed:
+            self._committed = True
+            try:
+                self._queue.sync_q.put_nowait(None)
+            except janus.SyncQueueShutDown:
+                pass
+        self._queue.shutdown(immediate=False)
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close()
+
+    def render(self, console: Console) -> None:
+        if self._render_count > 0:
+            if self._buffer:
+                console.print(Panel(
+                    Text("".join(self._buffer)),
+                    title=" RESPONSE ",
+                    title_align="left",
+                    border_style="cyan",
+                ))
+            return
+
+        self._buffer: list[str] = []
+        pending: list[str] = []
+        rendered_lines = 0
+
+        def _render_panel() -> None:
+            nonlocal rendered_lines
+            if rendered_lines > 0:
+                # 光标上移到上一个 panel 的起始行 + 清屏
+                console.file.write(f"\033[{rendered_lines}F")
+                console.file.write("\033[J")
+            panel = Panel(
+                Text("".join(self._buffer)),
+                title=" RESPONSE ",
+                title_align="left",
+                border_style="cyan",
+            )
+            with console.capture() as capture:
+                console.print(panel)
+            output = capture.get()
+            rendered_lines = output.count('\n')
+            console.file.write(output)
+            console.file.flush()
+
+        try:
+            while True:
+                item = self._queue.sync_q.get()
+                if item is None:
+                    break
+                pending.append(item)
+                if self._queue.sync_q.empty():
+                    self._buffer.append("".join(pending))
+                    pending.clear()
+                    _render_panel()
+            if pending:
+                self._buffer.append("".join(pending))
+                pending.clear()
+            _render_panel()
+        except janus.SyncQueueShutDown:
+            pass
+        finally:
+            console.print("")
+            self._render_count += 1
+
+
 Renderable: TypeAlias = RenderableType | OutputItem
 
 
@@ -99,10 +222,17 @@ class ConsoleOutput:
             name: str,
             alive: Callable[[], bool],
             queue: asyncio.Queue[list[Renderable]],
+            clear_func: Callable[[], None],
     ):
         self._name: str = name
         self._alive_fn = alive
         self._queue = queue
+        self._recent_items: list[OutputItem] = []
+        self._recent_expanded: bool = False
+        self._clear_fn = clear_func
+
+    def clear(self) -> None:
+        self._clear_fn()
 
     def rprint(self, *items: Renderable, spacing: bool = True) -> None:
         if not self._alive_fn():
@@ -113,22 +243,50 @@ class ConsoleOutput:
         self._queue.put_nowait(got_items)
 
     def output(self, item: OutputItem) -> None:
+        self._recent_items.append(item)
+        self._recent_expanded = False
+        if len(self._recent_items) > 50:
+            self._recent_items = self._recent_items[-50:]
         for i in self.format_output(item):
             self.rprint('', i)
 
-    def format_output(self, item: OutputItem) -> Iterable[RenderableType]:
-        title = Text(f" {item.role.upper()} ", style="bold cyan")
+    def replay_recent(self, force_expand: bool = False) -> None:
+        """Replay buffered items — used when toggling panel expand/collapse."""
+        if force_expand and self._recent_expanded:
+            return
+        for item in self._recent_items:
+            for i in self.format_output(item, force_expand=force_expand):
+                self.rprint('', i)
+        if force_expand:
+            self._recent_expanded = True
 
+    def format_output(self, item: OutputItem, force_expand: bool = False) -> Iterable[RenderableType]:
         # 2. 渲染消息体
         contents = []
         for msg in item.messages:
             contents.append(msg.to_content_string())
+
+        if not force_expand and item.role.lower() == 'moment':
+            msg_count = len(contents)
+            total_lines = sum(c.count('\n') + 1 for c in contents)
+            summary = Text(
+                f"⊟ {item.role.upper()} ({msg_count} messages, {total_lines} lines) ",
+                style="dim cyan",
+            )
+            summary.append("ctrl+o to expand", style="dim italic")
+            yield summary
+            if item.log:
+                yield Text(f"Log: {item.log}", style="dim italic green")
+            return
+
+        title = Text(f" {item.role.upper()} ", style="bold cyan")
 
         message_content = Syntax(
             "\n".join(contents),
             'xml',
             theme="ansi_dark",
             background_color="default",  # 关键点：背景透明，不抢终端色
+            word_wrap=True,
         )
         yield Panel(
             message_content,
@@ -290,7 +448,7 @@ class MossHostTUI(Generic[RUNTIME], ABC):
         self.kb: KeyBindingsBase | None = None
         self._style = prompt_style or DEFAULT_PROMPT_STYLE
         self.host: MossHost | None = host or MossHost.discover()
-        self.runtime: RUNTIME = self._get_runtime(self.host)
+        self.runtime: RUNTIME = self._get_runtime()
         self._closing_event = ThreadSafeEvent()
         self._event_loop: asyncio.AbstractEventLoop | None = None
         self._main_loop_task: asyncio.Task | None = None
@@ -298,7 +456,6 @@ class MossHostTUI(Generic[RUNTIME], ABC):
         self._renderable_queue: Queue[list[Renderable] | None] = Queue()
         self._console_print_thread = threading.Thread(target=self._main_render_loop, daemon=True)
         self._states: dict[str, TUIState] = {}
-        self._main_console_output = ConsoleOutput("", lambda: True, self._renderable_queue)
         # 需要对应 states.
         self._current_state_name: str = ""
         self._prompt_session = PromptSession()
@@ -312,16 +469,28 @@ class MossHostTUI(Generic[RUNTIME], ABC):
                 "traceback.item": "cyan",
             })
         )
+        self._paused = False
+        self._main_console_output = ConsoleOutput("", lambda: True, self._renderable_queue, self.clear_console)
         self._dummy_completer = DummyCompleter()
+
+    def clear_console(self) -> None:
+        """clear rich console"""
+        _queue = self._renderable_queue
+        while not _queue.empty():
+            try:
+                _queue.get_nowait()
+            except Empty:
+                break
+        self._rich_console.clear()
+        _queue.put_nowait(None)
 
     def default_commands(self) -> dict[str, tuple[str, Callable[[], None]]]:
         return {
             "exit": ("exit the tui", lambda: self.close())
         }
 
-    @classmethod
     @abstractmethod
-    def _get_runtime(cls, host: MossHost) -> RUNTIME:
+    def _get_runtime(self) -> RUNTIME:
         """从 host 上拿到 runtime 对象. """
         pass
 
@@ -366,6 +535,7 @@ class MossHostTUI(Generic[RUNTIME], ABC):
         guide.add_column("Key / Command")
         guide.add_row("Switch State (Next)", "Ctrl + P")
         guide.add_row("Switch State (Prev)", "Ctrl + B")
+        guide.add_row("Expand Panels", "ctrl+o")
         guide.add_row("Add New Line", "Ctrl + J")
         guide.add_row("Interrupt Task", "Esc")
         guide.add_row("REPL command", "Start with /")
@@ -389,6 +559,14 @@ class MossHostTUI(Generic[RUNTIME], ABC):
     def _get_custom_intro(self) -> RenderableType | None:
         """由子类实现，提供特定 Runtime 的业务介绍。"""
         return None
+
+    def _on_emergency_pause(self) -> None:
+        """急停 hook — 子类 override 实现具体 pause/resume 逻辑."""
+        pass
+
+    def _prompt_status(self) -> str:
+        """返回 prompt 前的状态标记。子类 override 如返回 '[PAUSED] '."""
+        return ""
 
     def farewell(self) -> None:
         """要在界面里输出告别信息. """
@@ -427,6 +605,15 @@ class MossHostTUI(Generic[RUNTIME], ABC):
         def accept(event) -> None:
             event.current_buffer.validate_and_handle()
 
+        @kb.add('c-o')
+        def expand_panels(event) -> None:
+            self.current_state().console.replay_recent(force_expand=True)
+
+        @kb.add('c-g')
+        def emergency_pause(event) -> None:
+            if self._event_loop:
+                self._event_loop.call_soon_threadsafe(self._on_emergency_pause)
+
         return kb
 
     def current_state(self) -> TUIState:
@@ -437,27 +624,39 @@ class MossHostTUI(Generic[RUNTIME], ABC):
         return self._main_console_output
 
     def _direct_print(self, obj: Renderable) -> None:
-        if isinstance(obj, OutputItem):
-            for item in self.console.format_output(obj):
-                self._rich_console.print(item)
-        else:
-            self._rich_console.print(obj)
+        try:
+            if isinstance(obj, OutputItem):
+                for item in self.console.format_output(obj):
+                    self._rich_console.print(item)
+            elif isinstance(obj, LiveStreamSink):
+                obj.render(self._rich_console)
+            else:
+                self._rich_console.print(obj)
+        except Exception:
+            try:
+                self._rich_console.print_exception()
+            except Exception:
+                pass
 
     def _main_render_loop(self) -> None:
         """一个独立的输出线程"""
         while not self._closing_event.is_set():
+            # non-blocking drain
             while not self._renderable_queue.empty():
                 items = self._renderable_queue.get_nowait()
                 if items is None:
-                    return
+                    continue
                 for item in items:
                     self._direct_print(item)
+            if self._closing_event.is_set():
+                break
+            # blocking wait with timeout
             try:
                 items = self._renderable_queue.get(timeout=0.5)
             except Empty:
                 continue
             if items is None:
-                return
+                continue
             for item in items:
                 self._direct_print(item)
 
@@ -549,7 +748,7 @@ class MossHostTUI(Generic[RUNTIME], ABC):
         while not self._closing_event.is_set():
             with patch_stdout.patch_stdout(raw=True):
                 item = await self._prompt_session.prompt_async(
-                    message=lambda: f' {self._current_state_name}  ❯ ',
+                    message=lambda: f'{self._prompt_status()}{self._current_state_name}  ❯ ',
                     style=self._style,
                     key_bindings=self.kb,
                     multiline=True,
@@ -604,6 +803,7 @@ class MossHostTUI(Generic[RUNTIME], ABC):
                 state.name(),
                 self._is_alive_func(state.name()),
                 self._renderable_queue,
+                lambda: None,  # per-state clear not yet implemented
             )
 
             #  注册回调.
@@ -622,7 +822,6 @@ class MossHostTUI(Generic[RUNTIME], ABC):
             loop.set_exception_handler(self.tui_exception_handler)
             # 等待运行结束
             self._closing_event.set()
-            self._renderable_queue.put_nowait(None)
             self._console_print_thread.join()
             self._rich_console.print("closed", style="green")
             self.farewell()

@@ -4,5 +4,5 @@ depend_zenoh()
 
 from ._provider import ZenohProviderConnection, ZenohChannelProvider
 from ._proxy import ZenohProxyConnection, ZenohProxyChannel
-from ._utils import NodeChannelBridgeExpr
+from ._utils import BridgeExpr, NodeChannelBridgeExpr
 from ._suite import ZenohBridgeTestSuite

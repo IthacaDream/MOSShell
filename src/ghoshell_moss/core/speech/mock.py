@@ -3,7 +3,7 @@ import time
 from queue import Empty, Queue
 from typing import Optional
 
-from ghoshell_common.helpers import uuid
+from ghoshell_moss.message import unique_id
 
 from ghoshell_moss.contracts.speech import Speech, SpeechStream
 from ghoshell_moss.core.helpers.asyncio_utils import ThreadSafeEvent
@@ -17,7 +17,7 @@ class MockSpeechStream(SpeechStream):
         typing_sleep: float = 0.0,
         speech_id: str = "",
     ):
-        super().__init__(id=id or uuid())
+        super().__init__(id=id or unique_id())
         self.speech_id = speech_id
         self.speech_outputs = speech_outputs
         self.outputs = []
@@ -102,7 +102,7 @@ class MockSpeech(Speech):
         self._outputs = []
         self._closed = ThreadSafeEvent()
         self._typing_sleep = typing_sleep
-        self._uid = uuid()
+        self._uid = unique_id()
 
     def new_stream(self, *, batch_id: Optional[str] = None) -> SpeechStream:
         stream = MockSpeechStream(

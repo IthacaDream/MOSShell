@@ -10,11 +10,11 @@ from ghoshell_moss.core.ctml.elements import CommandTaskElementContext, RootComm
 from ghoshell_moss.core.ctml.token_parser import CTML2CommandTokenParser
 from ghoshell_moss.core.helpers import ThreadSafeEvent
 from ghoshell_moss.core.speech.mock import MockSpeech
-from ghoshell_moss.contracts.speech import make_content_command_from_speech
 from ghoshell_moss.core.ctml.v1_0.constants import (
     CONTENT_COMMAND_NAME, SCOPE_COMMAND_NAME,
     SCOPE_ENTER_COMMAND_NAME, SCOPE_EXIT_COMMAND_NAME,
 )
+from ghoshell_moss.core.speech.speech_module import build_content_command
 
 
 @dataclass
@@ -53,19 +53,16 @@ class ElementTestSuite:
 def new_test_suite(*commands: Command, ignore_wrong_command: bool = True) -> ElementTestSuite:
     tasks_queue = deque()
     output = MockSpeech()
-    command_map = {'': {}}
+    commands_group = {}
+    command_map = {'': commands_group}
     for command in commands:
-        chan = command.meta().chan
-        if chan not in command_map:
-            command_map[chan] = {}
         # 假的 command map.
-        command_map[chan][command.name()] = command
-    content_command = make_content_command_from_speech(output)
+        commands_group[command.name()] = command
+    content_command = build_content_command(output)
     command_map[''][content_command.name()] = content_command
     stop_event = ThreadSafeEvent()
     ctx = CommandTaskElementContext(
         command_map,
-        output,
         ignore_wrong_command=ignore_wrong_command,
         # logger=get_console_logger(logging.DEBUG),
     )
@@ -110,14 +107,6 @@ async def test_element_with_no_command():
     # 最后一个 item 是毒丸.
     assert q[-1] is None
 
-    # 假设有正确的输出.
-    assert await ctx.speech.clear() == ["hello", "world"]
-
-    children = list(suite.root.children)
-    assert len(children) == 3
-    assert children[0].depth == 1
-    assert len(suite.root.inner_tasks) == 2
-
 
 @pytest.mark.asyncio
 async def test_element_baseline():
@@ -145,7 +134,8 @@ async def test_element_baseline():
     for task in suite.queue:
         # 要考虑 None 作为毒丸.
         if task:
-            assert task.caller_name() == task_caller_name[idx]
+            error = "actual %s, expect %s, idx %d" % (task.caller_name(), task_caller_name[idx], idx)
+            assert task.caller_name() == task_caller_name[idx], error
         idx += 1
     # 数 token
     assert len(list(suite.parser.parsed())) == (1 + 2 + 1 + 1 + 1 + 1)

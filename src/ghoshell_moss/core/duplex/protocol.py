@@ -3,8 +3,9 @@ import time
 from abc import ABC
 from typing import Any, ClassVar, Optional
 
-from ghoshell_common.helpers import uuid
+from ghoshell_moss.message import unique_id
 from pydantic import BaseModel, Field
+from pydantic_core import PydanticSerializationError
 from typing_extensions import Self, TypedDict
 from ghoshell_moss.core.concepts.command import CommandTaskResult
 from ghoshell_moss.core.concepts.channel import ChannelMeta
@@ -29,6 +30,7 @@ __all__ = [
     "ProviderPubTopicEvent",
     "ProviderSubTopicEvent",
     "ProxyPubTopicEvent",
+    "ChannelEventSerializedError",
 ]
 
 """
@@ -49,19 +51,28 @@ class ChannelEvent(TypedDict):
     data: str
 
 
+class ChannelEventSerializedError(Exception):
+    pass
+
+
 class ChannelEventModel(BaseModel, ABC):
     event_type: ClassVar[str] = ""
 
-    event_id: str = Field(default_factory=uuid, description="event id for transport")
+    event_id: str = Field(default_factory=unique_id, description="event id for transport")
     connection_id: str = Field(default="", description="channel proxy id")
     timestamp: float = Field(default_factory=lambda: round(time.time(), 4), description="timestamp")
 
     def to_channel_event(self) -> ChannelEvent:
-        data = self.model_dump_json(
-            exclude_none=True,
-            exclude={"event_type", "connection_id", "event_id"},
-            ensure_ascii=False,
-        )
+        try:
+            data = self.model_dump_json(
+                exclude_none=True,
+                exclude_defaults=True,
+                exclude={"event_type", "connection_id", "event_id"},
+                ensure_ascii=False,
+            )
+        except PydanticSerializationError as e:
+            raise ChannelEventSerializedError(str(e))
+
         return ChannelEvent(
             event_id=self.event_id,
             event_type=self.event_type,
@@ -129,10 +140,12 @@ class CommandCallEvent(ChannelEventModel):
     event_type: ClassVar[str] = "moss.channel.proxy.command.call"
     name: str = Field(description="command name")
     chan: str = Field(description="channel path")
-    command_id: str = Field(default_factory=uuid, description="command id")
+    command_id: str = Field(default_factory=unique_id, description="command id")
+    scope_id: str | None = Field(default=None, description="command scope id")
+    delta_arg: str | None = Field(default=None, description="delta arg")
     args: list[Any] = Field(default_factory=list, description="command args")
     kwargs: dict[str, Any] = Field(default_factory=dict, description="kwargs of the command")
-    tokens: str = Field("", description="command tokens")
+    tokens: str = Field(default="", description="command tokens")
     context: dict[str, Any] = Field(default_factory=dict, description="context of the command")
     call_id: str = Field(default="")
 

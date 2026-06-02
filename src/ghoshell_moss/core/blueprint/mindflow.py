@@ -1,4 +1,4 @@
-from typing import Callable, Coroutine, Protocol, Iterable, AsyncIterator, Any
+from typing import Callable, Coroutine, Protocol, Iterable, AsyncIterator, Any, Type
 
 from typing_extensions import Self, Literal
 from abc import ABC, abstractmethod
@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field, AwareDatetime, ValidationError
 
 from ghoshell_moss.message import Message
 from ghoshell_moss.core.concepts.command import ObserveError
-from ghoshell_common.helpers import uuid
+from ghoshell_moss.message import unique_id
 from ghoshell_container import IoCContainer
 from PIL.Image import Image
 from .conversation import Reaction, Moment
@@ -46,10 +46,13 @@ __all__ = [
     'Flag',
     'Logos', 'Moment', 'Reaction',
     'Action', 'Articulator',
-    'Nucleus', 'NucleusFactory', 'Mindflow', 'Attention',
+    'Nucleus', 'NucleusMeta',
+    'Mindflow', 'MindflowHook',
+    'Attention',
     # 几个关键的通讯信号, 用来快速终止一些循环.
     'AttentionAbortedError', 'ObserveError', 'ActionAbortedError', 'ArticulateAbortedError',
     'PreemptedElseSuppress', 'BufferImpulse',
+    'ChallengeVerdict',
 ]
 
 SignalName = str
@@ -84,7 +87,7 @@ class Signal(BaseModel):
         description="the signal name, if not match any mind pulse, the signal will be ignore",
     )
     id: str = Field(
-        default_factory=uuid,
+        default_factory=unique_id,
         description="unique identifier of the signal",
     )
     trace_id: str = Field(
@@ -182,8 +185,13 @@ class Signal(BaseModel):
         delta = time.time() - self.created_at.timestamp()
         return delta > self.stale_timeout
 
-    def to_json(self) -> str:
-        return self.model_dump_json(indent=0, exclude_none=True, exclude_defaults=True, ensure_ascii=False)
+    def to_json(self, indent: int = 0) -> str:
+        # 传输数据类型取最小信息.
+        return self.model_dump_json(indent=indent, exclude_none=True, exclude_defaults=True, ensure_ascii=False)
+
+    def to_dict(self) -> dict[str, Any]:
+        # 传输数据类型取最小信息.
+        return self.model_dump(exclude_none=True, exclude_defaults=True)
 
     def __repr__(self):
         return f"<Signal id={self.id} trace={self.trace_id} name={self.name}>"
@@ -277,12 +285,16 @@ class Impulse(BaseModel):
     它的核心目的是隔离原始信号, 将之转换成更明确的调度信号.
     """
     id: str = Field(
-        default_factory=uuid,
+        default_factory=unique_id,
         description="the impulse id",
     )
     source: str = Field(
         default='',
         description="the nucleus source name",
+    )
+    source_idx: int = Field(
+        default=0,
+        description="the impulse generated order in the source",
     )
     priority: Priority | int = Field(
         default=Priority.NOTICE,
@@ -294,9 +306,9 @@ class Impulse(BaseModel):
         ge=0,
         le=300,
     )
-    on_logos_start: str = Field(
+    reflex_logos: str = Field(
         default='',
-        description="the start logos insert into the stream. 可以理解为条件反射, 在思考启动前就会执行. ",
+        description="条件反射的 logos, 在思考启动前就会执行. ",
     )
     complete: bool = Field(
         default=True,
@@ -310,9 +322,9 @@ class Impulse(BaseModel):
         default_factory=list,
         description="the messages of the impulse. if empty, no need to think",
     )
-    prompt: str = Field(
+    reaction_instruction: str = Field(
         default='',
-        description="the prompt to handle the impulse",
+        description="the instruction to react this impulse",
     )
 
     stale_timeout: float = Field(
@@ -351,7 +363,7 @@ class Impulse(BaseModel):
             strength=signal.strength,
             messages=signal.messages.copy(),
             description=signal.description,
-            prompt=signal.prompt,
+            reaction_instruction=signal.prompt,
             complete=signal.complete,
             stale_timeout=stale_timeout,
         )
@@ -364,6 +376,12 @@ class Impulse(BaseModel):
             return False
         delta = time.time() - self.created_at.timestamp()
         return delta > self.stale_timeout
+
+    def to_dict(self) -> dict:
+        return self.model_dump(exclude_defaults=True, exclude_none=True)
+
+    def to_json(self, indent: int = 2) -> str:
+        return self.model_dump_json(exclude_defaults=True, exclude_none=True, ensure_ascii=False, indent=indent)
 
     def __repr__(self):
         return f"<Impulse id={self.id} trace={self.trace_id} source={self.source}>"
@@ -485,7 +503,7 @@ class Nucleus(ABC):
         pass
 
 
-class NucleusFactory(ABC):
+class NucleusMeta(ABC):
     """
     Nucleus 的元配置. 是可选的实现.
 
@@ -896,6 +914,47 @@ class Attention(ABC):
         pass
 
 
+_NucleusName = str
+
+ChallengeVerdict = Literal['preempted', 'suppressed', 'absorbed', 'initial']
+"""Impulse challenge 的仲裁结果。
+- preempted: 抢占成功，创建新 Attention
+- suppressed: 被压制，原 nucleus 收到 suppress()
+- absorbed: 同 ID 更新 complete，不抢占
+- initial: 当前无 attention（首个 impulse）
+"""
+
+
+class MindflowHook:
+
+    def name(self) -> str:
+        return ''
+
+    def description(self) -> str:
+        return ''
+
+    def on_impulse_challenged(
+            self,
+            challenger: Impulse,  # challenger — 发起挑战的 Impulse
+            defender: Impulse | None,  # defender   — 当前占据注意力的 Impulse，None 表示无当前 attention
+            verdict: ChallengeVerdict,  # verdict    — 仲裁结果
+    ) -> None:
+        """注册 challenge 旁路观察回调。
+        每次 impulse challenge attention 后触发:
+          observer(challenger, defender, verdict)
+
+        challenger — 发起挑战的 Impulse
+        defender   — 当前占据注意力的 Impulse，None 表示无当前 attention
+        verdict    — 仲裁结果: 'preempted' | 'suppressed' | 'absorbed' | 'initial'
+
+        传 None 清除回调。同时只保留一个。仅观察，无副作用。
+        """
+        pass
+
+    def on_error(self, error: Exception) -> None:
+        pass
+
+
 class Mindflow(ABC):
     """
     三循环全双工智能体的思维调度中枢.
@@ -913,7 +972,17 @@ class Mindflow(ABC):
     """
 
     @abstractmethod
-    def faculties(self) -> Iterable[Nucleus]:
+    def with_hook(self, hook: MindflowHook) -> Self:
+        """注册 hook"""
+        pass
+
+    @abstractmethod
+    def remove_hook(self, hook: str | MindflowHook) -> None:
+        """移除注册的 hook"""
+        pass
+
+    @abstractmethod
+    def faculties(self) -> dict[_NucleusName, Nucleus]:
         """
         持有的并行感知, 思考, 裁决单元.
         这里的 nucleus 并不一定是个执行单元, 也可以仅仅是一个通讯单元或 Adapter.
@@ -957,9 +1026,18 @@ class Mindflow(ABC):
         pass
 
     @abstractmethod
-    async def add_nucleus(self, nucleus: Nucleus) -> Self:
+    async def add_nucleus(self, nucleus: Nucleus, override: bool = False) -> Self:
         """
-        动态注册新的感知单元. 理论上可以在运行时添加启动.
+        动态注册新的感知单元. 在运行时添加, 添加时启动.
+        :raise DuplicatedError
+        """
+        pass
+
+    @abstractmethod
+    def with_nucleus(self, nucleus: Nucleus, override: bool = False) -> Self:
+        """
+        静态注册新的感知单元. 必须在 mindflow 启动前注册.
+        :raise DuplicatedError
         """
         pass
 

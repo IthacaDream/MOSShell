@@ -175,6 +175,10 @@ class Workspace(ABC):
         """
         pass
 
+    def logs(self) -> Storage:
+        # 约定的日志存储路径.
+        return self.runtime().sub_storage("logs")
+
     def configs(self) -> Storage:
         """
         配置文件存储路径.
@@ -194,7 +198,7 @@ class Workspace(ABC):
         return self.root().sub_storage("assets")
 
 
-class LocalStorage:
+class LocalStorage(Storage):
     """
     local storage by gemini 3.
     """

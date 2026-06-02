@@ -67,13 +67,28 @@ class CommandError(Exception):
         return cls(errcode, errmsg)
 
 
-class InterpretError(CommandError):
+class InterpretError(Exception):
     """
     解释器解释异常, 是可以恢复的异常.
     """
 
-    def __init__(self, message: str = ""):
-        super().__init__(CommandErrorCode.INTERPRET_ERROR.value, message)
+    def __init__(self, message: str | Exception = ""):
+        if isinstance(message, CommandError):
+            message = str(message)
+
+        elif isinstance(message, Exception):
+            message = CommandError.from_error(message)
+        else:
+            message = CommandErrorCode.description(
+                CommandErrorCode.INTERPRET_ERROR.value,
+                message,
+            )
+        super().__init__(message)
+
+    @classmethod
+    def from_error(cls, err: Exception) -> Self:
+        error = CommandError.from_error(err)
+        return cls(error)
 
 
 class PausedError(Exception):
@@ -132,8 +147,9 @@ class CommandErrorCode(IntEnum):
 
     # --- 命令执行不可接受的异常 --- #
     # 对于 AI 而言必须要立刻感知的致命异常.
-    FATAL = 500
+    CRITICAL = 500
     UNKNOWN_ERROR = 505
+    FATAL = 600
 
     def error(self, message: str) -> CommandError:
         at_line = get_caller_info(2)

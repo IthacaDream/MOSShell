@@ -1,5 +1,7 @@
-from typing import Coroutine, Callable, Self, AsyncIterator, AsyncGenerator
-from ghoshell_moss import Message
+from abc import abstractmethod
+from typing import Coroutine, Callable, AsyncIterator, AsyncGenerator
+from typing_extensions import Self
+from ghoshell_moss.message import Message
 from ghoshell_moss.core.blueprint.mindflow import (
     Attention, Impulse, Flag, Priority, Moment,
     AttentionAbortedError, Action, Articulator, Logos, Reaction, ObserveError,
@@ -7,13 +9,13 @@ from ghoshell_moss.core.blueprint.mindflow import (
 )
 from ghoshell_moss.core.helpers import ThreadSafeEvent
 from ghoshell_moss.contracts import LoggerItf, get_moss_logger
-from collections import deque
 import time
 import threading
 import asyncio
 import janus
 
 __all__ = [
+    'AbsAttention',
     'BaseAttention',
     'AttentionContext', 'BaseAction', 'BaseArticulator',
 ]
@@ -53,7 +55,7 @@ class AttentionContext:
     def __repr__(self):
         return self.logger_prefix
 
-    def buffer_logos(self, delta: str) -> None:
+    def buffer_executed_logos(self, delta: str) -> None:
         self._logos += delta
 
     def is_aborted(self) -> bool:
@@ -99,16 +101,16 @@ class AttentionContext:
             last.stop_reason = self._stop_reason
         return last
 
-    def to_new_observation(self) -> Moment:
+    def new_moment(self) -> Moment:
         last = self.stop_at_outcome()
         return last.new_moment()
 
     def next_frame(self) -> Self:
         """继承创建下一个 Ctx. """
-        observation = self.to_new_observation()
+        moment = self.new_moment()
         return AttentionContext(
             attention_id=self.attention_id,
-            moment=observation,
+            moment=moment,
             aborted_event=self._aborted_event,
             flags=self._flags,
             logger=self.logger,
@@ -172,10 +174,8 @@ class BaseArticulator(Articulator):
             *,
             ctx: AttentionContext,
             exited_event: ThreadSafeEvent,
-            on_start_logos: str,
     ):
         self._ctx = ctx
-        self._on_start_logos = on_start_logos
         self._task_group = BaseTaskGroup()
         self._exited_event = exited_event
         self._event_loop: asyncio.AbstractEventLoop | None = None
@@ -204,9 +204,6 @@ class BaseArticulator(Articulator):
         self._event_loop = asyncio.get_running_loop()
         # 启动一个检查, 确保 Attention 退出时可以影响到这里.
         self._task_group.add_task(self._event_loop.create_task(self._wait_aborted_and_cancel()))
-        # 实际上底层是空的.
-        if not self._ctx.is_aborted() and self._on_start_logos:
-            self._ctx.logos_queue.sync_q.put_nowait(self._on_start_logos)
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
@@ -325,7 +322,7 @@ class BaseAction(Action):
 
                 if item is None:
                     break
-                self._ctx.buffer_logos(item)
+                self._ctx.buffer_executed_logos(item)
                 yield item
         except janus.SyncQueueShutDown:
             return
@@ -388,10 +385,12 @@ class BaseAction(Action):
         return self._ctx.flag(name)
 
 
-class BaseAttention(Attention):
+class AbsAttention(Attention):
     """
-    基础的 Attention 机制实现.
-    只要这个机制通过了单元测试, 就能够把系统的复杂度都屏蔽到这套实现的内侧.
+    Attention 的抽象基类. 管理全部生命周期机械: loop, observe 循环, context func,
+    abort, Articulator/Action 创建, 强度状态存储.
+
+    challenge() 和 current_strength() 留给子类实现仲裁策略.
     """
 
     def __init__(
@@ -400,16 +399,10 @@ class BaseAttention(Attention):
             previous: Reaction,
             impulse: Impulse,
             logger: LoggerItf | None = None,
-            system_floor_strength: float = 0.0,  # 决定强度衰减到合适中断.
-            source_escalation: float = 1.1,  # 决定同源 impulse 提权比例.
-            max_protection_time: float = 3.0,  # 决定最大的保护时间.
-            protection_duration_ratio: float = 0.2,  # 决定保护时间在总时间的比例.
+            system_floor_strength: float = 0.0,  # 当 current_strength() <= 此值时自行 fade out
     ):
         self._init_impulse: Impulse = impulse
         self._wait_impulse_is_complete_event = ThreadSafeEvent()
-
-        # 一个可以接受新消息的 buffer.
-        self._info_impulse_buffer: deque[Impulse] = deque()
 
         self._logger = logger or get_moss_logger()
 
@@ -426,17 +419,13 @@ class BaseAttention(Attention):
         self._event_loop: asyncio.AbstractEventLoop | None = None
         self._inner_arbiter_task: asyncio.Task | None = None
 
-        # 这三个值通过 update impulse 更新.
+        # 这三个值通过 update impulse 更新，子类只读.
         self._initial_strength: float = 0.0
         self._strength_refreshed_at: float = 0.0
         self._strength_decay_time: float = 0.0
 
-        # 强度计算的相关参数.
+        # 强度 floor — _inner_attention_lifecycle 用它判断是否自行 fade out.
         self._system_floor_strength: float = system_floor_strength
-        # 当前 impulse 默认的提权效果.
-        self._source_escalation: float = source_escalation
-        self._max_protection_time: float = max_protection_time
-        self._protection_duration_ratio: float = min(max(protection_duration_ratio, 0.0), 1.0)
 
         self._started: bool = False
         self._closing: bool = False
@@ -453,7 +442,11 @@ class BaseAttention(Attention):
         # ctx 会持续存在.
         self._ctx = AttentionContext(
             attention_id=self._init_impulse.id,
-            moment=self._previous_reaction.new_moment(),
+            moment=self._previous_reaction.new_moment(
+                reflex_logos=impulse.reflex_logos,
+                percepts=impulse.messages,
+                reaction_instruction=impulse.reaction_instruction,
+            ),
             aborted_event=self._aborted_event,
             logger=self._logger,
             flags=self._flags,
@@ -529,41 +522,10 @@ class BaseAttention(Attention):
         # 先简单用时间刷新来做提权. 方便 AI 大神未来帮我改.
         self._strength_refreshed_at = time.monotonic()
 
+    @abstractmethod
     def current_strength(self) -> int:
-        """
-        Beta 版本实现：基于剩余生存权重的线性衰减模型。
-        """
-        now = time.monotonic()
-        elapsed = now - self._strength_refreshed_at
-
-        # 1. 启动保护区 (Protection Buffer)
-        # 逻辑：在前 20% 的时间里，Strength 保持 100% 且不会衰减，
-        # 确保 Attention 建立初期不会被微小的抖动打断。
-        # 由于 ttl 可能会设置很长, 所以也设置一个阈值.
-        protection_time = min(self._strength_decay_time * self._protection_duration_ratio, self._max_protection_time)
-        if elapsed < protection_time:
-            return int(self._initial_strength * self._source_escalation)
-
-        # 2. 运行者提权 (Escalation Gain)
-        # 逻辑：我们引入一个 'active_boost'，如果系统在运行，
-        # 我们认为它的“惯性”更高。
-        # 只有当 elapsed 超过保护区后，才开始衰减。
-        decay_elapsed = elapsed - protection_time
-        decay_duration = self._strength_decay_time - protection_time
-
-        # 归一化衰减进度 (0.0 -> 1.0)
-        progress = min(decay_elapsed / decay_duration, 1.0)
-
-        # 3. 线性衰减 + 提权惯性
-        # 核心设计：如果 impulse.complete 为 True (运行中)，
-        # 我们让衰减斜率减半（即：运行中的任务比待办任务更难被打断）。
-        decay_factor = 1.0 if self._init_impulse.complete else 1.5
-
-        # 计算最终强度
-        # 初始强度 * (1 - 进度 * 衰减斜率)
-        current = self._initial_strength * (1.0 - (progress * decay_factor))
-
-        return int(max(current, 0))
+        """子类实现各自的强度计算. 用于 _inner_attention_lifecycle 的 fade-out 检查."""
+        ...
 
     def loop(self) -> AsyncIterator[tuple[Articulator, Action]]:
         return self._loop()
@@ -598,21 +560,17 @@ class BaseAttention(Attention):
         impulse = await self.wait_first_impulse()
         if impulse is None:
             return
-        # 完成第一轮输入的赋值. 其中 mindflow context 应该是通过 context func 更新的.
+        # Moment 已在 __init__ 中通过 Reaction.new_moment() 创建并填入 percepts / reaction_instruction / reflex_logos.
+        # 但 wait_first_impulse 期间 impulse 可能被 incomplete→complete 吸收更新,
+        # 所以此处用最终的 impulse 重新对齐 Moment 的三个关键字段, 确保数据为最新.
         observation = self._ctx.moment
         observation.percepts = impulse.messages
-        observation.prompt = impulse.prompt
-        on_start_logos = impulse.on_logos_start
+        observation.reaction_instruction = impulse.reaction_instruction
+        observation.reflex_logos = impulse.reflex_logos
         while not self.is_aborted():
             # 每次刷新时会更新权重.
             self._escalation_on_active()
             current_observation = self._ctx.moment
-            while len(self._info_impulse_buffer) > 0:
-                impulse_buffer = self._info_impulse_buffer.popleft()
-                # buffer messages.
-                current_observation.percepts.extend(impulse_buffer.messages)
-                current_observation.prompt = impulse_buffer.prompt
-                on_start_logos = impulse_buffer.on_logos_start
 
             # 1. 准备本轮的 Observation
             # 这里的逻辑要把 context_funcs 执行一遍，塞进 self._ctx.observation
@@ -628,9 +586,7 @@ class BaseAttention(Attention):
             articulate = BaseArticulator(
                 ctx=self._ctx,
                 exited_event=self._articulate_stop_event,
-                on_start_logos=on_start_logos,
             )
-            on_start_logos = ''
             action = BaseAction(ctx=self._ctx, exited_event=self._action_stop_event)
 
             # 4. 交给外部执行线程/任务
@@ -652,43 +608,14 @@ class BaseAttention(Attention):
             # 7. 如果要继续, 要更新 ctx 准备下一轮.
             self._ctx = self._ctx.next_frame()
 
+    @abstractmethod
     def challenge(self, challenger: Impulse) -> bool | None:
         """
-        计算逻辑本身考虑线程安全. 重写这个函数, 可以实现不同的机制.
+        True: 抢占成功, 当前 attention 被 abort, 新 impulse 接管.
+        False: 压制, 挑战失败. 挑战者被 suppress.
+        None: 吸收, 挑战被内部消化 (如同源更新/buffer/DEBUG), 不影响当前 attention.
         """
-        if challenger.is_stale():
-            return False
-        # challenge 要有序调用, Mindflow 需要对它进行原子操作.
-        # 自己就不加锁了, 如果外层没有原子操作, 加锁也只会卡死.
-        if challenger.priority == Priority.DEBUG:
-            # mindflow 会 pop impulse 并丢弃.
-            # debug 类型不应该走到这一步.
-            self._ctx.logger.warning(
-                "%s receive debug level impulse: %s",
-                self._log_prefix, challenger
-            )
-            return None
-        if challenger.id == self._init_impulse.id:
-            # 来自自身的消息.
-            self._update_current_impulse(challenger)
-            return None
-        elif challenger.source == self._init_impulse.source and challenger.priority == Priority.INFO:
-            if challenger.complete:
-                self._info_impulse_buffer.append(challenger)
-                return None
-            return False
-        # priority is superior
-        if challenger.priority == Priority.FATAL or challenger.priority > self._init_impulse.priority:
-            return True
-        elif challenger.priority < self._init_impulse.priority:
-            return False
-        challenger_strength = challenger.strength
-        if challenger.source == self._init_impulse.source:
-            # 同源数据提权.
-            challenger_strength = int(challenger_strength * self._source_escalation)
-
-        current_strength = self.current_strength()
-        return current_strength < challenger_strength
+        ...
 
     def is_closed(self) -> bool:
         return self._aborted_event.is_set()
@@ -777,3 +704,72 @@ class BaseAttention(Attention):
             # 两个确保能够退出的标记.
             self._aborted_event.set()
             self._closed_event.set()
+
+
+class BaseAttention(AbsAttention):
+    """
+    Beta 版本的强度衰减仲裁实现.
+    保持原有构造签名和行为不变, 用于 BaseMindflow._create_attention_from_impulse() 向后兼容.
+    """
+
+    def __init__(
+            self,
+            *,
+            previous: Reaction,
+            impulse: Impulse,
+            logger: LoggerItf | None = None,
+            system_floor_strength: float = 0.0,
+            source_escalation: float = 1.1,
+            max_protection_time: float = 3.0,
+            protection_duration_ratio: float = 0.2,
+    ):
+        super().__init__(
+            previous=previous,
+            impulse=impulse,
+            logger=logger,
+            system_floor_strength=system_floor_strength,
+        )
+        self._source_escalation: float = source_escalation
+        self._max_protection_time: float = max_protection_time
+        self._protection_duration_ratio: float = min(max(protection_duration_ratio, 0.0), 1.0)
+
+    def challenge(self, challenger: Impulse) -> bool | None:
+        if challenger.is_stale():
+            return False
+        if challenger.priority == Priority.DEBUG:
+            self._ctx.logger.warning(
+                "%s receive debug level impulse: %s",
+                self._log_prefix, challenger
+            )
+            return None
+        if challenger.id == self._init_impulse.id:
+            self._update_current_impulse(challenger)
+            return None
+        if challenger.priority == Priority.FATAL or challenger.priority > self._init_impulse.priority:
+            return True
+        elif challenger.priority < self._init_impulse.priority:
+            return False
+        challenger_strength = challenger.strength
+        if challenger.source == self._init_impulse.source:
+            challenger_strength = int(challenger_strength * self._source_escalation)
+        current_strength = self.current_strength()
+        return current_strength < challenger_strength
+
+    def current_strength(self) -> int:
+        """基于剩余生存权重的线性衰减模型."""
+        now = time.monotonic()
+        elapsed = now - self._strength_refreshed_at
+
+        protection_time = min(
+            self._strength_decay_time * self._protection_duration_ratio,
+            self._max_protection_time,
+        )
+        if elapsed < protection_time:
+            return int(self._initial_strength * self._source_escalation)
+
+        decay_elapsed = elapsed - protection_time
+        decay_duration = self._strength_decay_time - protection_time
+        progress = min(decay_elapsed / decay_duration, 1.0)
+        decay_factor = 1.0 if self._init_impulse.complete else 1.5
+        current = self._initial_strength * (1.0 - (progress * decay_factor))
+        return int(max(current, 0))

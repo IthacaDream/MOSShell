@@ -1,7 +1,8 @@
 import asyncio
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Any, Optional, Callable, TypedDict, AsyncIterable
+from typing import Any, Optional, Callable, AsyncIterable
+from typing_extensions import TypedDict
 
 import numpy as np
 from pydantic import BaseModel, Field
@@ -20,7 +21,6 @@ __all__ = [
     "TTSBatch",
     "TTSInfo",
     "TTSSpeech",
-    "make_content_command_from_speech",
 ]
 
 
@@ -109,7 +109,6 @@ class SpeechStream(ABC):
         meta = CommandMeta(
             name="__speak__",
             # 默认主轨运行.
-            chan=chan,
             blocking=True,
         )
         start_synthesis = self.start_synthesis
@@ -278,57 +277,6 @@ class Speech(ABC):
         async with self:
             await self.wait_closed()
 
-
-def make_content_command_from_speech(speech: Speech, name="__content__", doc: str | None = None) -> Command:
-    """
-    不需要理解这里在干什么.
-    """
-
-    async def _feed_stream(stream: SpeechStream, deltas: AsyncIterable[str]) -> None:
-        """
-        实现一个异步消费的 task.
-        """
-        try:
-            nonlocal speech
-            if not speech.is_running():
-                return
-            has_first_chunk = False
-            async for chunk in deltas:
-                if not has_first_chunk and chunk.strip():
-                    has_first_chunk = True
-                    await stream.start_synthesis()
-                stream.feed(chunk)
-            stream.commit()
-        except asyncio.CancelledError:
-            await stream.close()
-
-    async def _content_partial(chunks__: AsyncIterable[str]) -> tuple[list, dict]:
-        """
-        在 command task 生成时, 就会对 chunks__ 进行流式加工.
-        """
-        nonlocal speech
-        if not speech.is_running():
-            return [], {}
-        stream = speech.new_stream()
-        await stream.start_synthesis()
-        _ = asyncio.create_task(_feed_stream(stream, chunks__))
-        return [], {"chunks__": stream}
-
-    # 发送给大模型的真实命令.
-    async def __content__(chunks__) -> None:
-        """speak chunks with your voice"""
-        if not speech.is_running():
-            return None
-        if not isinstance(chunks__, SpeechStream):
-            return None
-        try:
-            await chunks__.start_synthesis()
-            await chunks__.start_play()
-            await chunks__.wait_played()
-        finally:
-            await chunks__.close()
-
-    return PyCommand(func=__content__, partial=_content_partial, name=name, doc=doc)
 
 
 class AudioFormat(Enum):
@@ -665,82 +613,3 @@ class TTSSpeech(Speech, ABC):
     @abstractmethod
     def new_tts_stream(self, batch: TTSBatch) -> SpeechStream:
         pass
-
-    def commands(self) -> list[Command]:
-        """
-        返回 TTS Speech 默认支持的命令.
-        """
-        tts = self.tts()
-        tts_info = tts.get_info()
-        voice_schema_str = json.dumps(tts_info.voice_schema, ensure_ascii=False, indent=0)
-
-        def say_doc() -> str:
-            current_voice = tts.get_voice()
-            current_tone = tts.current_tone()
-            tones = tts_info.tones
-            tone_descriptions = []
-            for _tone, description in tones.items():
-                tone_descriptions.append(f"`{_tone}`: {description}")
-            tone_descriptions_str = ";".join(tone_descriptions)
-
-            return (
-                f"使用指定的声音状态说话. 当它在 __main__ channel 时, 默认可以省略. \n"
-                f":param voice: 声音的速度, 音调等. json 结构, json schema 是 {voice_schema_str}\n "
-                f"  你当前的声音状态是: {json.dumps(current_voice, ensure_ascii=False)}.\n"
-                f":param as_default: 将本轮设置的声音状态变成默认.\n"
-                f":param chunks__: 你说话的文本内容. \n"
-                f":param tone: 切换使用的音色. 默认为当前音色\n"
-                f"  当前的音色是 `{current_tone}`"
-                f"  当前可以使用的音色: {tone_descriptions_str}\n"
-            )
-
-        async def say_partial(
-                chunks__,
-                voice: dict | None = None,
-                as_default: bool = False,
-                tone: str = "",
-        ) -> tuple[list, dict]:
-            """
-            预先准备 say 的逻辑.
-            """
-            if as_default:
-                if voice:
-                    tts.set_voice(voice)
-                if tone:
-                    tts.use_tone(tone)
-            batch = self.tts().new_batch(voice=voice, tone=tone)
-            stream = self.new_tts_stream(batch)
-
-            async def run_tts_batch() -> None:
-                try:
-                    nonlocal chunks__
-                    # 允许开启解析.
-                    await stream.start_synthesis()
-                    async for chunk in chunks__:
-                        if stream.is_closed():
-                            return
-                        stream.feed(chunk)
-                except Exception as e:
-                    await stream.fail(e)
-                finally:
-                    stream.commit()
-
-            # 开始异步运行.
-            _ = asyncio.create_task(run_tts_batch())
-            return [], dict(voice=voice, chunks__=stream, as_default=as_default)
-
-        async def say(chunks__, voice: dict | None = None, as_default: bool = False, tone: str = "") -> None:
-            """
-            实际上拿到的 chunks__ 是一个 stream.
-            """
-            if not isinstance(chunks__, SpeechStream):
-                raise ValueError(f"System error: Chunks is not prepared")
-            await chunks__.say()
-
-        say_command = PyCommand(
-            say,
-            doc=say_doc,
-            partial=say_partial,
-        )
-
-        return [say_command]

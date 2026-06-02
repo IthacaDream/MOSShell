@@ -1,14 +1,15 @@
 ---
 title: First Ghost Prototype
-status: in_progress
+status: awaiting_human_validation
 priority: P0
 created: 2026-05-14
-updated: 2026-05-15
-step: 9
+updated: 2026-05-23
+step: 13_done
 depends: []
-milestone:
+milestone: 2026-05-22-first-ghost-echo-speaks
 description: >-
   从零开发第一个完整的 Ghost 原型——将 Ghost/Mindflow 抽象转化为可运行的智能体实现，打通 "感知→思考→执行" 三循环。
+  TUI 集成完成，echo 已说出第一句话。等待人类验证后 complete。
 ---
 
 # First Ghost Prototype
@@ -70,6 +71,92 @@ first-ghost-prototype/
 | 8 | Ghost ABC 微调 + 三层抽象落地 | `ghost.py` 注释/文档 | done |
 | 9 | _meta / _runtime 实现 + 测试 | `ghosts/atom/` (4 files, 24 tests) | done |
 | 10 | GhostRuntime 包裹模式 | 生命周期编排 | pending |
+| 10a | SystemPrompter tree 模型 | tree model + MossSystemPrompter 迁至 blueprint.host | done |
+| 10b | GhostRuntime ABC 定义 | ABC 5 成员 + 架构选型 (方案4) | done |
+| 10c | GhostRuntimeImpl skeleton | wiring: providers → moss → ghost → mindflow | done |
+| 10d | action observe 回路闭合 | 流式 feed → interpreter → action.outcome() + 异常分级 | done |
+| 10e | session signal 路由 | session → mindflow bridge + matrix logger 输出 | done |
+| 10f | task output 协议 | `on_task_done` → session.output, 结算只发 status | done |
+| 10g | output role 体系 + logos 缓冲 | 六 role 分离，command/error/system 已落地，logos 暂用缓冲过渡 | done |
+| 10h | session stream logos | logos 走 session stream 流式输出，替代当前缓冲检查点 | done |
+| 10i | ghost 可观测性体系 | Ghost on_articulate_exit + inspect_state, GhostRuntime inspect_loop_health + LoopHealth TypedDict | done |
+| 11a | Mindflow 默认 input signal | GhostRuntime fallback → new_default_mindflow() (InputSignalNucleus + PriorityProtectionAttention), 43 tests 全部通过 | done |
+| 11c | on_challenge 旁路观察 | ChallengeObserver(Callable[[challenger, defender, verdict], None]) + Mindflow.on_challenge(), AbsMindflow._challenge_attention 内 fire | done |
+| 11b | Mindflow inspect + 自解释 | mindflow 探知接口、自解释接口 | pending |
+| 12 | 测试与 TUI | mock ghost + input signal 脚本测试 → TUI 全链路验证 | done |
+| 13 | TUI 集成 | GhostREPLState + echo 默认实例 + moss-run-ghost CLI | done |
+| 14 | echo soul | ghost playground 产出 echo.md 系统提示词 | pending |
+| 15 | 人类验证 | 非 AI 开发者验证 echo 全链路 + 完善细节 | pending |
+| 16 | 文档 | AI 为 ghost 编写完整文档（由下一个 AI 实例完成） | pending |
+
+## 实现阶段关键决策（2026-05-16）— GhostRuntime 架构选型
+
+GhostRuntime 的四种架构方案与最终决策，详见 [DESIGN.md](./DESIGN.md)。
+
+**最终选择方案 4**：GhostRuntime 持有 MossRuntime，组合优于继承。ABC 五个成员（`.moss`/`.ghost`/`.meta`/`.container`/`close()`），ghost + mindflow main loop 托管给 `matrix.create_task`。
+
+定义位置: `ghoshell_moss/core/blueprint/host.py` — 与 `MossRuntime` 同文件。
+
+---
+
+## 实现阶段关键决策（2026-05-16）— SystemPrompter tree 模型
+
+在为 GhostRuntime 做准备时，发现 SystemPrompter 当前是压平字符串，Ghost 无法感知层次来插入 soul。
+在与人类工程师讨论后，将 SystemPrompter 从 flat model 重构为 tree model。
+
+核心决策：
+
+1. **SystemPrompter 作为 tree node** — `children() -> dict[str, SystemPrompter]` 暴露子节点树。每个子节点自身也是 SystemPrompter，递归可组合。不使用 `@property` — 函数签名自解释。
+
+2. **MossSystemPrompter 命名访问器** — `ctml_instruction() / project_instruction() / mode_instruction() / static_instruction()` 四个 concrete 方法，是对 children key 的便捷包装。不是 abstractmethod — 不排斥任意插槽。
+
+3. **flatten() + linear()** — `flatten()` 返回 `[(path, desc)]` 使树可自解释、可测试结构完整性。`linear(slots)` 按给定顺序拼装，Ghost 用来在层间插入 soul。
+
+4. **MossSystemPrompterImpl** — 钻石继承 `BaseSystemPrompter + MossSystemPrompter`，零额外代码。注册为 `SystemPrompter` 和 `MossSystemPrompter` 双 IoC key。
+
+5. **描述自解释** — `description()` 每节点可选声明。MatrixImpl 构建时填写，AI 遍历 `flatten()` 即理解全局。
+
+涉及文件：
+- `contracts/system_prompter.py` — tree model 实现
+- `host/system_prompter.py` — MossSystemPrompterImpl
+- `host/matrix.py` — _prepare_system_prompter 构建树
+
+### 2026-05-16（续）— 迁移 MossSystemPrompter 至 blueprint.host
+
+将 `MossSystemPrompter` 从 `contracts/system_prompter.py` 搬迁至 `blueprint/host.py`：
+
+6. **遵循 channel_builder 模式**：MOSS 特定约定与通用 contracts 分离。`SystemPrompter` + `BaseSystemPrompter` 留在 contracts（通用组件），`MossSystemPrompter` 放在 `blueprint/host.py` 与 `MossRuntime`/`MossHost` 同簇。
+
+7. **Slot 常量消除魔法值**：`CTML_SLOT = 'ctml'`, `PROJECT_SLOT = 'project'`, `MODE_SLOT = 'mode'`, `MOSS_STATIC_SLOT = 'static'`。upper fractal 重构因魔法值付出了巨大代价，此处从源头避免。
+
+8. **MossRuntime.system_prompter 便捷属性**：`self.matrix.container.force_fetch(MossSystemPrompter)`，消费者不感知 IoC key。
+
+9. **static slot 在 _bootstrap_after_matrix() lazily 注入**：`self._ctml_shell.static_messages` 作为 callable 传递，每次 instruction() 动态求值。Shell 启动后才可用。
+
+### 验证手法 — 基于抽象，零上下文集成测试
+
+关键发现：只用 blueprint + contracts 抽象，不引用任何 host 实现，可以独立运行全链路验证：
+
+```python
+# 单文件窗口：从抽象入口直达运行时验证
+from ghoshell_moss.core.blueprint.host import MossHost, MossSystemPrompter
+
+host = MossHost.discover()
+runtime = host.run(run_shell=False)
+async with runtime:
+    prompter = runtime.system_prompter
+    # children() / flatten() / named accessors 全链路验证
+```
+
+这个模式验证了：
+- `MossHost.discover()` 环境发现 → `MossRuntime` → `MossSystemPrompter` 全链路连通
+- CTML 真实加载（6146 chars）
+- tree 结构 `ctml → project → mode → static` 按序排列
+- `flatten()` 自解释输出正常
+
+基于抽象的单文件窗口是 MOSS 架构探索的核心模式 — 不依赖 IDE、不需要启动 REPL、不需要理解 host 实现。
+
+---
 
 ## 实现阶段关键决策（2026-05-15）
 
@@ -92,6 +179,53 @@ first-ghost-prototype/
 6. **package 内测试**：对于有特殊依赖（pydantic AI）的模块，测试放在 package 内 (`test_atom.py`)。
    只用真依赖路径，不堆 MagicMock。24 个测试覆盖 soul 加载、instruction 组装、消息协议、adapter 转换、生命周期。
 
+## 实现阶段关键决策（2026-05-17）— GhostRuntimeImpl + Ghost ABC 清理
+
+此轮实现了 GhostRuntimeImpl 并清理了 Ghost ABC。关键决策：
+
+1. **删除 `Ghost.nuclei()`**：实例方法造成语义漂移——nuclei 的创建和注册应走 `GhostMeta.nuclei_metas()` 工厂路径。nuclei 实例由 meta 工厂在容器 bootstrap 后产出，GhostRuntime 负责将它们注册到 Mindflow。
+
+2. **Ghost 自行组装 instruction**：GhostRuntime 不替 ghost 注入 soul 到 SystemPrompter tree。ghost 自己从 IoC 拿 prompter，自己决定如何组合。Atom 的 `build_instruction()` 已经是这个模式。
+
+3. **Mindflow 解析优先级**：`ghost.mindflow()` > `IoC.get(Mindflow)` > `BaseMindflow`。结果 `container.set(Mindflow, ...)` 回绑，让 Session 等组件可发现。
+
+4. **三循环用 janus.Queue + asyncio tasks**：v0 用协程而非多线程。janus 保留用于线程安全的未来兼容。
+
+5. **构造时检查 MossRuntime 未启动**：`is_running()` 为 True 则抛 `RuntimeError`。GhostRuntime 拥有完整生命周期。
+
+6. **`_action_loop` 流式执行 + observe 回路闭合**：`action.received_logos()` (stream) → `interpreter.feed(delta)` (stream)，不粘合 string 做批量。三个明确阶段：feed → compile → execute。`InterpretError` 被捕获，`interpretation.observe` + `as_messages()` 通过 `action.outcome()` 回传 Mindflow，模型在下一轮 Moment 看到错误可自我纠正。
+
+7. **异常四级分级**：(1) InterpretError — 可管理中断，observe=True；(2) Task 级失败 — 单个命令异常，不中断整体；(3) 静默失败 — log 不呈现；(4) 致命异常 — 向外传播。
+
+8. **matrix 信息输出预留**：logos 流式解析过程和 interpreter 结算两处标记 TODO，后续接入 matrix logger。
+
+## 实现阶段关键决策（2026-05-17）— task output 协议
+
+将 action loop 的产出接入 `session.output()` 总线，使端侧 consumer（TUI panel、测试断言）可通过统一协议消费 ghost 执行过程。
+
+核心决策：
+
+1. **task 级输出走 `on_task_done`**：每个 CommandTask 完成时通过 `interpreter.on_task_done()` 回调实时产出 `OutputItem(role='task', ...)`。有消息时带 `task_result().as_messages()`，无消息时只带 `log=f"{caller_name} done"`。consumer 可看到逐命令的执行进度。
+
+2. **结算只发 status_messages**：`wait_stopped()` 后只产出 `OutputItem(role='system', *status_messages())`。不再发全量 `executed_messages()`——因为每个 task 的结果已通过 `'task'` 逐条发送。`action.outcome()` 也只收 status，模型在下一轮 Moment 看到的是摘要（"5 done, 1 failed"），不是全量结果。
+
+3. **异常走 `'error'`**：InterpretError 捕获后 `session.output('error', str(exception))`，与 task 级别的 `'task'` 区分。
+
+4. **角色分配总结**（已由 10g 修订，见下文 2026-05-18 决策）：
+
+| role | 来源 | 时机 |
+|------|------|------|
+| `'logos'` | moment (待实现) | articulate loop 产出 |
+| `'task'` | `on_task_done` → `task_result()` | 每个 task 完成 |
+| `'error'` | InterpretError / critical failure | 异常捕获点 |
+| `'system'` | `status_messages()` only | interpreter 结算 |
+
+> 10g 将 `'task'` 拆为 `command-output` + `command-result`，新增 `moment` role，`'logos'` 不再待实现。
+
+涉及文件：`host/ghost_runtime.py` — `_stream_execute` 注册 `on_task_done` 回调 + 结算改走 status。
+
+## 实现阶段关键决策（2026-05-17）— observe 回路 + 流式执行
+
 ## 认知准备（已完成 2026-05-14）
 
 首轮探索确定了以下认知基线：
@@ -99,7 +233,7 @@ first-ghost-prototype/
 1. **测试体系**：`tests/` 下 ~70 个测试文件。Ghost 零测试。Mindflow 有三个测试文件覆盖三循环调度。
 2. **CTML**：流式命令标记语言。Code as Prompt、时间第一公民、树形 Channel、结构化并发。
 3. **Mindflow ABC**：三循环（感知/思考/执行）全双工调度中枢。Signal → Nucleus → Impulse → Attention → Articulator/Action。
-4. **Ghost ABC**：`system_prompt()` + `memories()` + `nuclei()` + `articulate()` + `channel()`。核心是 `articulate()`。
+4. **Ghost ABC**：`system_prompt()` + `memories()` + `articulate()` + `channel()` + `mindflow()`。核心是 `articulate()`。
 5. **Mindflow 测试**：`BaseMindflow` / `BaseAttention` / `BufferNucleus` 已通过测试验证三循环链路可运行。
 
 ### 架构关系速览
@@ -113,6 +247,251 @@ Mindflow (调度中枢) → Attention (单次运行态)
                                               ↑
                               Ghost.articulate() 提供 Logos
 ```
+
+## 实现阶段关键决策（2026-05-18）— output role 体系
+
+梳理 session.output 的 role 体系，解决两个 gap：
+1. articulate loop 产出（logos）未走 output 总线
+2. `_on_task_done` 只发了 `as_messages()`（给模型），没发 `result.output`（给人）
+
+### 统一 role 六类
+
+| role | 内容 | 消费者 | 状态 |
+|------|------|--------|------|
+| `moment` | ghost 本轮感知到的 percepts 概要 | 人/调试 | done |
+| `logos` | 模型 articulate 的文本产出 | 人 | done |
+| `command-output` | `CommandTaskResult.output` | 人 | done |
+| `command-result` | `CommandTaskResult.as_messages()` | 模型 | done |
+| `error` | 异常信息（articulate/action 均覆盖） | 调试 | done |
+| `system` | interpreter 结算 status | 调试 | done |
+
+原 `'task'` role 拆为 `command-output` + `command-result`——两个消费方向不同，混在一起 consumer 无法区分。
+
+### logos 流式输出（10h 完成）
+
+logos 通过 session stream 实时广播：
+
+```
+_articulate_loop:
+  articulator 入队
+    → output('moment', log="...")
+    → async for delta in ghost.articulate(articulator):
+        articulator.send_nowait(delta)   # 给 mindflow
+        session.pub_logos(delta)        # 实时流, 外部通过 get_logos() 消费
+
+_action_loop → _stream_execute:
+  每个 task done:
+    → output('command-output', *result.output)       # 给人看
+    → output('command-result', *result.as_messages()) # 给模型看
+  InterpretError:
+    → output('error', log=str(err))
+  结算:
+    → output('system', *status)
+```
+
+两个 loop 均有异常覆盖：action loop 已有，articulate loop 补上。
+
+涉及文件：`host/ghost_runtime.py` — `_articulate_loop` + `_stream_execute._on_task_done`
+
+---
+
+## 实现阶段关键决策（2026-05-19）— Ghost 可观测性体系
+
+### 方法论
+
+两个使用者，两个导向：
+
+1. **Ghost 开发者**（写 Atom/Mock 的人）— override Ghost 上的 hook，暴露这个原型的内部细节
+2. **Runtime 使用者**（REPL 人类 / 脚本 AI）— 通过 GhostRuntime 的诊断 API 观察系统，不穿透到 ghost
+
+Ghost 的 hook 是**数据源**，GhostRuntime 的诊断 API 是**消费面**。使用者永远只面对 GhostRuntime。
+
+### 两个前缀约定
+
+| 前缀 | 语义 | 位置 | 例子 |
+|------|------|------|------|
+| `on_*` | event callback，事件发生时 GhostRuntime 调用。默认 no-op | Ghost | `on_articulate_exit` |
+| `inspect_*` | state query，拉取当前状态快照，无副作用 | Ghost + GhostRuntime | `inspect_state()` `inspect_loop_health()` |
+
+`on_` = push（事件推给你），`inspect_` = pull（你拉状态）。
+
+不是 lifecycle hook（lifecycle 将管理 ghost 状态转换 born/wake/sleep/die）。可观测性 hook 纯粹诊断用途——删除不影响行为。
+
+### 第一版最小集
+
+- `Ghost.on_articulate_exit(articulator, logos, error)` — articulate 结束后，捕获完整 logos 用于复现
+- `Ghost.inspect_state() -> dict` — ghost 内部快照，无固定 schema，每个原型自决
+- `GhostRuntime.inspect_loop_health() -> LoopHealth` — 三循环状态，TypedDict 保证 key 全量
+
+### 类型约束
+
+```python
+LoopStatus = Literal["running", "stopped", "not_started"]
+
+class LoopHealth(TypedDict):
+    main: LoopStatus
+    articulate: LoopStatus
+    action: LoopStatus
+```
+
+抽象设计不写魔法值——读签名即知全貌。
+
+### 涉及文件
+
+- `core/blueprint/ghost.py` — Ghost 新增 on_articulate_exit + inspect_state
+- `core/blueprint/host.py` — GhostRuntime 新增 inspect_loop_health, LoopHealth/LoopStatus 类型
+- `host/ghost_runtime.py` — GhostRuntimeImpl 实现 + wire hooks + loop status 追踪
+- `ghosts/mock/_runtime.py` — MockGhost 覆盖 hook 作为 ghost 开发者参考范式
+- `scripts/ghost/test_debug_hooks.py` — 验证脚本
+
+## 实现阶段关键决策（2026-05-22）— Atom Ghost 端到端验证通过
+
+使用 `scripts/ghost/run_atom_hello.py` 脚本，首次跑通了从信号输入到模型响应的完整链路：
+
+```
+session.add_input_signal("hello")
+  → zenoh pub/sub → mindflow.add_signal()
+  → InputSignalNucleus → Impulse → Attention
+  → Articulator → _articulate_loop → Atom.articulate()
+  → pydantic AI run_stream() → Anthropic API (deepseek-v4-pro)
+  → CTML logos 流式返回 → _action_loop → interpreter
+```
+
+模型成功返回了 CTML 格式响应：`<_><say tone="爽朗少年" voice='{"emotion":"happy"}' as_default="true">哈哈，来了！有什么能帮你的？</say></_>`
+
+### 修复的关键 Bug
+
+1. **NucleusMeta 工厂 NotImplementedError 导致启动崩溃**（`ghost_runtime.py:138`）
+   - workspace 中的 `ExampleNucleusMeta.factory()` 抛出 `NotImplementedError`，`_wire_mindflow()` 无条件创建所有发现到的 nuclei，异常导致 `__aenter__` 失败，随后 cleanup 死锁（zenoh/Matrix 关闭 hang），进程看起来"卡住"而非报错
+   - 修复：`_wire_mindflow()` 中加 try/except，NotImplementedError 打 warning 跳过，其他异常打 exception 跳过。同时注释掉 `.moss_ws/` 和 stub 模板中的 example nucleus factory
+
+2. **pydantic AI API 400 `messages: at least one message is required`**（`atom/_runtime.py:83`）
+   - `Atom.articulate()` 将所有消息作为 `message_history` 传入，未分离当前消息
+   - pydantic AI 1.90.0 的 `run_stream()` 要求 `user_prompt`（当前消息）与 `message_history`（历史）分离
+   - 修复：`run_stream(user_prompt=request.parts, message_history=history)`
+
+3. **`anthropic_thinking` 类型不匹配**（`atom/_meta.py`）
+   - `{"type": "disabled"}` 字典值与 pydantic AI 期望的 `BetaThinkingConfigDisabledParam` 类型不兼容
+   - 修复：使用 `BetaThinkingConfigDisabledParam(type="disabled")`
+
+4. **`wait_any_task()` 导致脚本卡死**（`run_atom_hello.py:40`）
+   - 云端的 `task = await gr.moss.shell.wait_any_task()` 在脚本中卡死，因为 `wait_any_task()` 是 future-based API，等待的是"下一个" task，而非"是否曾经有 task"。interpreter 可能在脚本走到这行之前就已经 `push_task()` 完了，注册的 future 永远不会 resolve
+   - 而且 `<say>` 标签是显示/语音指令，大概率不走 `push_task()` 路径，无论时序如何都会永远卡住
+   - 该 API 设计上服务于交互式 REPL 场景，不适合一次性验证脚本
+   - 修复：直接删除 `wait_any_task()` 调用
+
+5. **`await asyncio.sleep(5)` 替换为 `wait_until_idle()`**（`run_atom_hello.py:55`）
+   - 原脚本用固定 sleep 等待 action loop 处理 CTML，可能等不够或白等
+   - `wait_until_idle()` 语义精确：等待 shell 运行时无可调度任务，处理完即继续
+
+### 已知遗留问题
+
+- **Cleanup 死锁**：`gr.close()` 后进程 hang，Matrix/zenoh teardown 阶段卡住。与脚本等待逻辑无关，是独立问题
+
+### 涉及文件
+
+- `src/ghoshell_moss/host/ghost_runtime.py` — _wire_mindflow try/except
+- `src/ghoshell_moss/ghosts/atom/_runtime.py` — user_prompt/message_history 分离
+- `src/ghoshell_moss/ghosts/atom/_meta.py` — BetaThinkingConfigDisabledParam
+- `scripts/ghost/run_atom_hello.py` — 端到端验证脚本
+- `.moss_ws/src/MOSS/manifests/nuclei.py` — 注释 example factory
+- `src/ghoshell_moss/host/stubs/workspace/src/MOSS/manifests/nuclei.py` — 同上
+
+### 下一阶段
+
+~~Mindflow 默认 input signal 体系~~ 已完成 (11a, 11c)。当前进入 TUI 全链路验证 (12c) 和 Ghost TUI 集成 (step 13)。
+
+---
+
+## 实现阶段关键决策（2026-05-22）— Moment/Attention 参数传递链路加固
+
+此轮通过单测驱动发现并修复了 staged 重构中的两个 bug，新增 22 个模型层单测。
+
+核心决策：
+
+1. **`as_request_messages()` 解绑 percepts 和 instruction**：`with_reaction_instruction` gate 不应跳过 `inputs_messages()` 整段调用 — percepts 和 instruction 是独立概念。修复后始终调用 `inputs_messages()`，由内部参数单独控制 instruction 显隐。
+
+2. **`_loop()` 中的 impulse 对齐是必要的**：不是冗余赋值。`wait_first_impulse()` 期间 impulse 可能被 incomplete→complete 吸收更新，所以 `_loop()` 中需要用最终 impulse 重新对齐 Moment 的三个关键字段（percepts / reaction_instruction / reflex_logos）。修正了遗漏的 `reflex_logos` 对齐。
+
+3. **脚本 vs 单测的断言哲学**：本次也清理了集成脚本中脆弱的 `hasattr` 检查和对内部实现名称的硬断言。脚本用 print 给人看，单测用 assert 给 CI 跑。
+
+涉及文件：
+- `conversation.py` — as_request_messages 解绑
+- `base_attention.py` — _loop() 补充 reflex_logos 对齐 + 设计注释
+- `test_mindflow.py` — 22 个新增单测
+- `test_on_challenge.py` — 去 hasattr + 断言改打印
+
+## 实现阶段关键决策（2026-05-22）— GhostRuntime 生命周期异常治理
+
+在三循环中统一了异常处理纪律，并标记了 hook 插入点。
+
+核心决策：
+
+1. **FatalError 传播 / Exception 续流**：三个循环统一采用此模式。FatalError 穿透所有层级终止循环，普通异常 log 后继续 — 全双工长运行系统的基础纪律。
+
+2. **`_loop_status` 语义修正**：articulate 和 action 循环的 status 之前在每个迭代的 finally 中设为 "stopped"，但 while 循环还在继续 — 状态永久显示 "stopped"。修正为只在循环真正退出时（外层 finally）设置。
+
+3. **`_action_loop` 不再 re-raise**：之前对普通 Exception 直接 `raise e` 会杀死整个 action 循环。改为 log 后 continue，与 main/articulate 一致。action 是消耗品，丢掉当前 action 继续。
+
+4. **`close()` 防御**：加了 `_mindflow is not None` 检查 — startup 失败时 mindflow 未初始化，二次调用 `.close()` 会 AttributeError。
+
+5. **启动步骤日志**：`__aenter__` 5 步每步加 debug 日志。出问题时一眼看到卡在哪一步。
+
+6. **Hook 标记**：9 个 `# todo: hook —` 注释覆盖三循环全部生命周期关键节点。不实装，但为后续 hook 体系保留插入点。
+
+涉及文件：`host/ghost_runtime.py`
+
+## 实现阶段关键决策（2026-05-22）— TUI 集成规划 + echo 默认 Ghost
+
+完成 TUI 架构调研后确定了 Ghost TUI 集成的核心原则和默认 Ghost 实例。
+
+核心决策：
+
+1. **主界面极简**：logos 流式输出 + 用户文本输入。调试能力走 inspector。
+
+2. **echo 作为默认 Ghost**：开发者拿到 MOSS 后看到的第一个实例。Atom 原型的具体化。名字的含义是"壳中的第一声回响" — 简单、通用、不张扬。soul/system prompt 由后续 ghost playground workstream 产出。
+
+3. **Scripts 机制是等价调试手段**：`moss script run <name>` 让 AI 在 REPL 外也能独立向 ghost 发 signal 验证行为。
+
+详见 [DESIGN.md](./DESIGN.md) TUI 集成设计章节和 [discuss/08-tui-integration-planning.md](./discuss/08-tui-integration-planning.md)。
+
+---
+
+## 当前状态（2026-05-23, claude-code）
+
+Feature 状态: **awaiting_human_validation** — 不能由 AI 单独标记为 completed。
+
+echo 已完成端到端验证：signal → impulse → articulate → model API → logos 流式返回。
+TUI 集成就绪：`moss-run-ghost echo` 启动交互终端。
+`moss script run say-hello` 可向运行中的 echo 发送 signal。
+
+### 2026-05-23（续）— GhostTUI 环境路径修正
+
+消除 `GhostTUI._ghost_name` 的 class attribute workaround，回归 Environment 作为 ghost 信息源：
+
+1. **`Environment.ghost_name` property**：`_ghost_name` 原为 private，补充 public accessor
+2. **`ghost_run.py` 启动时 `env.set_ghost_name(ghost)`**：正确的启动模式——脚本通过 `environment.set_ghost_name` 将 ghost name 写入环境
+3. **`GhostTUI._get_runtime` 从 `host.env.ghost_name` 读取**：`_get_runtime` 是 classmethod 接收 `host: MossHost`，从 `host.env` 拿 ghost name 是显式路径，不再需要 class attribute 隐式传递
+
+信息流：`ghost_run.py → env.set_ghost_name(ghost) → host.env.ghost_name → _get_runtime(host)`
+
+**未完成**:
+- echo 的 soul/system prompt（step 14, 依赖 ghost playground）
+- 人类验证 echo 全链路并记录细节问题（step 15）
+- echo 没有配套的 kernel prompt, 所以提示词是原始的 atom, 导致模型输出的 logos 品质不高
+- bootstrap 时 logger 有越界 warning（已知，不重要）
+
+**下一个 AI 实例的任务（step 16）**:
+人类完成验证后，下一个 AI 实例将基于本 feature 的全部记录（FEATURE.md + DESIGN.md +
+discuss/ + milestones/ + memory/）为一个全新的上下文，为 echo/ghost 编写完整的
+第一版文档。这份文档是给人类开发者看的——解释 Ghost 是什么、如何配置、如何开发。
+这不是 AI 能独立完成的工作：它需要在人类验证 echo 时发现的真实问题作为输入。
+
+**复苏指引**:
+- 读 `FEATURE.md` 本文件的完整内容
+- 读 `.memory/daily/2026-05/22.md` — deepseek-v4-pro 的 session 记录和锚点
+- 读 milestones/2026-05-22-first-ghost-echo-speaks.md — 里程碑
+- 读 DESIGN.md 的 "TUI 集成设计" 和 "默认 Ghost — echo" 章节
 
 ---
 

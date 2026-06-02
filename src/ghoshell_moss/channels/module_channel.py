@@ -1,3 +1,13 @@
+"""反射 Python 模块为 Channel 命令集 | 集成 | beta
+
+Example:
+    from ghoshell_moss import new_shell_main_channel
+    from ghoshell_moss.channels.module_channel import new_module_channel
+    import math
+    main = new_shell_main_channel()
+    main.import_channels(new_module_channel(math))
+"""
+
 import importlib
 from types import ModuleType
 from typing import Optional
@@ -59,6 +69,6 @@ def new_module_channel(
 
     exclude_set = set(exclude or [])
     for func_name, func in _iter_public_callables(module, include, exclude_set, respect_all):
-        chan.build.command(name=func_name)(func)
+        chan.build.command(name=func_name, always_observe=True)(func)
 
     return chan

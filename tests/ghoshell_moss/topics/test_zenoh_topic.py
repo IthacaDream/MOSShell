@@ -1,7 +1,6 @@
 import asyncio
-import ghoshell_moss.core.concepts.topic as topic_concepts
-from ghoshell_moss.core.concepts.topic import Topic, TopicMeta, ErrorTopic, TopicClosedError
-from ghoshell_moss.core.topic.zenoh_topics import ZenohTopicService
+from ghoshell_moss.core.concepts.topic import ErrorTopic
+from ghoshell_moss.host.topics.zenoh_topics import ZenohTopicService
 import pytest
 import zenoh
 

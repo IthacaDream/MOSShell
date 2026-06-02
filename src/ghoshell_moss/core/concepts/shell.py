@@ -5,7 +5,7 @@
 import asyncio
 import contextlib
 from abc import ABC, abstractmethod
-from typing import Literal, Optional, AsyncIterable, AsyncIterator, Generic, TypeVar, AsyncGenerator
+from typing import Literal, Optional, AsyncIterable, Generic, TypeVar, Any
 from ghoshell_container import IoCContainer
 from ghoshell_moss.core.concepts.channel import Channel, ChannelFullPath, ChannelMeta, ChannelRuntime
 from ghoshell_moss.core.concepts.command import Command, CommandTask, CommandToken
@@ -132,6 +132,11 @@ class MOSShell(Generic[MAIN_CHANNEL], ABC):
         pass
 
     @abstractmethod
+    async def wait_any_task(self) -> CommandTask:
+        """wait any task is pushed into the shell and notify with it"""
+        pass
+
+    @abstractmethod
     def is_closed(self) -> bool:
         """
         是否已经关闭运行.
@@ -233,6 +238,7 @@ class MOSShell(Generic[MAIN_CHANNEL], ABC):
             config: Optional[list[ChannelFullPath]] = None,
             ignore_wrong_command: bool = False,
             clear_after_exit: bool | None = None,
+            task_context: dict[str, Any] | None = None,
     ):
         """
         简单的语法糖.
@@ -244,6 +250,7 @@ class MOSShell(Generic[MAIN_CHANNEL], ABC):
             config=config,
             ignore_wrong_command=ignore_wrong_command,
             clear_after_exit=clear_after_exit,
+            task_context=task_context,
         )
         async with interpreter:
             yield interpreter
@@ -260,6 +267,7 @@ class MOSShell(Generic[MAIN_CHANNEL], ABC):
             token_replacements: dict[str, str] | None = None,
             meta_instruction: str | None = None,
             clear_after_exit: bool | None = None,
+            task_context: dict[str, Any] | None = None,
     ) -> Interpreter:
         """
         实例化一个 interpreter 用来做解释.
@@ -291,6 +299,7 @@ class MOSShell(Generic[MAIN_CHANNEL], ABC):
 
         :param clear_after_exit: clear undone tasks after exit.
         :param meta_instruction: 可以用来替换系统默认的 moss 语法 prompt. 通常只在调试时需要修改.
+        :param task_context: 给所有的 command task 复制 task context
         """
         pass
 

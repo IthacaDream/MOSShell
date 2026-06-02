@@ -1,5 +1,5 @@
 from typing import Iterable, Type
-from ghoshell_moss.core.topic.zenoh_topics import ZenohTopicService
+from ghoshell_moss.host.topics.zenoh_topics import ZenohTopicService
 from ghoshell_moss.core.concepts.topic import TopicService
 from ghoshell_moss.contracts import LoggerItf
 from ghoshell_container import Provider, IoCContainer, INSTANCE

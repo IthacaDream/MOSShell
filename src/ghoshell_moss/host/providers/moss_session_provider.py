@@ -9,28 +9,26 @@ from ghoshell_moss.core.blueprint.environment import Environment
 
 depend_zenoh()
 import zenoh
-from ghoshell_moss.core.session.zenoh_session import MossSessionWithZenoh
+from ghoshell_moss.host.session.zenoh_session import MossSessionWithZenoh
 
 __all__ = [
-    'WorkspaceSessionProvider',
+    'HostSessionProvider',
 ]
 
 
-class WorkspaceSessionProvider(Provider[Session]):
+class HostSessionProvider(Provider[Session]):
     """
     make session instance from workspace
     """
 
     def __init__(
             self,
-            session_scope: str | None = None,
             *,
             session_path: str = 'sessions',
-            session_id_prefix: str = 'session-',
+            session_tmp_path: str = 'sessions-tmp',
     ):
-        self._session_scope = session_scope
         self._session_path = session_path
-        self._session_id_prefix = session_id_prefix
+        self._session_tmp_path = session_tmp_path
 
     def singleton(self) -> bool:
         return True
@@ -45,27 +43,21 @@ class WorkspaceSessionProvider(Provider[Session]):
         ws = con.force_fetch(Workspace)
         zenoh_session = con.force_fetch(zenoh.Session)
         logger = con.get(LoggerItf)
-        session_scope = self._session_scope
-        session_id = None
-        if session_scope is None:
-            env = con.force_fetch(Environment)
-            session_scope = env.session_scope
-            session_id = env.session_id
-        session_storage_path = self._session_id_prefix + session_scope
-        storage = ws.runtime().sub_storage('session').sub_storage(session_storage_path)
-        if session_id:
-            # use session id to separate session playground
-            storage = storage.sub_storage(f"session-{session_id}")
+        env = con.force_fetch(Environment)
+        session_scope = env.session_scope
+        session_id = env.session_id
+        # session 的根目录.
+        session_root_storage = ws.runtime().sub_storage(self._session_path)
+        # session 的临时信息的根目录.
+        session_tmp_root_storage = ws.runtime().sub_storage(self._session_tmp_path)
         topics = con.force_fetch(TopicService)
         session = MossSessionWithZenoh(
             session_scope=session_scope,
-            session_storage=storage,
+            session_root_storage=session_root_storage,
+            session_tmp_root_storage=session_tmp_root_storage,
             logger=logger,
             zenoh_session=zenoh_session,
             topic_service=topics,
             session_id=session_id,
         )
-
-        # always clear during the container shutdown.
-        con.add_shutdown(session.clear)
         return session

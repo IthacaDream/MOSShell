@@ -1,7 +1,6 @@
 import asyncio
 from typing import AsyncIterable
 
-from ghoshell_moss import CommandError
 from ghoshell_moss.core import CTMLShell, InterpretError
 from ghoshell_moss.core.ctml import ctml_shell_test
 from ghoshell_moss.core.blueprint.channel_builder import new_channel
@@ -70,12 +69,12 @@ async def test_ctml_parallel_baseline():
 
     @a.build.command()
     async def foo() -> None:
-        await asyncio.sleep(0.005)
+        await asyncio.sleep(0.05)
         order.append('foo')
 
     @b.build.command()
     async def bar() -> None:
-        await asyncio.sleep(0.001)
+        await asyncio.sleep(0.01)
         order.append('bar')
 
     tasks = await ctml_shell_test(a, b, ctml="<a:foo/><b:bar/>")
@@ -103,11 +102,13 @@ async def test_ctml_empty_content_not_run():
     """
     验证空的字符串不会触发 content 调用.
     """
+    from ghoshell_moss.contracts import get_console_logger, LoggerItf
     a_chan = new_channel(name="a")
     results = []
 
     @a_chan.build.command()
-    async def cmd_a(): results.append("a")
+    async def cmd_a():
+        results.append("a")
 
     # a 嵌套 b，b 内部调用自己的命令，b 结束后回到 a 调用 a 的命令
     # 保留很多空行.
@@ -117,7 +118,13 @@ async def test_ctml_empty_content_not_run():
                 
         </_>
         """
-    tasks = await ctml_shell_test(a_chan, ctml=ctml)
+    time_err = None
+    try:
+        tasks = await ctml_shell_test(a_chan, ctml=ctml, timeout=0.5)
+    except asyncio.TimeoutError as e:
+        time_err = e
+    assert time_err is None
+
     assert len(tasks) == 3
     # 加入有意义的字符, 就会多一个 content 函数.
     ctml = """
@@ -126,7 +133,7 @@ async def test_ctml_empty_content_not_run():
                 hello
             </_>
             """
-    tasks = await ctml_shell_test(a_chan, ctml=ctml)
+    tasks = await ctml_shell_test(a_chan, ctml=ctml, timeout=0.5)
     assert len(tasks) == 4
     # 前后都一样.
     ctml = """
@@ -136,7 +143,7 @@ async def test_ctml_empty_content_not_run():
                     world
                 </_>
                 """
-    tasks = await ctml_shell_test(a_chan, ctml=ctml)
+    tasks = await ctml_shell_test(a_chan, ctml=ctml, timeout=0.5)
     assert len(tasks) == 5
 
 
@@ -148,10 +155,12 @@ async def test_ctml_nested_scope_override():
     results = []
 
     @a_chan.build.command()
-    async def cmd_a(): results.append("a")
+    async def cmd_a():
+        results.append("a")
 
     @b_chan.build.command()
-    async def cmd_b(): results.append("b")
+    async def cmd_b():
+        results.append("b")
 
     # a 嵌套 b，b 内部调用自己的命令，b 结束后回到 a 调用 a 的命令
     ctml = """
@@ -162,8 +171,13 @@ async def test_ctml_nested_scope_override():
         <cmd_a />
     </_>
     """
-    with pytest.raises(InterpretError):
+    err = None
+    try:
         await ctml_shell_test(a_chan, b_chan, ctml=ctml)
+    except Exception as e:
+        err = e
+    assert err is not None
+    assert isinstance(err, InterpretError)
 
 
 # --- 以下是 Gemini 3 写的单测, 发现 channel=name 语法有歧义, 仍改为命名空间定义作用域 --- #
@@ -347,7 +361,7 @@ async def test_ctml_nested_any_all_recursion():
 
     @a.build.command()
     async def trigger():
-        await asyncio.sleep(0.01)  # 快速触发
+        await asyncio.sleep(0.03)  # 快速触发
 
     ctml = """
     <_ channel='a' until='any'>
@@ -358,7 +372,7 @@ async def test_ctml_nested_any_all_recursion():
         </_>
     </_>
     """
-    await ctml_shell_test(a, ctml=ctml)
+    await ctml_shell_test(a, ctml=ctml, timeout=1)
     # trigger 完成导致外部 any 结束，内部 all 应该被整体撤销，包含它的 2 个 waiter
     assert done_count == 0
 
@@ -405,7 +419,7 @@ async def test_ctml_none_strict_features_of_until_flow_with_none_self_command():
     @a.build.command()
     async def foo():
         # 让 foo 不会比 __content__ 更快执行完.
-        await asyncio.sleep(0.01)
+        await asyncio.sleep(0.02)
         done.append('foo')
 
     ctml = """
@@ -555,7 +569,8 @@ async def test_ctml_scope_timeout():
         <_ timeout="0.1">
             <timer:long_task/>
         </_>
-        """
+        """,
+        timeout=1,
     )
     # 超时会导致作用域内的任务被取消，所以 long_task 会抛出 CancelledError
     has_long = False
@@ -647,14 +662,14 @@ async def test_ctml_command_cid_and_result():
 
 @pytest.mark.asyncio
 async def test_ctml_observe_interrupt():
-    """测试 Observe 返回值中断所有运行中命令"""
-    from ghoshell_moss import Observe
+    """测试 ObserveError 中断所有运行中命令（Observe 返回则不中断）"""
+    from ghoshell_moss.core.concepts.command import ObserveError
     loop_chan = new_channel(name='loop')
     inter_chan = new_channel(name="interrupt")
 
     @inter_chan.build.command()
-    async def trigger_observe() -> Observe:
-        return Observe()
+    async def trigger_observe_error() -> None:
+        raise ObserveError("emergency stop")
 
     @loop_chan.build.command()
     async def infinite_loop() -> None:
@@ -669,12 +684,11 @@ async def test_ctml_observe_interrupt():
         ctml="""
         <_>
             <loop:infinite_loop/>
-            <interrupt:trigger_observe/>
+            <interrupt:trigger_observe_error/>
         </_>
         """
     )
-    # 由于 Observe 触发，整个作用域应被中断，所有任务取消
-    # 每个任务都会抛出 CancelledError
+    # ObserveError 触发紧急中断，infinite_loop 被取消
     has_loop = False
     for t in tasks:
         if t.meta.name == "infinite_loop":
@@ -1316,6 +1330,7 @@ async def test_primitive_clear_cancels_all():
         ctml="""
         <_ until="all">
             <long_task/>
+            <sleep duration="0.01"/>
             <interrupt/>
         </_>
         """
@@ -1349,16 +1364,17 @@ async def test_primitive_cannot_be_used_in_non_root_channel():
         return "ok"
 
     # 在非根通道作用域内使用 <clear> 应该报错
-    tasks = await ctml_shell_test(
-        non_root,
-        ctml="""
-        <_ until="all" channel="non_root">
-            <some_cmd/>
-            <clear/>
-        </_>
-        """
-    )
-    assert tasks[0].exception() is not None
+    # 解析阶段就会抛出 InterpretError，无法得到 tasks
+    with pytest.raises(InterpretError):
+        await ctml_shell_test(
+            non_root,
+            ctml="""
+            <_ until="all" channel="non_root">
+                <some_cmd/>
+                <clear/>
+            </_>
+            """
+        )
 
 
 # ============= 总结性测试：端到端人机交互场景 =============

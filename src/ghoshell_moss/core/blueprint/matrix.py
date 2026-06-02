@@ -5,21 +5,24 @@ from abc import ABC, abstractmethod
 
 from ghoshell_moss.core.concepts.channel import Channel, ChannelProxy
 from ghoshell_moss.core.blueprint.session import Session
-from ghoshell_moss.contracts import LoggerItf, ConfigStore, Workspace, SystemPrompter, ResourceRegistry
+from ghoshell_moss.contracts import LoggerItf, ConfigStore, Workspace, SystemPrompter, ResourceRegistry, Storage
 from ghoshell_container import IoCContainer
 from ghoshell_moss.core.blueprint.manifests import Manifests
 from pydantic import BaseModel, Field
 from pathlib import Path
+from enum import Enum
 import asyncio
 import frontmatter
+import logging
 
 __all__ = ['Matrix', 'Cell', 'SystemPrompter', 'ScopesKey', 'MatrixLifecycleObject', 'Mode']
 
-CellTypes = Literal[
-    'host',  # 表示为启动网络的主进程节点.
-    'app',  # 表示在相同的 workspace 下的 App 节点. 由 main 节点管理生命周期.
-    'fractal',  # Matrix 的分形通讯机制下, 其它 Matrix 连接到当前 Matrix, 所形成的 cell 节点.
-]
+
+class CellType(str, Enum):
+    host = 'host',  # 表示为启动网络的主进程节点.
+    app = 'app',  # 表示在相同的 workspace 下的 App 节点. 由 main 节点管理生命周期.
+    fractal = 'fractal',  # Matrix 的分形通讯机制下, 其它 Matrix 连接到当前 Matrix, 所形成的 cell 节点.
+    script = 'script',  # 在 workspace 里独立运行的 script, 同样可以获取 matrix 节点身份.
 
 
 class Cell(ABC):
@@ -32,8 +35,9 @@ class Cell(ABC):
     """
     name: str  # 节点的名称.
     description: str  # 节点的描述.
-    type: CellTypes | str
+    type: CellType | str
     where: str  # 这个节点自身的工作目录.
+    workspace: str | None = None  # cell 级的 workspace, 如果为空, 系统需要帮它创建一个.
 
     @property
     def address(self) -> str:
@@ -42,8 +46,9 @@ class Cell(ABC):
         return self.make_address(self.type, self.name)
 
     @classmethod
-    def make_address(cls, type: str, fullname: str) -> str:
-        return '/'.join([type, fullname])
+    def make_address(cls, cell_type: str | CellType, fullname: str) -> str:
+        cell_type = str(cell_type).lower()
+        return '/'.join([cell_type, fullname])
 
     @property
     def log_name(self) -> str:
@@ -65,6 +70,7 @@ class Cell(ABC):
             "where": self.where,
             "log_name": self.log_name,
             "is_alive": self.is_alive(),
+            "workspace": self.workspace,
         }
 
 
@@ -77,7 +83,8 @@ ScopesKey = Literal[
     'mode',  # 对环境中所有资源的隔离形式, 通过不同的 mode 隔离不同的资源组合. 使得资源如 provider, config 等可以复用.
     'session_scope',  # 运行时隔离的基本维度, 使用不同的 scope 启动, 可以用来隔离通讯/存储等. 前提是对应组件使用了这个隔离级别.
     'session_id',  # 运行时的唯一 Id. 如果一些资源或状态希望在系统关闭时就丢弃, 可以基于 session_id 构建隔离级别来通讯或存储.
-    'cell_address',  # Matrix 实例作为通讯架构, 运行在每个不同的 Cell 内. 同时可以有很多个 cell 并行运行组网.
+    'ghost',  # 如果运行时启动了 ghost, 这里是 ghost 的名称.
+    'cell',  # Matrix 实例作为通讯架构, 当前节点的地址
 ]
 
 INSTANCE = TypeVar('INSTANCE')
@@ -222,6 +229,43 @@ class Matrix(ABC):
         """
         pass
 
+    # --- cells - Matrix 可以管理多个节点的通讯, 每个节点称之为 Cell --- #
+
+    @property
+    @abstractmethod
+    def this(self) -> Cell:
+        """
+        返回当前节点自身的讯息. 节点之间通讯仅仅通过 topics / parameter / action 等.
+        自身的 cell 类型是不需要定义的, Matrix 在环境中发现, 启动时, 自动会生成描述.
+        """
+        pass
+
+    @property
+    def cell_workspace(self) -> Workspace:
+        """cell 独立的 workspace. 基于约定返回. """
+        from ghoshell_moss.contracts.workspace import LocalWorkspace
+        # 系统默认的 workspace 约定体系. code as prompt
+        if self.this.type == CellType.host.value:
+            return self.workspace
+        if hasattr(self, '_this_cell_workspace'):
+            return getattr(self, '_this_cell_workspace')
+        else:
+            if self.this.workspace is not None:
+                root_path = Path(self.this.workspace).resolve()
+            else:
+                # runtime 下面的 cells. 用来放无 workspace cell 的专属目录.
+                root_path = self.workspace.runtime().sub_storage('cells').abspath() / self.this.address
+            workspace = LocalWorkspace(root_path)
+            setattr(self, '_this_cell_workspace', workspace)
+            return workspace
+
+    @abstractmethod
+    def list_cells(self) -> dict[CellAddress, Cell]:
+        """
+        返回环境里的所有节点, 以及这些节点是否在运行.
+        """
+        pass
+
     @abstractmethod
     def cell_env(self) -> dict[str, str]:
         """
@@ -232,14 +276,67 @@ class Matrix(ABC):
         # matrix 不依赖 Environment 对象, 避免发现逻辑永远不可重写.
         pass
 
+    # --- Matrix 提供的文件存储区汇总 --- #
+
     @property
     @abstractmethod
-    def this(self) -> Cell:
+    def workspace(self) -> Workspace:
         """
-        返回当前节点自身的讯息. 节点之间通讯仅仅通过 topics / parameter / action 等.
-        自身的 cell 类型是不需要定义的, Matrix 在环境中发现, 启动时, 自动会生成描述.
+        workspace 管理.
         """
         pass
+
+    @property
+    def ghosts_storage(self) -> Storage:
+        """
+        workspace 里所有 ghosts 持久化存储所在的空间.
+        """
+        return self.workspace.root().sub_storage('ghosts')
+
+    @property
+    def modes_storage(self) -> Storage:
+        """
+        workspace 里所有 moss 模式的持久化存储空间.
+        """
+        return self.workspace.root().sub_storage('modes')
+
+    def get_ghost_storage(self, ghost_name: str) -> Storage:
+        """不同的 ghost 独享的存储空间. """
+        return self.ghosts_storage.sub_storage(ghost_name)
+
+    def get_modes_storage(self, mode_name: str) -> Storage:
+        """不同模式独享的存储空间"""
+        return self.modes_storage.sub_storage(mode_name)
+
+    @property
+    def ghost_home(self) -> Storage:
+        return self.get_ghost_storage(self.ghost_name)
+
+    @property
+    def mode_home(self) -> Storage:
+        return self.get_modes_storage(self.mode_name)
+
+    def storages(self) -> dict[str, Storage]:
+        """
+        Matrix 可提供的各种持久化存储路径, 显式声明定义.
+
+        此处不建议直接使用, 而是提示项目的基础约定.
+        """
+        return {
+            'workspace': self.workspace.root(),
+            'runtime': self.workspace.runtime(),
+            'configs': self.workspace.configs(),
+            'assets': self.workspace.assets(),
+            'ghosts': self.ghosts_storage,
+            'ghost_home': self.ghost_home,
+            'modes': self.modes_storage,
+            'mode_home': self.mode_home,
+            'session': self.session.storage,
+            # cell 独有的 workspace 位置.
+            'cell': self.cell_workspace.root(),
+            # 所有临时存储空间使用, 都应该基于 tmp
+            'tmp': self.session.tmp_storage
+        }
 
     # -- 运行前 注册函数 -- #
 
@@ -280,20 +377,6 @@ class Matrix(ABC):
         """
         pass
 
-    @property
-    @abstractmethod
-    def moss_mode_name(self) -> str:
-        pass
-
-    def scopes(self) -> dict[ScopesKey, str]:
-        """返回 Matrix 运行时的维度座标. 用来构建不同的隔离级别. """
-        return {
-            'session_id': self.session.session_id,
-            'session_scope': self.session.session_scope,
-            'mode': self.mode.name,
-            'cell_address': self.this.address,
-        }
-
     @abstractmethod
     def ctml_version(self) -> str:
         """
@@ -308,10 +391,11 @@ class Matrix(ABC):
         """
         pass
 
+    @property
     @abstractmethod
-    def list_cells(self) -> dict[CellAddress, Cell]:
+    def logger(self) -> logging.Logger:
         """
-        返回环境里的所有节点, 以及这些节点是否在运行.
+        日志模块. 从属于当前节点.
         """
         pass
 
@@ -319,7 +403,8 @@ class Matrix(ABC):
     @abstractmethod
     def session(self) -> Session:
         """
-        共享的 Session Store.
+        所有 Matrix 共享的通讯总线
+        同时分享会话级别的存储空间.
         """
         pass
 
@@ -362,21 +447,98 @@ class Matrix(ABC):
             }
             yield info
 
+    # --- scopes. 运行时的作用域信息. --- #
+
+    @property
+    def mode_name(self) -> str:
+        """当前模式的名称. """
+        return self.mode.name
+
+    @property
+    @abstractmethod
+    def ghost_name(self) -> str | Literal['None']:
+        """
+        如果当前的 Host 节点是用 GhostRuntime 运行的, 则返回 ghost name, 否则是 'None'
+        """
+        pass
+
+    @property
+    def session_scope(self) -> str:
+        return self.session.session_scope
+
+    @property
+    def session_id(self) -> str:
+        return self.session.session_id
+
+    def scopes(self) -> dict[ScopesKey, str]:
+        """返回 Matrix 运行时的维度座标. 用来构建不同的隔离级别. """
+        return {
+            'session_id': self.session_id,
+            'session_scope': self.session_scope,
+            'mode': self.mode_name,
+            'ghost': self.ghost_name,
+            'cell': self.this.address,
+        }
+
+    def get_scoped_url(self, *scopes: ScopesKey, **kwargs: str) -> str:
+        """
+        基于作用域生成一个 URL 形式的资源路径.
+        可以用这种形式生成字符串唯一 id, 用来管理各种可复用的资源.
+
+        举个例子: get_scoped_url('ghost', 'mode', user=name) 会生成一个 指定Ghost在指定模式下对特定用户 的唯一id, 配合后缀可做记忆管理.
+        """
+        scope_values = self.scopes()
+        for scope in scopes:
+            if scope in scope_values:
+                kwargs[scope] = scope_values[scope]
+        result = []
+        for k, v in sorted(kwargs.items(), key=lambda item: item[0]):
+            result.append(k.strip('/'))
+            result.append(v.strip('/'))
+        return '/'.join(result)
+
+    def get_scoped_storage(self, scope: ScopesKey, *scopes: ScopesKey) -> Storage:
+        """
+        基于指定的作用域获取一个持久化存储的 Storage 位置. 举例:
+        - get_scoped_storage('ghost', 'mode') : 当前 Ghost X MOSS 不同模式独立的存储空间.
+        - get_scoped_storage('ghost') : 当前 Ghost 所有模式/session 下共同的存储空间.
+        - get_scoped_storage('session_id', 'ghost'): 在当前 session id 下, 为当前 ghost 准备的存储空间.
+        """
+        if scope == 'ghost':
+            root = self.get_ghost_storage(self.ghost_name)
+        elif scope == 'mode':
+            root = self.get_modes_storage(self.mode_name)
+        elif scope == 'session_id':
+            root = self.session.storage
+        elif scope == 'cell':
+            root = self.cell_workspace.root()
+        elif scope == 'session_scope':
+            root = self.session.scope_storage
+        else:
+            raise KeyError(f"scope {scope} is not supported")
+        storage = root
+        scope_values = self.scopes()
+        for scope in scopes:
+            if scope not in scope_values:
+                raise KeyError(f"scope {scope} not in scopes")
+            sub_storage_path = f"{scope}-{scope_values[scope]}"
+            storage = storage.sub_storage(sub_storage_path)
+        return storage
+
+    # --- channel --- #
+
     @abstractmethod
     def provide_channel(
             self,
             channel: Channel,
             *,
-            cell_type: Literal['app', 'main'] | _ThisCellType = _ThisCellType,
-            cell_name: str | _ThisCellName = _ThisCellName,
+            address: str | None = None,
     ) -> asyncio.Future[None]:
         """
         将 Channel 通过当前节点提供到整个 Matrix 网络中,
         :param channel: 需要提供到 matrix 体系里的根节点.
-        :param cell_type: 需要定义 channel 提供出去时的 cell 类型. 通常不需要传参, 按约定定义.
-        :param cell_name: 提供出去时使用的 cell 名称. 不传参时就使用自己的名字.
+        :param address: 提供时声明自身的节点信息. 默认使用 this.address
         """
-        # 在 AppCell 内通过 Matrix 调用 provide channel,
         # 一个进程只能调用一个 provide channel, 可以提供树形的 channel.
         pass
 
@@ -387,21 +549,23 @@ class Matrix(ABC):
             name: str,
             description: str = '',
             id: str | None = None,
-            only_allowed_in_main_cell: bool = True,
+            only_allowed_in_host_cell: bool = True,
     ) -> ChannelProxy:
         """
         搭建一个 proxy 获取另一个节点里通过 address (通常是 cell address) 提供的 channel. 进行跨网络同构.
 
-        这个函数除特殊情况外, 不需要手动使用. Host 节点启动时会提供 apps 的自动发现.
+        一个节点 provider, 另一个节点 proxy, 就可以形成 channel 基于 matrix 的通讯体系.
+        通常情况下, proxy 只由 Matrix 的 Host 节点管理.
 
         :param address: cell address where providing a channel tree
         :param name: channel name which rewrite the providing channel.
         :param description: channel description which rewrite the providing channel.
-        :param id: channel uid if given, otherwise will generate a uuid for the proxy.
-        :param only_allowed_in_main_cell: if true, check this cell is host main cell or raise error.
+        :param id: channel uid if given, otherwise will generate a unique id for the proxy.
+        :param only_allowed_in_host_cell: if true, check this cell is host main cell or raise error.
+
         :raise RuntimeError: if the current cell is not the main cell of the matrix runtime.
         """
-        # 通常只允许 Matrix 里的 main cell 使用 proxy 连接 channel. 因为 channel 是 matrix 内唯一的.
+        # 通常只允许 Matrix 里的 host cell 使用 proxy 连接 channel. 因为 channel 是 matrix 内唯一的.
         # 多个 proxy 连接会导致 channel 频繁地重启.
         # 仍然允许用这个方式进行测试.
         #
@@ -409,21 +573,7 @@ class Matrix(ABC):
         # 进入这个网络后, 可以通过 address 的方式来组建 proxy => provider 的通讯.
         pass
 
-    @property
-    @abstractmethod
-    def logger(self) -> LoggerItf:
-        """
-        日志模块. 从属于当前节点.
-        """
-        pass
-
-    @property
-    @abstractmethod
-    def workspace(self) -> Workspace:
-        """
-        workspace 管理.
-        """
-        pass
+    # ---- 状态描述 ---- #
 
     @abstractmethod
     def is_running(self) -> bool:
@@ -438,6 +588,8 @@ class Matrix(ABC):
         判断 moss 是否在运行中.
         """
         pass
+
+    # --- 生命周期管理 --- #
 
     @abstractmethod
     def close(self) -> None:
@@ -463,7 +615,13 @@ class Matrix(ABC):
         pass
 
     @abstractmethod
-    def create_task(self, cor: Coroutine) -> asyncio.Task:
+    def create_task(
+            self,
+            cor: Coroutine,
+            *,
+            stop_matrix_on_error: bool = False,
+            name: str | None = None,
+    ) -> asyncio.Task:
         """
         创建包含在 Matrix 生命周期内的 Task
         """
@@ -504,7 +662,7 @@ class Matrix(ABC):
                     for t in [task, exit_signal]:
                         if not t.done():
                             t.cancel()
-                    await asyncio.gather(task, exit_signal, return_exceptions=True)
+                    _ = await asyncio.gather(task, exit_signal, return_exceptions=True)
             else:
                 # 如果用户传的是普通 Awaitable 或已完成的结果
                 return await result_or_coro
@@ -526,6 +684,18 @@ class Matrix(ABC):
             return asyncio.run(self.arun(main_coro))
         except KeyboardInterrupt:
             pass  # 底层 arun 已经处理了清理
+
+    @abstractmethod
+    async def add_lifecycle_object(self, obj: MatrixLifecycleObject) -> None:
+        """
+        可以在运行时动态添加 lifecycle object, 会绑定到 exit stack 启动, 退出时清空.
+        """
+        pass
+
+    @abstractmethod
+    def register_lifecycle_object(self, obj: MatrixLifecycleObject) -> None:
+        """注册 lifecycle object, 只有在运行前可以注册. """
+        pass
 
     @abstractmethod
     async def __aenter__(self) -> Self:

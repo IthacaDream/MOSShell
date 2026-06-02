@@ -16,22 +16,25 @@ _AttrName = str
 _Prompt = str
 
 
-def reflect_module(module: ModuleType) -> str:
+def reflect_module(module: ModuleType, *, deps: bool = True) -> str:
     """
     generate llm-oriented prompt from runtime module
     """
-    return Reflector.from_module(module).reflect()
+    return Reflector.from_module(module).reflect(deps=deps)
 
 
-def reflect_any_by_import_path(import_path: str) -> str:
+def reflect_any_by_import_path(import_path: str, *, deps: bool = True) -> str:
     """
     :param import_path: [module.path][:attribute]
+    :param deps: include reflected dependency interfaces in output
     :return: value
     """
     from ghoshell_moss.core.codex._reflect import reflect_prompt_from_value
     value = import_from_path(import_path)
+    if value is None:
+        raise ImportError(f"Cannot import '{import_path}': attribute not found")
     if isinstance(value, ModuleType):
-        return reflect_module(value)
+        return reflect_module(value, deps=deps)
     data = reflect_prompt_from_value(value)
     if data is None:
         try:
@@ -88,15 +91,20 @@ class Reflector:
         """
         return self._modulename
 
-    def reflect(self) -> str:
+    def reflect(self, *, deps: bool = True) -> str:
         """
         :return: generated prompt of the module
         """
+        if not deps:
+            return self.source
         if self._prompt is None:
-            self._prompt = self._make_prompt()
+            self._prompt = self._make_prompt(deps=True)
         return self._prompt
 
-    def _make_prompt(self) -> str:
+    def _make_prompt(self, *, deps: bool = True) -> str:
+        if not deps:
+            return self.source
+
         from ._reflect import reflect_imported_locals_by_modulename
         from ._utils import escape_string_quotes
         attr_prompts = reflect_imported_locals_by_modulename(

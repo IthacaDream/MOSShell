@@ -9,7 +9,7 @@ __all__ = ['TTSSpeechServiceProvider']
 class TTSSpeechServiceProvider(Provider[Speech]):
 
     def singleton(self) -> bool:
-        return False
+        return True
 
     def factory(self, con: IoCContainer) -> INSTANCE:
         logger = con.force_fetch(LoggerItf)

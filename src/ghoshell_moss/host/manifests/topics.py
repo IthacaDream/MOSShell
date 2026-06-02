@@ -1,5 +1,5 @@
 from typing import Any, Iterable
-from ghoshell_moss.core.codex.discover import scan_package
+from ghoshell_moss.core.codex.discover import scan_package, ScanError
 from ghoshell_moss.core.concepts.topic import TopicModel, TopicSchema
 from ghoshell_moss.core.blueprint.manifests import TopicInfo
 
@@ -17,28 +17,43 @@ ModulePath = str
 
 def find_topic_infos_from_package(
         package_import_path: str,
+        *,
+        strict: bool = False,
+        errors: list[ScanError] | None = None,
 ) -> Iterable[tuple[ModuleFile, ModulePath, type[TopicModel] | TopicSchema]]:
     """
     扫描逻辑：寻找原生定义的 TopicModel 子类。
     """
     # 限制递归深度为 2
-    for manifest in scan_package(package_import_path, max_depth=2):
+    for manifest in scan_package(package_import_path, max_depth=2, strict=strict, errors=errors):
 
-        # 我们寻找类，且必须是本模块定义的
-        for name, obj in manifest.iter_members(predicate=is_topic_info_object):
-            model_path = f"{manifest.module_path}:{name}"
-            yield manifest.file_path, model_path, obj
+        try:
+            # 我们寻找类，且必须是本模块定义的
+            for name, obj in manifest.iter_members(predicate=is_topic_info_object):
+                model_path = f"{manifest.module_path}:{name}"
+                yield manifest.file_path, model_path, obj
+        except Exception as e:
+            if strict:
+                raise
+            if errors is not None:
+                errors.append(ScanError(module_path=manifest.module_path, exception=e, stage="iterate"))
+            continue
 
 
 def search_topic_infos_from_package(
         package_import_path: str = MANIFEST_TOPICS_PATH,
+        *,
+        strict: bool = False,
+        errors: list[ScanError] | None = None,
 ) -> dict[TopicName, TopicInfo]:
     """
     将扫描到的类转化为 TopicInfo 对象，并以 topic_name 为 key 聚合
     """
     topics: dict[TopicName, TopicInfo] = {}
 
-    for file, path, model in find_topic_infos_from_package(package_import_path):
+    for file, path, model in find_topic_infos_from_package(
+        package_import_path, strict=strict, errors=errors,
+    ):
         # 转化为 Info 结构
         info = TopicInfo.from_topic_type(
             found=path.split(':')[0],  # 模块路径

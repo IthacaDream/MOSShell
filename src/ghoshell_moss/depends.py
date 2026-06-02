@@ -7,21 +7,21 @@ def depend_zenoh():
     try:
         import zenoh
     except ImportError:
-        raise ImportError(f"Depend zenoh, please install by 'pip install ghoshell_moss[matrix]'")
+        raise ImportError(f"Depend zenoh, please install by 'pip install ghoshell_moss[host]'")
 
 
 def depend_circus():
     try:
         import circus
     except ImportError:
-        raise ImportError(f"Depend circus, please install by 'pip install ghoshell_moss[matrix]'")
+        raise ImportError(f"Depend circus, please install by 'pip install ghoshell_moss[host]'")
 
 
 def depend_cli():
     try:
         import typer
     except ImportError:
-        raise ImportError(f"Depend typer, please install by 'pip install ghoshell_moss[cli'")
+        raise ImportError(f"Depend typer, please install by 'pip install ghoshell_moss[host]'")
 
 
 def depend_pyaudio():
@@ -35,4 +35,4 @@ def depend_pydantic_ai():
     try:
         import pydantic_ai
     except ImportError:
-        raise ImportError(f"Depend pydantic ai, please install by 'pip install ghoshell_moss[host]'")
+        raise ImportError(f"Depend pydantic ai, please install by 'pip install ghoshell_moss[ghost]'")

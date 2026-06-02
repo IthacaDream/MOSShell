@@ -8,7 +8,6 @@ from ghoshell_moss.core.concepts.command import (
     CommandStackResult,
     CommandTaskState,
     PyCommand,
-    CancelAfterOthersTask,
     CommandTaskResult,
 )
 from ghoshell_moss.core.concepts.errors import CommandError, CommandErrorCode
@@ -250,16 +249,51 @@ async def test_command_task_result():
 
 
 @pytest.mark.asyncio
-async def test_cancel_task():
-    async def foo():
-        await asyncio.sleep(10)
+async def test_bare_and_magic_task():
+    async def __foo__() -> int:
         return 123
 
-    foo_cmd = PyCommand(foo)
-    task = BaseCommandTask.from_command(foo_cmd)
-    cancel_task = CancelAfterOthersTask(task)
+    command = PyCommand(__foo__)
 
-    got = await asyncio.gather(task.run(), cancel_task.run(), return_exceptions=True)
-    for r in got:
-        pass
+    task = BaseCommandTask.from_command(command)
+    assert task.is_magical()
+    task.func = None
+    assert task.is_bare_task()
+    r = await task.dry_run()
+    assert r is None
+
+    task = BaseCommandTask.from_command(command)
+    assert not task.is_bare_task()
+    assert task.is_magical()
+    r = await task.dry_run()
+    assert r is 123
+
+
+@pytest.mark.asyncio
+async def test_command_task_timeout():
+    async def foo() -> int:
+        await asyncio.sleep(1)
+        return 123
+
+    foo_command = PyCommand(foo, timeout=0.01)
+    task = BaseCommandTask.from_command(foo_command)
+    with pytest.raises(asyncio.TimeoutError):
+        await task.run()
+
+    task = BaseCommandTask.from_command(foo_command)
+    task.func = None
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(task.wait(throw=True), 0.2)
+
+
+@pytest.mark.asyncio
+async def test_command_task_cancel_is_not_success():
+    async def foo() -> int:
+        await asyncio.sleep(1)
+        return 123
+
+    foo_command = PyCommand(foo, timeout=0.01)
+    task = BaseCommandTask.from_command(foo_command)
+    task.cancel()
     assert task.cancelled()
+    assert not task.success()

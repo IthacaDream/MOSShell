@@ -6,8 +6,10 @@ MOSS 环境发现的关键常量.
 from typing import Literal
 from typing_extensions import Self
 from pathlib import Path
-from ghoshell_common.helpers import uuid
+from ghoshell_moss.message import unique_id
+from ghoshell_common.contracts import config_logger_from_yaml
 from importlib import resources
+import logging
 from pydantic import BaseModel, Field
 from ghoshell_moss.core.ctml.versions import (
     CTML_VERSION, search_version_file_in_dir, default_moss_ctml_meta_instruction_directory,
@@ -50,9 +52,6 @@ __all__ = [
     'WORKSPACE_ENV_FILENAME',
     'WORKSPACE_ENV_EXAMPLE_FILENAME',
 ]
-
-from ghoshell_moss import TopicModel
-from ghoshell_moss.contracts.configs import ConfigType
 
 # --- moss 的 workspace 发现机制 --- #
 
@@ -98,7 +97,7 @@ ENV_GHOST_NAME_KEY = 'MOSS_GHOST_NAME'
 ENV_PARENT_PID_KEY = 'MOSS_PARENT_PID'
 
 ENV_CELL_ADDRESS_KEY = 'MOSS_CELL_ADDRESS'
-DEFAULT_CELL_ADDRESS = 'main'
+DEFAULT_CELL_ADDRESS = 'host/{mode}'
 
 MOSSEnvKey = Literal[
     "MOSS_WORKSPACE", "MOSS_SESSION_SCOPE", "MOSS_MODE_NAME",
@@ -187,9 +186,12 @@ class Environment:
         )
         self._session_id: str = session_id or os.environ.get(ENV_SESSION_ID_KEY, '')
         if not self._session_id:
-            self._session_id = uuid()
+            self._session_id = unique_id()
 
-        self._cell_address: str = os.environ.get(ENV_CELL_ADDRESS_KEY, DEFAULT_CELL_ADDRESS)
+        self._cell_address: str = os.environ.get(
+            ENV_CELL_ADDRESS_KEY,
+            DEFAULT_CELL_ADDRESS.format(mode=self._moss_mode)
+        )
 
         # 为空表示运行时不启用 ghost.
         self._ghost_name: str = ghost_name or os.environ.get(ENV_GHOST_NAME_KEY, '')
@@ -210,9 +212,17 @@ class Environment:
         self._session_id = session_id
         os.environ[ENV_SESSION_ID_KEY] = session_id
 
+    @property
+    def ghost_name(self) -> str:
+        return self._ghost_name
+
     def set_ghost_name(self, ghost_name: str) -> None:
         self._ghost_name = ghost_name
         os.environ[ENV_GHOST_NAME_KEY] = ghost_name
+
+    @property
+    def logger(self) -> logging.Logger:
+        return logging.getLogger('moss.' + self._cell_address.replace('/', '.'))
 
     def ctml_prompts_dir(self) -> Path:
         return self.workspace_path.joinpath("ctml_versions")
@@ -289,23 +299,22 @@ class Environment:
             return
         self._bootstrapped = True
         if not self.workspace_path.exists():
-            # 初始化 workspace.
-            # 如果 workspace 不存在的话.
-            # 启动脚本应该提示用户
             raise EnvironmentError(f"Workspace `{self.workspace_path}` does not exist")
 
         env_file = self.env_file
-        # 确认加载一次环境变量.
         if env_file is not None:
             dotenv.load_dotenv(env_file)
 
-        # 确认路径被正确加载.
         source_path = self.source_dir
         if source_path is not None:
             abs_source_path = str(source_path.absolute())
-            # 加载路径.
             if abs_source_path not in sys.path:
                 sys.path.append(abs_source_path)
+
+        # 按约定加载 logging 配置: workspace/configs/logging.yml
+        logging_config = self._workspace_path / 'configs' / 'logging.yml'
+        if logging_config.exists():
+            config_logger_from_yaml(str(logging_config))
 
     @staticmethod
     def find_workspace_path() -> Path:

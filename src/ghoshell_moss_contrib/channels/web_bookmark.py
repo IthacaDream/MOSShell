@@ -4,7 +4,7 @@ from ghoshell_common.contracts import Workspace, WorkspaceConfigs, YamlConfig
 from ghoshell_container import IoCContainer
 from pydantic import BaseModel, Field
 
-from ghoshell_moss import PyChannel
+from ghoshell_moss.core import PyChannel
 
 """
 预计实现一个网页收藏夹, 让 AI 来收藏网页, 并且可以随时打开.

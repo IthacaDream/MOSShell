@@ -4,13 +4,14 @@ from pathlib import Path
 
 from typing import Iterable, Type
 from typing_extensions import Self
-from ghoshell_moss.core.blueprint.host import FractalHub, FractalCellProvider
+from ghoshell_moss.core.blueprint.fractal import FractalHub, FractalCellProvider
 from ghoshell_moss.core.blueprint.environment import Environment
 from ghoshell_moss.core.blueprint.states_channel import StatefulChannel
 from ghoshell_moss.core.concepts.channel import Channel, ChannelName, ChannelNamePattern, \
     ChannelProvider
 from ghoshell_moss.core.concepts.command import Command
-from ghoshell_moss.core.blueprint.states_channel import new_channel_from_state, ChannelState
+from ghoshell_moss.message import unique_id
+from ghoshell_moss.core.blueprint.states_channel import new_stateful_channel_from_main, ChannelState
 from ghoshell_moss.bridges.zenoh_bridge import ZenohChannelProvider, ZenohProxyChannel
 from ghoshell_moss.contracts.workspace import Workspace
 from ghoshell_moss.contracts import LoggerItf, get_moss_logger
@@ -67,7 +68,7 @@ class ZenohFractalHub(FractalHub):
             hub_name=self._hub_name,
             address_prefix=address_prefix,
         )
-        self._auto_approve_connecting = auto_approve_connecting
+        self.auto_approve_connecting = auto_approve_connecting
 
         # 子节点缓存 — subscriber 回调写入，refresh loop 做 stale 清理
         self._connected_cells: dict[str, FractalCell] = {}
@@ -82,6 +83,9 @@ class ZenohFractalHub(FractalHub):
         self._started = False
         self._closed = False
         self._log_prefix = f"<ZenohSessionFractalHub name={self._hub_name} session_scope={self.session_scope}>"
+
+    def set_auto_accept(self, toggle: bool) -> None:
+        self.auto_approve_connecting = toggle
 
     @property
     def name(self) -> str:
@@ -116,9 +120,6 @@ class ZenohFractalHub(FractalHub):
 
     def is_running(self) -> bool:
         return self._started and not self._closed
-
-    def as_channel(self, name: str = '', description: str = '') -> Channel:
-        return self.as_channel_hub(name, description)
 
     # ------------------------------------------------------------------
     # Cell 访问控制
@@ -223,11 +224,11 @@ class ZenohFractalHub(FractalHub):
                         self._cell_last_seen.pop(name, None)
                         return
                 if name not in self._connected_cells:
-                    cell.accepted = self._auto_approve_connecting
+                    cell.accepted = self.auto_approve_connecting
                     self._connected_cells[name] = cell
                 self._cell_last_seen[name] = now
-        except Exception:
-            pass
+        except Exception as e:
+            self._logger.exception("failed to handle manifest sample %s: %s", sample, e)
 
     async def _refresh_loop(self) -> None:
         """后台循环：定期清理超过 stale_timeout 未心跳的子节点。"""
@@ -283,7 +284,12 @@ class ZenohFractalHub(FractalHub):
             lines.append("No connected nodes")
         return "\n".join(lines)
 
-    def as_channel_hub(self, name: str = '', description: str = '') -> StatefulChannel:
+    def as_channel(
+            self,
+            description: str = '',
+            allow_all: bool = False,
+            auto_start: bool = False,
+    ) -> StatefulChannel:
         """
         返回一个被动 Channel（无 start/stop 命令），用于展示已连接的 fractal 子节点。
 
@@ -292,13 +298,13 @@ class ZenohFractalHub(FractalHub):
         """
         state = FractalHubChannelState(
             hub=self,
-            name=name,
             description=description or (
                 "Fractal Hub 通道，用于发现和管理通过分形协议连接的远程 Matrix 节点。"
                 "你可以通过此通道查看已连接的节点及其提供的子通道。"
             ),
+            allow_all=allow_all,
         )
-        return new_channel_from_state(state)
+        return new_stateful_channel_from_main(state)
 
 
 class FractalHubChannelState(ChannelState):
@@ -315,15 +321,20 @@ class FractalHubChannelState(ChannelState):
             self,
             *,
             hub: ZenohFractalHub,
-            name: str | None = None,
             description: str = "",
+            allow_all: bool = False,
     ):
         self._hub = hub
-        self._name = name or hub.name
+        self._name = hub.name
         self._description = description or "Moss Fractal "
         self._proxy_channels: dict[str, Channel] = {}
         self._proxy_channels_lock = threading.Lock()
         self._own_commands = self._build_commands()
+        self._hub.set_auto_accept(allow_all)
+        self._uid = unique_id()
+
+    def id(self) -> str:
+        return self._uid
 
     def _build_commands(self) -> dict[str, Command]:
         from ghoshell_moss.core.blueprint.channel_builder import new_command
@@ -409,7 +420,9 @@ class FractalHubChannelState(ChannelState):
         for cell in cells:
             cell_name = cell.name
             if not cell.accepted:
-                continue
+                if not self._hub.auto_approve_connecting:
+                    continue
+                cell.accepted = True
             existing = exists.get(cell_name, None)
             if existing is not None:
                 # 创建过的不再重复创建.

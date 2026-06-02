@@ -4,7 +4,7 @@ import pytest
 
 from ghoshell_moss.core.concepts.channel import ChannelCtx
 from ghoshell_moss.core.concepts.command import CommandTask, PyCommand
-from ghoshell_moss.core.concepts.errors import CommandError
+from ghoshell_moss.core.concepts.errors import CommandError, CommandErrorCode
 from ghoshell_moss.core.py_channel import PyChannel, PyChannelBuilder
 from ghoshell_moss.message import Message, Text
 
@@ -369,11 +369,11 @@ async def test_py_channel_child_orders() -> None:
     async with main.bootstrap() as runtime:
         # 深度优先排序.
         all_runtimes = runtime.tree.all()
-        order = [b.channel for b in all_runtimes.values()]
-        assert order == [main, a_chan, c_chan, d_chan, b_chan, e_chan]
+        order = [b.channel.id() for b in all_runtimes.values()]
+        assert order == [main.id(), a_chan.id(), c_chan.id(), d_chan.id(), b_chan.id(), e_chan.id()]
         # 运行第二次.
-        order = [b.channel for b in all_runtimes.values()]
-        assert order == [main, a_chan, c_chan, d_chan, b_chan, e_chan]
+        order = [b.channel.id() for b in all_runtimes.values()]
+        assert order == [main.id(), a_chan.id(), c_chan.id(), d_chan.id(), b_chan.id(), e_chan.id()]
 
 
 @pytest.mark.asyncio
@@ -505,7 +505,8 @@ async def test_py_channel_observe_command():
         bar_task = runtime.create_command_task("bar")
         runtime.push_task(bar_task)
         result = await bar_task
-        assert result is None
+        assert isinstance(result, Observe)
+        assert len(result.messages) == 0
         task_result = bar_task.task_result()
         assert task_result.observe
 
@@ -531,6 +532,7 @@ async def test_py_channel_call_soon_command():
         return
 
     async with main.bootstrap() as runtime:
+        assert runtime.is_running()
         _foo = runtime.create_command_task("foo")
         _bar = runtime.create_command_task("bar")
         runtime.push_task(_foo)
@@ -538,7 +540,7 @@ async def test_py_channel_call_soon_command():
         await asyncio.sleep(0.1)
         runtime.push_task(_bar)
         await _bar
-        assert exec_log == ["cancelled"]
+        assert exec_log == ["cancelled"], _bar.done_at
 
 
 @pytest.mark.asyncio
@@ -740,3 +742,64 @@ async def test_py_channel_virtual_children():
         main.build.add_virtual_channel(sub_main)
         await runtime.refresh_metas()
         assert len(runtime.virtual_sub_channels()) == 1
+
+
+@pytest.mark.asyncio
+async def test_py_channel_run_task_with_timeout():
+    main = PyChannel(name="channel")
+
+    @main.build.command()
+    async def foo() -> int:
+        await asyncio.sleep(1)
+        return 123
+
+    err = None
+    async with main.bootstrap() as runtime:
+        try:
+            await runtime.execute_command("foo", timeout=0.01)
+        except CommandError as e:
+            err = e
+    assert err is not None
+    assert err.code == CommandErrorCode.TIMEOUT.value
+
+
+@pytest.mark.asyncio
+async def test_py_channel_none_block_commands():
+    main = PyChannel(name="channel")
+
+    data = []
+
+    @main.build.command(blocking=False)
+    async def foo() -> int:
+        await asyncio.sleep(0.05)
+        data.append(1)
+        return 1
+
+    task_done = asyncio.Event()
+
+    def on_task_done(t) -> None:
+        task_done.set()
+
+    async with main.bootstrap() as runtime:
+        runtime.on_task_done(on_task_done)
+        for i in range(10):
+            t = runtime.create_command_task('foo')
+            runtime.push_task(t)
+        # 所有的 task 都应该入队执行完了. 这仍是一个性能敏感测试, 不过有 0.5s buffer. 几乎一定能完成.
+        await asyncio.sleep(0.1)
+        assert task_done.is_set()
+        assert runtime.is_idle()
+        assert len(data) == 10
+
+
+@pytest.mark.asyncio
+async def test_py_channel_import_factory_return_none():
+    from ghoshell_container import IoCContainer
+    main = PyChannel(name="channel")
+
+    def foo(ioc: IoCContainer) -> None:
+        return None
+
+    main.build.import_channels(foo)
+    async with main.bootstrap() as runtime:
+        assert runtime.is_idle()

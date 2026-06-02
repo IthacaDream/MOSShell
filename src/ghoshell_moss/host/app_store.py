@@ -64,6 +64,7 @@ class HostAppStore(AppStore):
         self._circus_process: Optional[subprocess.Popen] = None
         # self._client: Optional[AsyncCircusClient] = None
         self._polling_task: Optional[asyncio.Task] = None
+        self._call_lock = asyncio.Lock()
 
         self._endpoint: str = ""
         self._pubsub_endpoint: str = ""
@@ -118,7 +119,7 @@ class HostAppStore(AppStore):
         target_dir = self.app_store_directory.joinpath(group, name)
         if target_dir.exists(): return f"Error: Exists at {target_dir}"
 
-        spec = importlib.util.find_spec("ghoshell_moss.host.app_stub")
+        spec = importlib.util.find_spec("ghoshell_moss.host.stubs.app")
         if not spec or not spec.origin: return "Error: Stub not found"
         stub_dir = Path(spec.origin).parent
 
@@ -129,13 +130,16 @@ class HostAppStore(AppStore):
                     shutil.copy2(item, target_dir / item.name)
 
             app_md_path = target_dir / "APP.md"
-            if description and app_md_path.exists():
-                new_app_info = AppInfo(name=name, group=group, description=description,
-                                       docstring=description, work_directory=str(target_dir.absolute()))
-                app_md_path.write_text(new_app_info.as_markdown(), encoding='utf-8')
+            new_app_info = AppInfo(
+                name=name, group=group,
+                description=description,
+                docstring=description,
+                work_directory=str(target_dir.absolute()),
+            )
+            app_md_path.write_text(new_app_info.as_markdown(), encoding='utf-8')
 
             self.list_apps(refresh=True)
-            return f"Success: App '{fullname}' initialized."
+            return f"App '{fullname}' initialized at {target_dir}"
         except Exception as e:
             if target_dir.exists(): shutil.rmtree(target_dir)
             return f"Error: {e}"
@@ -219,8 +223,8 @@ class HostAppStore(AppStore):
 
         return {
             "name": app.address,
-            "cmd": executable,  # 仅包含可执行程序名
-            "args": [self._get_app_script(app)],  # 参数列表
+            "cmd": executable,
+            "args": args_list,
             "options": options,
         }
 
@@ -232,7 +236,7 @@ class HostAppStore(AppStore):
             # 构造参数
             params = self._app_to_circus_params(
                 app,
-                self._env_obj.dump_moss_env(for_child_process=True, with_os_env=False, cell_address=app.address),
+                self._env_obj.dump_moss_env(for_child_process=True, with_os_env=True, cell_address=app.address),
                 argument,
             )
             app_runtime_logs_dir = Path(app.work_directory).joinpath("runtime").joinpath("logs").resolve()
@@ -255,23 +259,35 @@ class HostAppStore(AppStore):
                 "filename": str(app_stderr_log.resolve().absolute()),
                 **rotation_config,
             }
+            r1 = None
+            started_in_add = False
             if app_fullname not in self._managed_apps_with_fullname:
-                r1 = await self._call_circus({"command": "add", "properties": params})
-                if r1['status'] == "error":
-                    self._logger.error(
-                        "%s failed to start app %s on error: %s",
-                        self._log_prefix, app_fullname, r1,
-                    )
-                    raise CommandErrorCode.VALUE_ERROR.error(f"failed to start {app_fullname}")
+                existing = await self._call_circus({"command": "list"})
+                existing_watchers = existing.get("watchers", [])
+                if app.address not in existing_watchers:
+                    # add 时传 start: true，watcher.start() 直接启动进程，
+                    # 绕过 arbiter.start_watchers() 的全局锁，支持并行 bringup
+                    params['start'] = True
+                    r1 = await self._call_circus({"command": "add", "properties": params})
+                    if r1.get('status') == "error":
+                        self._logger.error(
+                            "%s failed to add watcher %s: %s",
+                            self._log_prefix, app_fullname, r1,
+                        )
+                        raise CommandErrorCode.VALUE_ERROR.error(f"failed to start {app_fullname}")
+                    started_in_add = True
 
             self._managed_apps_with_fullname.add(app_fullname)
-            r2 = await self._call_circus({"command": "start", "name": app.address})
-            if r2['status'] == "error":
-                self._logger.error(
-                    "%s failed to start app %s on error: %s",
-                    self._log_prefix, app_fullname, r2,
-                )
-                raise CommandErrorCode.VALUE_ERROR.error(f"failed to start {app_fullname}")
+            if not started_in_add:
+                r2 = await self._call_circus({"command": "start", "name": app.address})
+                if r2.get('status') == "error":
+                    self._logger.error(
+                        "%s failed to start app %s on error: %s",
+                        self._log_prefix, app_fullname, r2,
+                    )
+                    raise CommandErrorCode.VALUE_ERROR.error(f"failed to start {app_fullname} cause system error")
+            else:
+                r2 = r1
             self._logger.info("%s start app %s: %s, %s", self._log_prefix, app_fullname, r1, r2)
 
             self._set_app_state(app_fullname, AppState.STARTING)
@@ -286,11 +302,11 @@ class HostAppStore(AppStore):
 
     async def stop_app(self, app_fullname: str) -> str:
         app = self.get_app_info(app_fullname)
-        if not app or app.address not in self._managed_apps_with_fullname:
+        if not app or app.fullname not in self._managed_apps_with_fullname:
             return f"App {app_fullname} is not under management."
         try:
             await self._call_circus({"command": "rm", "name": app.address})
-            self._managed_apps_with_fullname.remove(app.address)
+            self._managed_apps_with_fullname.remove(app.fullname)
             self._set_app_state(app_fullname, AppState.STOPPED)
             return f"Stopped and removed {app_fullname}."
         except Exception as e:
@@ -318,8 +334,9 @@ class HostAppStore(AppStore):
         """在后台线程执行同步的 ZMQ 调用，彻底隔离 Tornado/uvloop 冲突"""
         if not self._client:
             return {}
-        # 抛入 asyncio 的默认线程池运行，完美兼容 uvloop
-        return await asyncio.to_thread(self._client.call, command)
+        # ZMQ socket 不是线程安全的，用锁保证同一时间只有一个协程操作 socket
+        async with self._call_lock:
+            return await asyncio.to_thread(self._client.call, command)
 
     async def __aenter__(self) -> Self:
         if not self._runnable: raise RuntimeError('AppStore is not runnable')
@@ -410,8 +427,8 @@ class HostAppStore(AppStore):
 
         self._lock.release()
 
-    async def get_apps_context(self) -> str:
-        apps = self.list_apps()
+    async def get_apps_context(self, refresh: bool = False) -> str:
+        apps = self.list_apps(refresh=refresh)
         if not apps: return "No apps discovered."
         lines = ["## Managed Apps Context"]
         for app in apps:

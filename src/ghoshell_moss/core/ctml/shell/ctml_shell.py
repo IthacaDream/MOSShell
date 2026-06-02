@@ -4,10 +4,10 @@ import logging
 from collections.abc import Callable, Iterable
 from typing import Any, Optional, AsyncGenerator
 
-from ghoshell_common.contracts import LoggerItf
-from ghoshell_common.helpers import uuid
+from ghoshell_moss.message import unique_id
 from ghoshell_container import Container, IoCContainer
 
+from ghoshell_moss.contracts.logger import get_moss_logger, LoggerItf
 from ghoshell_moss.message import Message
 from ghoshell_moss.core.concepts.topic import TopicService
 from ghoshell_moss.core.concepts.channel import (
@@ -33,9 +33,11 @@ from ghoshell_moss.core.ctml.interpreter import CTMLInterpreter
 from ghoshell_moss.core.ctml.versions import get_moss_ctml_meta_instruction, CTML_VERSION
 from ghoshell_moss.core.ctml.v1_0.prompts import make_static_messages, make_dynamic_messages
 from ghoshell_moss.core.ctml.shell.ctml_main import create_ctml_main_chan, default_primitive_map
-from ghoshell_moss.core.helpers import ThreadSafeEvent
-from ghoshell_moss.core.speech.mock import MockSpeech
-from ghoshell_moss.contracts.speech import Speech, TTSSpeech, make_content_command_from_speech
+from ghoshell_moss.core.helpers import ThreadSafeEvent, ThreadSafeFuture
+from ghoshell_moss.core.speech.null import NullSpeech
+from ghoshell_moss.core.speech.speech_module import build_content_command
+from ghoshell_moss.contracts.speech import Speech
+from collections import deque
 import time
 
 __all__ = ["CTMLShell", "new_ctml_shell"]
@@ -55,9 +57,11 @@ class CTMLShell(MOSShell[PrimeChannel]):
             primitives: list[str | Command] | None = None,
             meta_instruction: str | None = None,
             refresh_moss_static: bool = False,
+            capture_errors_on_exit: bool = False,
     ):
         self._name = name
         self._desc = description
+        self._capture_errors_on_exit = capture_errors_on_exit
 
         self._container = Container(name=name, parent=parent_container)
         self._container.set(MOSShell, self)
@@ -108,6 +112,9 @@ class CTMLShell(MOSShell[PrimeChannel]):
         self._main_runtime: Optional[ChannelRuntime] = None
         self._log_prefix = "[MOSSShell name=%s] " % self._name
 
+        # --- hook? --- #
+        self._wait_any_task: deque[ThreadSafeFuture[CommandTask]] = deque()
+
     @property
     def container(self) -> IoCContainer:
         return self._container
@@ -144,6 +151,7 @@ class CTMLShell(MOSShell[PrimeChannel]):
         for ctx_manager in self._bootstrap_stacks():
             # 进入每一个开启状态.
             await self._exit_stack.enter_async_context(ctx_manager())
+        self.logger.info("%s shell started", self._log_prefix)
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
@@ -152,7 +160,10 @@ class CTMLShell(MOSShell[PrimeChannel]):
                 pass
             else:
                 self.logger.exception(exc_val)
+        self.logger.info("%s shell is exiting", self._log_prefix)
         await self._exit_stack.__aexit__(exc_type, exc_val, exc_tb)
+        self.logger.info("%s exited", self._log_prefix)
+        return self._capture_errors_on_exit or None
 
     def _bootstrap_stacks(self) -> Iterable[Callable[[], contextlib.AbstractAsyncContextManager[None]]]:
         yield self._ioc_context_manager
@@ -171,29 +182,34 @@ class CTMLShell(MOSShell[PrimeChannel]):
                 self._container.set(LoggerItf, logger)
             self._logger = logger
 
-        yield
-        await asyncio.to_thread(self._container.shutdown)
+        try:
+            yield
+        finally:
+            await asyncio.to_thread(self._container.shutdown)
 
     @contextlib.asynccontextmanager
     async def _speech_context_manager(self):
         """
         启动关闭音频模块.
         """
-        if self._speech is None:
+        if self._speech:
+            self._container.set(Speech, self._speech)
+        else:
             speech = self._container.get(Speech)
             if speech is None:
-                speech = MockSpeech()
+                speech = NullSpeech()
                 self._container.set(Speech, speech)
             self._speech = speech
-        # 注册 tts 的 command.
-        if isinstance(self._speech, TTSSpeech):
-            for command in self._speech.commands():
-                self.main_channel.build.add_command(command, override=False)
-        default_content_command = make_content_command_from_speech(self._speech)
-        self.main_channel.build.add_command(default_content_command, override=False)
+
+        # 注册 __content__ 内核命令（shell 始终拥有说话能力）
+        content_cmd = build_content_command(self._speech)
+        self.main_channel.build.add_command(content_cmd, override=False)
+
         await self._speech.start()
-        yield
-        await self._speech.close()
+        try:
+            yield
+        finally:
+            await self._speech.close()
 
     @contextlib.asynccontextmanager
     async def _runtime_context_manager(self):
@@ -203,9 +219,11 @@ class CTMLShell(MOSShell[PrimeChannel]):
         self._main_runtime = self._main_channel.bootstrap(self._container)
         # 开启 Runtime
         await self._main_runtime.start()
-        yield
-        # 关闭 Runtime. k
-        await self._main_runtime.close()
+        try:
+            yield
+        finally:
+            # 关闭 Runtime. k
+            await self._main_runtime.close()
 
     # --- lifetime functions --- #
 
@@ -225,7 +243,7 @@ class CTMLShell(MOSShell[PrimeChannel]):
     @property
     def logger(self) -> LoggerItf:
         if self._logger is None:
-            logger = self._container.get(LoggerItf) or logging.getLogger("moss")
+            logger = self._container.get(LoggerItf) or get_moss_logger()
             self._logger = logger
         return self._logger
 
@@ -247,7 +265,7 @@ class CTMLShell(MOSShell[PrimeChannel]):
                 continue
             waiting.append(runtime.wait_connected())
         if len(waiting) > 0:
-            await asyncio.gather(*waiting)
+            _ = await asyncio.gather(*waiting)
 
     async def wait_until_idle(self, timeout: float | None = None) -> None:
         if not self.is_running():
@@ -286,6 +304,7 @@ class CTMLShell(MOSShell[PrimeChannel]):
             ignore_wrong_command: bool = False,
             token_replacements: dict[str, str] | None = None,
             clear_after_exit: bool | None = None,
+            task_context: dict[str, Any] | None = None,
     ) -> Interpreter:
         self._check_running()
         self._check_paused()
@@ -323,8 +342,7 @@ class CTMLShell(MOSShell[PrimeChannel]):
             interrupted=interrupted_interpretation,
             undone_tasks=undone_tasks,
             commands=commands,
-            speech=self._speech,
-            stream_id=stream_id or uuid(),
+            stream_id=stream_id or unique_id(),
             callback=callback,
             logger=self.logger,
             channel_metas=config,
@@ -332,6 +350,7 @@ class CTMLShell(MOSShell[PrimeChannel]):
             tokens_replacement=token_replacements,
             clear_after_exit=clear_after_exit,
             moss_static=self._moss_static_cache,
+            task_context=task_context,
         )
 
         # 会接受回调的话, 更新最新的 interpreter.
@@ -401,6 +420,13 @@ class CTMLShell(MOSShell[PrimeChannel]):
     def push_task(self, *tasks: CommandTask) -> None:
         self._check_running()
         self._check_paused()
+        for task in tasks:
+            # wait any task
+            while len(self._wait_any_task) > 0:
+                ft = self._wait_any_task.popleft()
+                if not ft.done():
+                    ft.set_result(task)
+
         self._main_runtime.push_task(*tasks)
 
     async def stop_interpretation(self) -> Optional[Interpretation]:
@@ -417,6 +443,15 @@ class CTMLShell(MOSShell[PrimeChannel]):
         if not self.is_running():
             return
         await self._closed_event.wait()
+
+    async def wait_any_task(self) -> CommandTask:
+        ft = ThreadSafeFuture[CommandTask]()
+        try:
+            self._wait_any_task.append(ft)
+            return await ft
+        finally:
+            if not ft.done():
+                ft.cancel()
 
     def commands(
             self,
@@ -509,6 +544,7 @@ class CTMLShell(MOSShell[PrimeChannel]):
         done = await asyncio.gather(
             self._speech.clear(),
             self._main_runtime.tree.clear(self._main_runtime),
+            self.stop_interpretation(),
             return_exceptions=True,
         )
         for t in done:
@@ -526,8 +562,9 @@ def new_ctml_shell(
         experimental: bool = True,
         meta_instruction: str | None = None,
         primitives: list[str | Command] | None = None,
+        capture_errors_on_exit: bool = False,
 ) -> CTMLShell:
-    """语法糖, 好像不甜"""
+    """系统默认提供的 shell"""
     return CTMLShell(
         name=name,
         description=description,
@@ -537,7 +574,8 @@ def new_ctml_shell(
         logger=logger,
         experimental=experimental,
         primitives=primitives,
-        meta_instruction=meta_instruction
+        meta_instruction=meta_instruction,
+        capture_errors_on_exit=capture_errors_on_exit,
     )
 
 
@@ -546,11 +584,15 @@ async def ctml_shell_test(
         ctml: str,
         builder: Callable[[CTMLShell], None] | None = None,
         main: PrimeChannel | None = None,
+        logger: LoggerItf | None = None,
+        timeout: float | None = None,
 ) -> list[CommandTask]:
     """
-    simple method to test ctmlk
+    simple method to test ctml
     """
     shell = new_ctml_shell(main_channel=main)
+    if logger is not None:
+        shell.container.set(LoggerItf, logger)
     for channel in channels:
         shell.main_channel.import_channels(channel)
     if builder is not None:
@@ -560,6 +602,8 @@ async def ctml_shell_test(
         async with interpreter:
             interpreter.feed(ctml)
             interpreter.commit()
-            tasks = await interpreter.wait_tasks()
-            interpreter.raise_exception()
+            if timeout is not None:
+                tasks = await asyncio.wait_for(interpreter.wait_tasks(throw=True), timeout=timeout)
+            else:
+                tasks = await interpreter.wait_tasks(throw=True)
             return list(tasks.values())

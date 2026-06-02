@@ -1,20 +1,24 @@
-import contextlib
-from typing import Protocol, Callable, Any, ClassVar
+from typing import Protocol, Callable, Any, Literal
 
 from ghoshell_container import IoCContainer
-from typing_extensions import Self
+from typing_extensions import Self, TypedDict
 from abc import ABC, abstractmethod
 
-from ghoshell_moss.core.blueprint.manifests import Manifests
-from ghoshell_moss.core.concepts.channel import Channel, ChannelProvider
-from .app import AppStore
-from ghoshell_moss.core.blueprint.matrix import Matrix, Cell, Mode
-from ghoshell_moss.core.blueprint.session import Session
 from ghoshell_moss.core.concepts.shell import MOSShell
+from ghoshell_moss.core.blueprint.manifests import Manifests
+from ghoshell_moss.core.blueprint.matrix import Matrix, Mode
+from ghoshell_moss.core.blueprint.session import Session
+from ghoshell_moss.core.blueprint.mindflow import Mindflow
 from ghoshell_moss.message import Message
+from ghoshell_moss.contracts import SystemPrompter, LoggerItf
+from .ghost import Ghost, GhostMeta
+from .app import AppStore
+from .environment import Environment
+from .fractal import FractalHub, FractalCellProvider
 
 __all__ = [
-    'MossRuntime', 'MossHost', 'Mode', 'FractalHub', 'FractalCellProvider',
+    'MossRuntime', 'MossHost', 'Mode',
+    'MossSystemPrompter', 'GhostRuntime', 'LoopHealth', 'LoopStatus',
 ]
 
 
@@ -30,6 +34,46 @@ class MossLifecycleContract(Protocol):
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         pass
+
+
+class MossSystemPrompter(SystemPrompter, ABC):
+    """MOSS 约定的 instruction 层次 — 命名访问器.
+
+    四个标准层通过 children() 暴露, 命名方法是对 children key 的便捷包装.
+    不排斥开发者通过 with_prompter 添加任意其他 key.
+    """
+
+    # 约定的 prompt slots.
+    CTML_SLOT = 'ctml'
+    PROJECT_SLOT = 'project'
+    MODE_SLOT = 'mode'
+    MOSS_STATIC_SLOT = 'static'
+
+    def ctml_instruction(self) -> str:
+        """当前系统所使用的默认 ctml 提示词. 是 moss 运行基础. """
+        return self.child_instruction(self.CTML_SLOT)
+
+    def project_instruction(self) -> str:
+        """项目级提示词, 定义在 workspace 的 MOSS.md, 所有模式共享"""
+        return self.child_instruction(self.PROJECT_SLOT)
+
+    def mode_instruction(self) -> str:
+        """模式级别的提示词. 定义在 workspace 的不同模式中 (MODE.md), 每个模式独有."""
+        return self.child_instruction(self.MODE_SLOT)
+
+    def moss_static_instruction(self) -> str:
+        """moss 运行时的静态提示词. 来自 shell 构建后的 moss static"""
+        return self.child_instruction(self.MOSS_STATIC_SLOT)
+
+    def default_instruction(self) -> str:
+        """建议使用的默认提示词组合方式.供参考."""
+        # code as prompt 提示如何使用.
+        return self.linear([
+            self.CTML_SLOT,
+            self.PROJECT_SLOT,
+            self.MODE_SLOT,
+            self.MOSS_STATIC_SLOT,
+        ])
 
 
 class MossRuntime(ABC):
@@ -135,9 +179,14 @@ class MossRuntime(ABC):
     def apps(self) -> AppStore:
         """
         管理 moss 架构下的 app 体系.
-        可以启动/关闭 app.
+        可以启动/关闭 app. 具体的 apps / bringup 体系与 Mode 的配置有关.
         """
         pass
+
+    @property
+    def system_prompter(self) -> MossSystemPrompter:
+        """获取运行时提供的各种提示词声明. 可用于组装. """
+        return self.matrix.container.force_fetch(MossSystemPrompter)
 
     @property
     @abstractmethod
@@ -169,16 +218,32 @@ class MossRuntime(ABC):
         """
         pass
 
+    @property
+    def logger(self) -> LoggerItf:
+        return self.matrix.logger
+
     def wait_close_sync(self, timeout: float | None = None) -> bool:
-        """阻塞等待关闭讯号. """
+        """阻塞等待关闭触发信号 (closing). """
         pass
 
     async def wait_close(self) -> None:
-        """异步阻塞等带关闭讯号."""
+        """异步阻塞等待关闭触发信号 (closing)."""
+        pass
+
+    @abstractmethod
+    def is_running(self) -> bool:
         pass
 
     def close(self) -> None:
-        """发送关闭信号."""
+        """发送关闭触发信号 (closing)."""
+        pass
+
+    def wait_closed_sync(self, timeout: float | None = None) -> bool:
+        """阻塞等待关闭完成 (closed). """
+        pass
+
+    async def wait_closed(self) -> None:
+        """异步阻塞等待关闭完成 (closed)."""
         pass
 
     @abstractmethod
@@ -192,181 +257,97 @@ class MossRuntime(ABC):
         pass
 
 
-class FractalHub(ABC):
+LoopStatus = Literal["running", "stopped", "not_started"]
+"""Status values for individual loop health checks."""
+
+
+class LoopHealth(TypedDict):
+    """Three-loop health snapshot. All keys guaranteed present."""
+
+    main: LoopStatus
+    articulate: LoopStatus
+    action: LoopStatus
+
+
+class GhostRuntime(ABC):
+    """编排 MossRuntime + Ghost 的生命周期.
+
+    GhostRuntime 持有 MossRuntime, 在其启动前后完成 Ghost 的注册和生命周期管理.
+    不实现 MossRuntime ABC — 组合优于伪装.
+    ghost + mindflow 的 main loop 作为内部 async 函数, 通过 matrix.create_task 托管,
+    Matrix 退出时自动 cancel.
+
+        ghost_runtime.moss          → MossRuntime (全部 moss 能力)
+        ghost_runtime.ghost         → Ghost (运行时实例)
+        ghost_runtime.meta          → GhostMeta (启动前即可访问)
+        ghost_runtime.mindflow      → Mindflow (运行时三循环中枢)
+        ghost_runtime.container     → IoCContainer (快捷路径)
     """
-    Moss 分享架构的核心.
 
-    它可以接受其它 Moss Runtime 的接入,
-    通过 Channel 形式提供给当前的 moss 运行时, 做分形能力的注册.
-    未来希望能扩展到资源体系, Ghost / Agent 通讯等.
-
-    当 MOSS 的环境中注册了 FractalHub 的实现时 (Matrix.container.bound(FractalHub) is True), 会自动集成.
-    如果没有注册这个实现, 则不会启动 FractalHub.
-
-    FractalHub 解决什么问题呢?
-    MossHost 实现基于环境发现构建 HostRuntime 的能力
-    """
-    DEFAULT_HUB_NAME: ClassVar['str'] = 'fractal_hub'
-
+    @property
     @abstractmethod
-    def self_explain(self) -> str:
-        """
-        通讯协议和其它讯息的自解释.
-
-        预计通过 repl 等手段做显式交互, 或提供给 moss 的 meta ghost 去解释.
-        """
-        # 为何用自然语言解释, 而不是用强类型呢?
-        # 因为未来的开发希望直接面向模型。
-        # 仍然可以拥有强类型描述：
-        #    1. 想要拥有强类型, 可以通过具体实现扩展函数.
-        #    2. matrix.contracts 可以发现绑定
+    def moss(self) -> MossRuntime:
+        """持有的 MossRuntime. 调用方通过 .moss 访问全部 Moss 能力."""
         pass
 
+    @property
     @abstractmethod
-    def get_connected(self) -> list[Cell]:
-        """
-        返回已经联通到当前 Hub 的节点.
-        """
+    def ghost(self) -> Ghost:
+        """由 GhostMeta.factory(container) 产出的 Ghost 运行时实例."""
         pass
 
+    @property
     @abstractmethod
-    def is_running(self) -> bool:
-        """是否已经运行中."""
+    def meta(self) -> GhostMeta:
+        """Ghost 的元信息. MossHost.run_ghost 时即已发现, 启动前即可访问."""
         pass
 
+    @property
     @abstractmethod
-    def status(self) -> str:
-        """
-        默认的运行时描述逻辑.
-        """
+    def mindflow(self) -> Mindflow:
+        """GhostRuntime 持有的 Mindflow. 启动后可用，未启动时抛出 RuntimeError."""
         pass
 
-    @abstractmethod
-    def as_channel(
-            self,
-            name: str = '',
-            description: str = '',
-    ) -> Channel:
-        """
-        将 Hub 定义为一个 Channel.
-        可以注册到 MossRuntime.shell
-        """
-        pass
-
-    def accept(self, cell_name: str):
-        """
-        允许 cell 进入 hub. cell 状态 alive 为 true.
-        raise KeyError: 如果 cell 不存在.
-        """
-        pass
-
-    def ignore(self, cell_name: str):
-        """
-        忽略某个连接的 cell. cell 状态 alive 为 false
-        raise KeyError: 如果 cell 不存在.
-        """
-        pass
+    @property
+    def container(self) -> IoCContainer:
+        """快捷路径: moss.matrix.container"""
+        return self.moss.matrix.container
 
     @abstractmethod
     async def __aenter__(self) -> Self:
-        """需要提供生命周期治理"""
+        """编排生命周期:
+
+        1. 预注入 ghost providers / nuclei manifests → container
+        2. MossRuntime.__aenter__ (matrix → shell → mindflow)
+        3. GhostMeta.factory(container) → ghost
+        4. ghost.__aenter__ (注册 main loop 为 matrix.create_task)
+        """
         pass
 
     @abstractmethod
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """需要提供生命周期治理"""
+        """逆序清理: ghost.__aexit__ → moss.__aexit__"""
         pass
 
-
-class FractalCellProvider(ABC):
-    """
-    可以将当前 MossRuntime 提供给其它 MossRuntime 的 provider.
-
-    是一种特殊的协议.
-    """
-
-    # 为何叫 Provider 而不是 Client 或 Server?
-    # 因为双工通讯的协议可能同时有 正向/反向/桥接 等各种. 单一方向不能涵盖语义.
-
-    @abstractmethod
-    def channel_provider(
-            self,
-            as_cell_name: str = '',
-    ) -> ChannelProvider | None:
-        """
-        最基础的 channel provider 实现.
-        """
+    def pause(self, toggle: bool = True) -> None:
+        """急停: 级联暂停 mindflow，attention abort 自然中断 articulate/action 循环."""
         pass
 
-    @abstractmethod
-    def self_explain(self) -> str:
+    def close(self) -> None:
+        """发送关闭信号. 委托给 MossRuntime."""
+        self.moss.close()
+
+    def inspect_loop_health(self) -> LoopHealth:
+        """Return three-loop running status for debugging.
+
+        Called by REPL / debug scripts. No side effects.
+        All three keys always present.
         """
-        解释自身的通讯协议. 通常包含:
-        1. 什么协议.
-        2. 当前连接了什么路径.
-        3. 从什么配置文件获得的讯息.
-        4. 默认将自己用什么名字提供.
-        """
-        pass
-
-    def __repr__(self):
-        return f"<FractalCellProvider>\n{self.self_explain()}\n</FractalCellProvider>"
-
-    @abstractmethod
-    async def __aenter__(self) -> Self:
-        pass
-
-    @abstractmethod
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        pass
-
-    @abstractmethod
-    def is_running(self) -> bool:
-        pass
-
-    async def provide(
-            self,
-            moss: MossRuntime,
-            *,
-            as_cell_name: str | None = None,
-            on_channel_event: Callable[[Any], None] | None = None,
-    ) -> None:
-        """
-        将当前的 moss provide 给另一个扮演 hub 角色的 moss.
-
-        :param moss: 持有 moss runtime.
-        :param as_cell_name: 可以改写自己提供给父节点时, 自身的名称. 否则使用默认名称.
-        :param on_channel_event: 可以注册 channel 双工协议的事件回调. 类型与协议有关.
-        """
-        # 基于 code as prompt 原则将抽象使用的最小实现直接在代码里提示.
-        # provide 的设计目标包含: resources / ghosts / agents / channels 等等.
-        # 不过现阶段, 仅仅有条件实现 channels.
-        # 为何叫做 Provider?
-        # 1. 通信协议无关, 所以可能有 client -> server, server -> client, cell -> broker <- hub 等多种机制.
-        # 2. 不一定有连接顺序. 比如 hub  和  cell 可能互相先后启动, 通过服务发现机制探测到.
-        stack = contextlib.AsyncExitStack()
-        async with stack:
-            # 防蠢.
-            if not self.is_running():
-                await stack.enter_async_context(self)
-            channel_provider = self.channel_provider(
-                # 默认的名称.
-                as_cell_name or f'{moss.name}_{moss.mode.name}',
-            )
-            if channel_provider:
-                if on_channel_event:
-                    channel_provider.on_proxy_event(on_channel_event)
-
-                # 定义闭包启动.
-                async def provide_moss_channels():
-                    nonlocal moss, channel_provider
-                    await channel_provider.arun_until_closed(
-                        # main channel 的 description 由 mode 决定.
-                        moss.shell.runtime if moss.shell.is_running() else moss.shell.main_channel
-                    )
-
-                # 通过 matrix 来托管 provider 的生命周期, 避免没有优雅退出.
-                await moss.matrix.create_task(provide_moss_channels())
+        return {
+            "main": "not_started",
+            "articulate": "not_started",
+            "action": "not_started",
+        }
 
 
 class MossHost(ABC):
@@ -403,12 +384,13 @@ class MossHost(ABC):
         pass
 
     @classmethod
-    def discover(cls) -> Self:
+    def discover(cls, env: Environment | None = None) -> Self:
         """
         环境发现的标准实现.
         """
         from ghoshell_moss.host import Host
-        return Host.discover()
+        # 使用反范式定义项目的默认约定.
+        return Host.discover(env)
 
     @property
     @abstractmethod
@@ -459,7 +441,6 @@ class MossHost(ABC):
             self,
             *,
             run_shell: bool = True,
-            with_primitives: bool = True,
             name: str | None = None,
             description: str | None = None,
     ) -> MossRuntime:
@@ -467,7 +448,6 @@ class MossHost(ABC):
         bootstrap moss runtime.
         flags:
         :param run_shell: if true, start shell when runtime aenter.
-        :param with_primitives: if true, register manifests primitives into the shell
         :param name: set the moss name else use meta config
         :param description: set the moss description else use meta config
         """
@@ -492,8 +472,6 @@ class MossHost(ABC):
             # shell 本身就是主节点 channel runtime 的自解释封装.
             # 所以仍然可以运行 shell, 它不提供 logos 控制根 channel 即可.
             run_shell=True,
-            # 原语只有主轨执行有意义, 所以这个 flag 设置为 false.
-            with_primitives=False,
             description=description,
         )
         # 这里的实现作为 code as prompt 的一部分, 解释自身的使用逻辑.

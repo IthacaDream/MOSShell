@@ -365,6 +365,23 @@ class TestBridgeSuite:
         t.join()
 
     @pytest.mark.asyncio
+    async def test_provider_pass_observe_instance(self, suite: BridgeTestSuite) -> None:
+        from ghoshell_moss.core.blueprint.channel_builder import Observe
+        chan = PyChannel(name="provider")
+
+        @chan.build.command()
+        async def foo() -> Observe:
+            return Observe.new("helo world")
+
+        provider, proxy = suite.create("proxy")
+        async with provider.arun(chan):
+            async with proxy.bootstrap() as runtime:
+                await runtime.wait_connected()
+                assert runtime.is_running()
+                r = await runtime.execute_command('foo')
+                assert isinstance(r, Observe)
+
+    @pytest.mark.asyncio
     async def test_channel_with_delta_func(self, suite: BridgeTestSuite) -> None:
         chan = PyChannel(name="provider")
 
@@ -404,3 +421,119 @@ class TestBridgeSuite:
                 assert value == "hello"
                 value = await runtime.execute_command("tokens", kwargs=dict(tokens__=generate_tokens()))
                 assert value == 10
+
+    @pytest.mark.asyncio
+    async def test_remote_scope_with_content_delta(self, suite: BridgeTestSuite) -> None:
+        """远程 scope + content delta — scope_enter/content/scope_exit 顺序到达，__content__ 收到全部 chunks"""
+        from ghoshell_moss.core.ctml.shell import new_ctml_shell
+        from ghoshell_moss.core.concepts.command import PyCommand
+        from ghoshell_moss.core.concepts.channel import ChannelRuntime
+
+        chan = PyChannel(name="provider")
+        got: list[str] = []
+
+        async def __content__(chunks__) -> str:
+            nonlocal got
+            async for c in chunks__:
+                got.append(c)
+            return ''.join(got)
+
+        partial_got: str = ''
+
+        async def __partial__(chunks__) -> tuple[list, dict]:
+            nonlocal partial_got
+
+            async def _generator():
+                nonlocal partial_got
+                async for c in chunks__:
+                    partial_got += c
+                    yield c
+
+            return [], {"chunks__": _generator()}
+
+        command = PyCommand(
+            func=__content__,
+            partial=__partial__,
+            interface=ChannelRuntime.__content__,
+        )
+
+        chan.build.add_command(command)
+
+        provider, proxy = suite.create("proxy")
+        shell = new_ctml_shell()
+        shell.main_channel.import_channels(proxy)
+
+        async with provider.arun(chan):
+            async with shell:
+                await shell.wait_connected("proxy")
+                await shell.refresh_metas()
+                async with shell.interpreter_in_ctx() as i:
+                    i.feed("<_ channel='proxy'>hello world</_>")
+                    i.commit()
+                    tasks = await i.wait_tasks(timeout=10)
+                    i.raise_exception()
+
+        assert got == ['hello world'], f"got={got}"
+        assert partial_got == 'hello world'
+
+    @pytest.mark.asyncio
+    async def test_proxy_task_cancel_propagates_to_provider(self, suite: BridgeTestSuite) -> None:
+        """验证 proxy 侧 task 被取消时，provider 侧的命令也会被取消"""
+        provider_cancelled = False
+        provider_started = asyncio.Event()
+        provider_done = asyncio.Event()
+
+        chan = PyChannel(name="provider")
+
+        @chan.build.command()
+        async def long_running() -> None:
+            nonlocal provider_cancelled
+            provider_started.set()
+            try:
+                await asyncio.sleep(1.0)  # 长时任务
+            except asyncio.CancelledError:
+                provider_cancelled = True
+                provider_done.set()
+                raise
+
+        provider, proxy = suite.create("proxy")
+        async with provider.arun(chan):
+            async with proxy.bootstrap() as runtime:
+                await runtime.wait_connected()
+                assert runtime.is_running()
+
+                # 通过 proxy 发起命令调用
+                proxy_task = runtime.create_command_task("long_running")
+                # 入栈做远程通讯.
+                runtime.push_task(proxy_task)
+                # 等待 provider 侧确认开始执行
+                await asyncio.wait_for(provider_started.wait(), timeout=2.0)
+
+                # provider 开始执行后立刻取消.
+                proxy_task.cancel()
+
+                # 等待 proxy task 结束
+                assert proxy_task.cancelled()
+
+                # 给 provider 侧一点时间处理取消事件
+                await asyncio.wait_for(provider_done.wait(), timeout=2.0)
+                assert provider_cancelled is True, (
+                    "provider 侧命令未被取消 — 取消传播失败"
+                )
+
+    @pytest.mark.asyncio
+    async def test_proxy_start_before_provider(self, suite: BridgeTestSuite) -> None:
+        provider, proxy = suite.create("proxy")
+
+        chan = PyChannel(name="provider")
+
+        @chan.build.command()
+        async def foo() -> str:
+            return 'hello world'
+
+        async with proxy.bootstrap() as runtime:
+            async with provider.arun(chan):
+                await runtime.wait_connected()
+                await runtime.refresh_metas()
+                assert len(runtime.metas()) == 1
+                assert await runtime.execute_command('foo') == 'hello world'

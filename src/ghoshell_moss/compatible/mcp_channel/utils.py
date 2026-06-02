@@ -1,6 +1,6 @@
 from mcp import types
 
-from ghoshell_moss import CommandError, CommandErrorCode
+from ghoshell_moss.core.concepts.errors import CommandError, CommandErrorCode
 from ghoshell_moss.compatible.mcp_channel.types import MCPCallToolResultAddition
 from ghoshell_moss.message import Base64Image, Message, Text
 

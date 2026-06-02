@@ -1,4 +1,5 @@
-from typing import Callable, Iterable, Self
+from typing import Callable, Iterable
+from typing_extensions import Self
 from prompt_toolkit.completion import WordCompleter, Completer
 from prompt_toolkit.widgets import TextArea, Frame
 from prompt_toolkit.key_binding import KeyPressEvent
@@ -65,8 +66,7 @@ class FakeRuntime(Runtime):
 
 class EchoCase(MossHostTUI):
 
-    @classmethod
-    def _get_runtime(cls, host: MossHost) -> RUNTIME:
+    def _get_runtime(self) -> RUNTIME:
         return FakeRuntime()
 
     def create_states(self) -> Iterable[TUIState]:

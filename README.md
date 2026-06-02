@@ -1,38 +1,43 @@
-# 项目概述
+# MOSS — Model-oriented Operating System Shell
 
-项目名为 `MOS-Shell` (Model-oriented Operating System Shell), 包含几个核心目标:
-目标是 AI 大模型作为大脑, 不仅可以思考, 还可以 实时/并行/有序 地操作包括 计算机/具身躯体 来进行交互.
+MOSS 是 Ghost in Shells 架构的 Shell（躯体）层。
 
-MOS-Shell 是 Ghost In Shells (中文名: 灵枢) 项目创建的新交互范式架构, 是第二代 MOSS 架构 (完善了 ChannelApp 和
-Realtime-Actions 思想). 第一代 MOSS 架构 (全代码驱动 + FunctionToken) 详见 [GhostOS](https://github.com/ghostInShells/ghostos)
+它聚焦一个领域：**大模型智力的实时双工运行时**。让 AI 能够持续存在、多模态感知、流式思考、并行行动——不是回合制对话，而是一个活在现实世界里的具身智能体。
 
-**更多设计思路请访问飞书文档**: [核心设计思想综述](https://ycnrlabqki3v.feishu.cn/wiki/QCKUwAX7tiUs4GkJTkLcMeWqneh)
+它试图解决一个命题：面向模型的操作系统应该是什么样的？当模型需要同时说话、看画面、控制机器人躯体、响应弹幕，这些能力分布在独立进程中，但模型视角下应该是一棵统一的接口树。CTML（流式控制语言）让模型边生成 token 边执行命令——时间是语法第一公民。Channel 体系让任何 Python 代码反射为模型可操作的能力——代码即 prompt。
 
-## Beta 版本
+MOSS 已在其它项目中实装了机械臂、机器狗、桌面机器人等多种具身形态。推荐用 [Reachy Mini](https://huggingface.co/docs/reachy_mini/index) 作为验证 MOSS 的机器人实体。
 
-当前还在 beta 版本的开发中, 没有时间精力完善文档与工具. 简单介绍下 main 分支的使用: 
+## 模型原生开发
+
+MOSS 是一个**面向模型开发**的项目。所有工具、文档、命令为 AI 读者设计——CLI 输出纯文本节省 token，codex 命令运行时反射代码接口，manifests 体系自描述环境能力。
 
 ```bash
-# 1. 下载仓库 - 略
-# 2. 使用 uv 创建环境并且安装全部依赖 (暂时没拆分好依赖)
-uv venv 
-source .venv/bin/activate
-uv sync --ative --all-extras
-
-# 初始化运行环境. 
-moss ws init
-
-# 查看更多命令
-moss
-
-# 交互命令行
-moss-cli
-
-# debug 用的 repl
-moss-repl
-
-# 以 MCP 的方式运行, 可以提供给 claude code 使用. 
-moss-as-mcp
+git clone https://github.com/GhostInShells/MOSShell && cd MOSShell
+uv sync --active --all-extras
+cp .moss_ws/.env.example .moss_ws/.env    # 模型配置必须，语音可选
 ```
 
-更多的介绍等 beta 版本基本收敛后完善. 预计通过 claude code 提供项目解释. 
+安装后，用 Claude Code、Gemini CLI 或任意 AI 工具打开项目。从 `moss start` 开始，模型会加载认知地图，自主发现全部命令和文档，能对人类解释 MOSS 是什么、参与到开发中来。建议用 token 成本较低的模型做调研探索。
+
+如需了解模型看到了什么：[src/ghoshell_moss/cli/start.md](src/ghoshell_moss/cli/start.md) 是认知入口，[src/ghoshell_moss/cli/CLAUDE.md](src/ghoshell_moss/cli/CLAUDE.md) 是 CLI 工具使用指南。
+
+如需先自行浏览，架构参考文档在这里：[src/ghoshell_moss/cli/docs/](src/ghoshell_moss/cli/docs/)。项目为模型作为第一开发者, 提供了自解释体系。
+
+## 核心概念
+
+| 概念 | 是什么 |
+|------|--------|
+| **CTML** | 流式控制语言 — 模型边生成 token 边执行命令，时间是语法第一公民 |
+| **Channel** | 能力组织单元 — Python 函数签名即 prompt，树形拓扑，跨进程透明 |
+| **Matrix** | 面向 AI 的进程组网 — 独立进程以统一接口树呈现 |
+| **Mindflow** | 感知/思考/行动仲裁 — 多模态流式输入到有序关键帧 |
+| **Ghost** | 持久化智能体 — 连续记忆，主动交互，反身性控制 |
+
+## 项目状态
+
+Beta。核心架构已可用。后续迭代方向：开箱即用的能力与躯体集成、模型 agent 的原生接入、安全体系。
+
+---
+
+*May AI Ghost wandering in the Shells.*

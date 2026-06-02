@@ -32,7 +32,7 @@ class MOSSRuntimeREPLState(REPLState):
             "manifests": ManifestsInspector(self._host.manifests),
             "moss": MOSSRuntimeInspector(self._moss_runtime, self.console),
             "apps": AppStoreInspector(self._moss_runtime.apps),
-            "fractal_hub": FractalInspector(self._moss_runtime.get_fractal_hub())
+            "fractal": FractalInspector(self._moss_runtime.matrix, self._moss_runtime.get_fractal_hub())
         }
 
     def output_on_switch(self, enter_else_leave: bool) -> None:
@@ -55,9 +55,8 @@ class MOSSRuntimeREPLState(REPLState):
 
 class MossRuntimeTUI(MossHostTUI[MossRuntime]):
 
-    @classmethod
-    def _get_runtime(cls, host: MossHost) -> MossRuntime:
-        return host.run()
+    def _get_runtime(self) -> MossRuntime:
+        return self.host.run()
 
     def create_states(self) -> Iterable[TUIState]:
         yield MOSSRuntimeREPLState(self.host, self.runtime)

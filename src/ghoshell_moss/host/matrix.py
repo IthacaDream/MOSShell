@@ -1,5 +1,5 @@
 import asyncio
-from typing import Coroutine, Iterable, Type
+from typing import Coroutine, Iterable, Type, Literal
 
 from typing_extensions import Self
 
@@ -7,25 +7,27 @@ from ghoshell_common.contracts import LoggerItf
 from ghoshell_container import IoCContainer, Container, Provider
 
 from ghoshell_moss.contracts import (
-    Workspace, ConfigStore, WorkspaceYamlConfigStoreProvider, BaseSystemPrompter,
-    SystemPrompter, ResourceStorageFactoryBootstrapper,
+    Workspace, ConfigStore, WorkspaceYamlConfigStoreProvider,
+    SystemPrompter, BaseSystemPrompter,
+    ResourceStorageFactoryBootstrapper,
 )
 from ghoshell_moss.core.blueprint.session import Session
 from ghoshell_moss.core.blueprint.manifests import Manifests
 from ghoshell_moss.core.blueprint.matrix import Matrix, Cell, MatrixLifecycleObject
 from ghoshell_moss.core.blueprint.app import AppStore, AppInfo
-from ghoshell_moss.core.blueprint.host import Mode, FractalHub
+from ghoshell_moss.core.blueprint.host import Mode
 from ghoshell_moss.core.blueprint.environment import Environment, DEFAULT_CELL_ADDRESS
+from ghoshell_moss.core.blueprint.host import MossSystemPrompter
 from ghoshell_moss.core.concepts.channel import Channel
 from ghoshell_moss.core.concepts.topic import TopicService
 from ghoshell_moss.core.concepts.errors import FatalError
 from ghoshell_moss.host.providers import (
-    WorkspaceZenohProvider, WorkspaceLoggerProvider, ZenohTopicServiceProvider,
-    WorkspaceSessionProvider,
+    WorkspaceZenohProvider, HostLoggerProvider, ZenohTopicServiceProvider,
+    HostSessionProvider,
 )
 from ghoshell_moss.bridges.zenoh_bridge import ZenohChannelProvider, ZenohProxyChannel
 from ghoshell_moss.core.helpers import ThreadSafeEvent
-from ghoshell_common.helpers import uuid
+from ghoshell_moss.message import unique_id
 from ghoshell_moss.depends import depend_zenoh
 
 depend_zenoh()
@@ -35,7 +37,7 @@ import logging
 import threading
 import psutil
 
-__all__ = ['AppCell', 'HostMainCell', 'MatrixImpl']
+__all__ = ['AppCell', 'HostCell', 'MatrixImpl']
 
 
 class AppCell(Cell):
@@ -45,6 +47,7 @@ class AppCell(Cell):
         self.description = app.description
         self.type = "app"
         self.where = app.work_directory
+        self.workspace = self.where
         self._alive_event = event
         self._address = app.address
 
@@ -56,13 +59,14 @@ class AppCell(Cell):
         return self._alive_event.is_set()
 
 
-class HostMainCell(Cell):
+class HostCell(Cell):
 
-    def __init__(self, mode: Mode, event: threading.Event):
-        self.name = DEFAULT_CELL_ADDRESS
+    def __init__(self, mode: Mode, event: threading.Event, workspace: str):
+        self.name = mode.name
         self.type = 'host'
         self.description = mode.description
         self.where = mode.file
+        self.workspace = workspace
         self._alive_event = event
 
     def is_alive(self) -> bool:
@@ -79,7 +83,7 @@ class UnknownCell(Cell):
         self.type = 'unknown'
         self.description = ''
         self.where = ''
-        self._address = 'unknown/' + uuid()
+        self._address = 'unknown/' + unique_id()
 
     @property
     def address(self) -> str:
@@ -123,7 +127,7 @@ class MatrixImpl(Matrix):
 
         # prepare main cell
         event = threading.Event()
-        main_cell = HostMainCell(self._current_mode, event)
+        main_cell = HostCell(self._current_mode, event, str(self.workspace.root().abspath()))
         cell_alive_events[main_cell.address] = event
         cells[main_cell.address] = main_cell
         self._main_cell = main_cell
@@ -140,7 +144,7 @@ class MatrixImpl(Matrix):
 
         self._cells = cells
         self._cell_alive_events = cell_alive_events
-        self._is_main = isinstance(self._this_cell, HostMainCell)
+        self._is_main = isinstance(self._this_cell, HostCell)
         self._logger: LoggerItf | logging.Logger | None = logger
         self._started = False
         self._channel_provider_task: asyncio.Task | None = None
@@ -161,11 +165,31 @@ class MatrixImpl(Matrix):
         self._lifecycle_bound_objects_or_types: list[MatrixLifecycleObject | Type[MatrixLifecycleObject]] = []
 
     def _prepare_system_prompter(self) -> SystemPrompter:
-        prompter = BaseSystemPrompter()
-        # ctml 优先.
-        prompter.with_prompter("ctml", self.ctml_instruction())
-        prompter.with_prompter("moss_meta_config_content", self.env.meta_config.system_prompt)
-        prompter.with_prompter("moss_mode_instruction", self._current_mode.instruction)
+        from ghoshell_moss.host.system_prompter import MossSystemPrompterImpl
+        prompter = MossSystemPrompterImpl(
+            description="MOSS system instruction — assembled from ctml, project, mode, static layers.",
+        )
+        prompter.with_prompter(
+            MossSystemPrompter.CTML_SLOT,
+            BaseSystemPrompter(
+                own_instruction=self.ctml_instruction(),
+                description="CTML grammar prompt for the current version.",
+            ),
+        )
+        prompter.with_prompter(
+            MossSystemPrompter.PROJECT_SLOT,
+            BaseSystemPrompter(
+                own_instruction=self.env.meta_config.system_prompt,
+                description="Workspace root MOSS.md project instruction.",
+            ),
+        )
+        prompter.with_prompter(
+            MossSystemPrompter.MODE_SLOT,
+            BaseSystemPrompter(
+                own_instruction=self._current_mode.instruction,
+                description=f"Mode '{self._current_mode.name}' instruction.",
+            ),
+        )
         return prompter
 
     def ctml_version(self) -> str:
@@ -195,8 +219,9 @@ class MatrixImpl(Matrix):
         container.set(Mode, self._current_mode)
         container.set(Workspace, self._workspace)
         container.set(Manifests, self._manifests)
-        # system prompter
+        # system prompter — 同时注册两个 key, 指向同一实例
         container.set(SystemPrompter, self._system_prompter)
+        container.set(MossSystemPrompter, self._system_prompter)
 
         # 注册 manifest providers. 包含环境与模式的双重配置.
         for contract in self._manifests.providers():
@@ -217,9 +242,6 @@ class MatrixImpl(Matrix):
             bootstrapper = ResourceStorageFactoryBootstrapper(storage_factory)
             container.add_bootstrapper(bootstrapper)
 
-        if self._logger is not None:
-            # 替换掉注册的.
-            container.set(LoggerItf, self._logger)
         return container
 
     def _default_providers(self) -> list[Provider]:
@@ -228,19 +250,18 @@ class MatrixImpl(Matrix):
         default_providers = []
         if self._is_main:
             default_providers.append(WorkspaceZenohProvider("zenoh_config_main.json5"))
-        elif self._this_cell.type == 'app':
-            default_providers.append(WorkspaceZenohProvider("zenoh_config_app.json5"))
         else:
-            raise RuntimeError(f"Unknown cell type: {self._this_cell.type}")
+            # All non-host cells (app, script, future) share the connector config.
+            default_providers.append(WorkspaceZenohProvider("zenoh_config_cell.json5"))
 
         # 注册 configs
         default_providers.append(WorkspaceYamlConfigStoreProvider(
             *[info.config for info in self.manifests.configs().values()]
         ))
         # 注册 session.
-        default_providers.append(WorkspaceSessionProvider(session_scope=self.env.session_scope))
+        default_providers.append(HostSessionProvider())
         # 否则注册约定的日志模块, 但仍然可能被 contracts 覆盖.
-        default_providers.append(WorkspaceLoggerProvider(self._this_cell.log_name))
+        default_providers.append(HostLoggerProvider())
 
         # 注册 Topic Service.
         default_providers.append(ZenohTopicServiceProvider(
@@ -275,8 +296,8 @@ class MatrixImpl(Matrix):
         return self._current_mode
 
     @property
-    def moss_mode_name(self) -> str:
-        return self._current_mode.name
+    def ghost_name(self) -> str | Literal['None']:
+        return self.env.ghost_name or 'None'
 
     def list_cells(self) -> dict[str, Cell]:
         return self._cells
@@ -297,8 +318,7 @@ class MatrixImpl(Matrix):
             self,
             channel: Channel,
             *,
-            cell_type: str | None = None,
-            cell_name: str | None = None,
+            address: str | None = None,
     ) -> asyncio.Future[None]:
         self._check_running()
         # cancel providing channel
@@ -308,9 +328,7 @@ class MatrixImpl(Matrix):
             cancelling = self._channel_provider_task
             self._channel_provider_task = None
 
-        cell_name = cell_name or self._this_cell.name
-        cell_type = cell_type or self._this_cell.type
-        provider_address = Cell.make_address(cell_type, cell_name)
+        provider_address = address or self._this_cell.address
 
         async def _providing():
             nonlocal cancelling, channel
@@ -338,10 +356,10 @@ class MatrixImpl(Matrix):
             name: str,
             description: str = '',
             id: str | None = None,
-            only_allowed_in_main_cell: bool = True,
+            only_allowed_in_host_cell: bool = True,
     ) -> ZenohProxyChannel:
         self._check_running()
-        if only_allowed_in_main_cell and self.this.type != 'main':
+        if only_allowed_in_host_cell and not self._is_main:
             raise RuntimeError(f"Only allowed in main cell type: {self.this.type}")
         return ZenohProxyChannel(
             address=address,
@@ -354,11 +372,9 @@ class MatrixImpl(Matrix):
 
     @property
     def logger(self) -> LoggerItf:
-        if self._logger is None:
-            self._logger = self._container.get(LoggerItf)
-            if self._logger is None:
-                self._logger = logging.getLogger(self._this_cell.log_name)
-        return self._logger
+        if self._logger is not None:
+            return self._logger
+        return self.env.logger
 
     @property
     def configs(self) -> ConfigStore:
@@ -390,9 +406,29 @@ class MatrixImpl(Matrix):
     def wait_closed_sync(self, timeout: float | None = None) -> bool:
         return self._closed_event.wait_sync(timeout)
 
-    def create_task(self, cor: Coroutine) -> asyncio.Task:
+    def create_task(
+            self,
+            cor: Coroutine,
+            *,
+            stop_matrix_on_error: bool = False,
+            name: str | None = None,
+    ) -> asyncio.Task:
         self._check_running()
-        task = self._event_loop.create_task(cor)
+
+        async def _wait_done():
+            nonlocal stop_matrix_on_error, cor
+            try:
+                await cor
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                self.logger.error("%s receive exception on inner task %s: %r", self._log_prefix, name, e)
+                if stop_matrix_on_error:
+                    self.close()
+            finally:
+                self.logger.info("%s inner task %s done", self._log_prefix, name)
+
+        task = self._event_loop.create_task(_wait_done())
         self._add_task(task)
         return task
 
@@ -562,10 +598,35 @@ class MatrixImpl(Matrix):
         """
         注册抽象里定义好的, 基于约定发现的特殊抽象类型.
         """
-        if self._is_main:
-            # 只有 main 节点允许启动 hub.
-            yield FractalHub
-        return
+        # 暂时不做隐式绑定.
+        yield from []
+
+    def _session_communication_bus_ctx_manager(self):
+        """管理 session 事件总线的生命周期. """
+        # 未来考虑把 zenoh 完全屏蔽到 session 内侧. 暂时无法做到.
+        zenoh_session = self._container.force_fetch(zenoh.Session)
+        self._exit_stack.enter_context(zenoh_session)
+        self._exit_stack.enter_context(self._all_cell_liveness_check_ctx_manager(zenoh_session))
+        self._exit_stack.enter_context(self._this_liveness_ctx_managers(zenoh_session))
+
+    async def add_lifecycle_object(self, obj: MatrixLifecycleObject) -> None:
+        self._check_running()
+        for registered in self._lifecycle_bound_objects_or_types:
+            if obj is registered:
+                return
+        self._lifecycle_bound_objects_or_types.append(obj)
+        await self._async_exit_stack.enter_async_context(obj)
+        self._logger.info("%s add lifecycle object to exit stack %s", self._log_prefix, obj)
+
+    def register_lifecycle_object(self, obj: MatrixLifecycleObject) -> None:
+        if self._closing_event.is_set():
+            raise RuntimeError(f"Matrix already closing")
+        if self.is_running():
+            self._event_loop.create_task(self.add_lifecycle_object(obj))
+            self._logger.info("%s try to create task bind lifecycle object %s", self._log_prefix, obj)
+        else:
+            self._lifecycle_bound_objects_or_types.append(obj)
+            self._logger.info("%s register lifecycle object %s", self._log_prefix, obj)
 
     async def __aenter__(self) -> Self:
         if self._started:
@@ -576,11 +637,14 @@ class MatrixImpl(Matrix):
         self._exit_stack.__enter__()
         self._exit_stack.enter_context(self._ensure_process_locker_ctx_manager())
         self._exit_stack.enter_context(self._ensure_container_lifecycle_ctx_manager())
-        # 显式声明 zenoh session 生命周期, 不在 container 里 bootstrap 了.
-        zenoh_session = self._container.force_fetch(zenoh.Session)
-        self._exit_stack.enter_context(zenoh_session)
-        self._exit_stack.enter_context(self._all_cell_liveness_check_ctx_manager(zenoh_session))
-        self._exit_stack.enter_context(self._this_liveness_ctx_managers(zenoh_session))
+        # 实现 Matrix.session 的通讯总线同步启动部分.
+        self._session_communication_bus_ctx_manager()
+
+        # IoC 容器已启动，探查是否注册了 LoggerItf，有则覆写 _logger。
+        logger = self._container.get(LoggerItf)
+        if logger is not None:
+            self._logger = logger
+
         # 启动 stack.
         try:
             await self._async_exit_stack.__aenter__()
@@ -589,7 +653,11 @@ class MatrixImpl(Matrix):
             topic_service = self._container.force_fetch(TopicService)
             # ensure topic service lifecycle
             await self._async_exit_stack.enter_async_context(topic_service)
+            # 完成 session 的异步启动逻辑.
+            session = self._container.force_fetch(Session)
+            await self._async_exit_stack.enter_async_context(session)
             # 完成启动后, 进入到关联依赖启动. 启动成功才进入到核心生命周期启动.
+            lifecycle_objects = []
             if len(self._lifecycle_bound_objects_or_types) > 0:
                 for lifecycle in self._lifecycle_bound_objects_or_types:
                     if isinstance(lifecycle, type):
@@ -598,12 +666,14 @@ class MatrixImpl(Matrix):
                     else:
                         # todo: 暂时不做类型检查, 交给 AI 在合适的时候做. 或者保留 todo, 报错时可以看到这里源码.
                         lifecycle_obj = lifecycle
+                    lifecycle_objects.append(lifecycle_obj)
                     if lifecycle_obj is not None:
                         self.logger.info(
                             "%s bootstrap bound lifecycle object: %s",
                             self._log_prefix, lifecycle,
                         )
                         await self._async_exit_stack.enter_async_context(lifecycle)
+            self._lifecycle_bound_objects_or_types = lifecycle_objects
             # 进入到根据约定可以做绑定的生命周期对象.
             for lifecycle_contract in self._lifecycle_level_contracts():
                 if bound := self._container.get(lifecycle_contract):

@@ -2,14 +2,17 @@ from typing_extensions import Self
 
 import janus
 
-from ghoshell_moss import Message, MOSShell, CTMLShell
+from ghoshell_moss.message.message import Message
+from ghoshell_moss.core.concepts.shell import MOSShell
+from ghoshell_moss.core.ctml.shell.ctml_shell import CTMLShell
 from ghoshell_moss.core.blueprint.host import (
-    MossRuntime, Mode, FractalHub
+    MossRuntime, Mode, FractalHub, MossSystemPrompter
 )
 from ghoshell_moss.core.blueprint.app import AppStore
 from ghoshell_moss.core.blueprint.matrix import Matrix
 from ghoshell_moss.core.helpers import ThreadSafeEvent
 from ghoshell_moss.core.ctml import new_ctml_shell
+from ghoshell_moss.core.blueprint.states_channel import new_shell_main_channel
 from ghoshell_moss.contracts import Workspace
 from .app_store import HostAppStore
 from .matrix import MatrixImpl
@@ -30,7 +33,6 @@ class MossRuntimeImpl(MossRuntime):
             mode: Mode,
             matrix: MatrixImpl,
             run_shell_on_start: bool = True,
-            with_primitives: bool = True,
             name: str | None = None,
             description: str | None = None,
     ):
@@ -40,14 +42,14 @@ class MossRuntimeImpl(MossRuntime):
         # 主节点自解释发现逻辑, 手动定义优先, 其次是模式定义, 其次是环境定义.
         self._description = description or mode.description or env.meta_config.description
         self._workspace = workspace
-        self._with_primitives = with_primitives
         self._matrix = matrix
         self._mode = mode
         self._app_store: HostAppStore | None = None
         self._async_exit_stack = contextlib.AsyncExitStack()
         self._started = False
         self._paused = False
-        self._close_event = ThreadSafeEvent()
+        self._closing_event = ThreadSafeEvent()
+        self._closed_event = ThreadSafeEvent()
         self._log_prefix = f"<HostMossRuntime mode={self._mode.name} session_id={self._env.session_scope}>"
         self._interpreting_future: asyncio.Future | None = None
         self._event_loop: asyncio.AbstractEventLoop | None = None
@@ -58,14 +60,24 @@ class MossRuntimeImpl(MossRuntime):
         self._shell_logos_queue: janus.Queue = janus.Queue()
         # --- prepare shell --- #
         system_prompt = self._matrix.moss_system_prompter()
+        # 从 manifest 发现 __main__ channel，没有则用默认空白 main。
+        # main channel 上的 import_channels / with_state / with_module 已在 manifest 中完成组合。
+        # channels() key 是 Python 变量名，查找需匹配 channel.name()。
+        manifests_main = next(
+            (ch for ch in self._matrix.manifests.channels().values() if ch.name() == "__main__"),
+            None,
+        )
+        if manifests_main is None:
+            manifests_main = new_shell_main_channel(
+                description=f"Default main channel for {self._description or self._name}"
+            )
         self._ctml_shell = new_ctml_shell(
             name=self._name,
             description=self._description,
             parent_container=self.matrix.container,
+            main_channel=manifests_main,
             experimental=False,
             meta_instruction=system_prompt.instruction(),
-            # 只用环境发现的原语. 不做任何隐式原语.
-            primitives=list(self._matrix.manifests.primitives().values()) if self._with_primitives else [],
         )
 
     @property
@@ -154,16 +166,24 @@ class MossRuntimeImpl(MossRuntime):
             return interpreter.interpretation().executed_messages()
 
     def is_running(self) -> bool:
-        return self._started and not self._close_event.is_set()
+        return self._started and not (
+                self._closing_event.is_set() or self._closed_event.is_set()
+        )
 
     def wait_close_sync(self, timeout: float | None = None) -> bool:
-        return self._close_event.wait_sync(timeout)
+        return self._closing_event.wait_sync(timeout)
 
     async def wait_close(self) -> None:
-        await self._close_event.wait()
+        await self._closing_event.wait()
+
+    def wait_closed_sync(self, timeout: float | None = None) -> bool:
+        return self._closed_event.wait_sync(timeout)
+
+    async def wait_closed(self) -> None:
+        await self._closed_event.wait()
 
     def close(self) -> None:
-        self._close_event.set()
+        self._closing_event.set()
 
     def pause(self, toggle: bool = True) -> None:
         self._check_running()
@@ -194,14 +214,17 @@ class MossRuntimeImpl(MossRuntime):
             bringup=self._mode.bringup_apps,
             logger=self.matrix.logger,
         )
-        # 注册 Apps
-        for channel in self._matrix.manifests.channels().values():
-            # 注册环境发现的 channels.
-            self._ctml_shell.main_channel.import_channels(channel)
+        # __main__ channel 已在 __init__ 中从 manifests 发现并传入 shell。
+        # 所有 import_channels / with_state / with_module 组合在 manifest 中已完成。
 
         self._matrix.container.set(AppStore, self._app_store)
         self._matrix.container.set(MOSShell, self._ctml_shell)
         self._matrix.container.set(CTMLShell, self._ctml_shell)
+        moss_system_prompter = self._matrix.container.force_fetch(MossSystemPrompter)
+        moss_system_prompter.with_prompter(
+            MossSystemPrompter.MOSS_STATIC_SLOT,
+            self._ctml_shell.static_messages,
+        )
 
     @contextlib.asynccontextmanager
     async def _manager_shell_lifecycle(self):
@@ -225,10 +248,6 @@ class MossRuntimeImpl(MossRuntime):
         # 启动 app 并且 bringup
         self._bootstrap_after_matrix()
         await self._async_exit_stack.enter_async_context(self._app_store)
-        # 如果存在 fractal hub, 就完成注册.
-        if fractal_hub := self._matrix.container.get(FractalHub):
-            # 不在这里启动 fractal_hub, 因为实际上 fractal hub 是在 matrix 启动的.
-            self._ctml_shell.main_channel.import_channels(fractal_hub.as_channel())
         # 启动 ctml shell
         await self._async_exit_stack.enter_async_context(self._manager_shell_lifecycle())
         # 注册日志到当前 app store 里.
@@ -236,6 +255,9 @@ class MossRuntimeImpl(MossRuntime):
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
+        # 进入即标记 closing, 通知所有依赖方提前结束运行时逻辑.
+        self._closing_event.set()
+        self._matrix.close()
         try:
             await self._async_exit_stack.__aexit__(exc_type, exc_val, exc_tb)
         except asyncio.CancelledError:
@@ -244,4 +266,4 @@ class MossRuntimeImpl(MossRuntime):
             self._matrix.logger.exception("%s failed to aexit %s", self._log_prefix, e)
             raise e
         finally:
-            self._close_event.set()
+            self._closed_event.set()

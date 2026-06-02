@@ -6,12 +6,10 @@ from .channel import (
     ChannelPaths,
     ChannelProvider,
     ChannelCtx,
-    ChannelInterface,
 )
 from .command import (
     RESULT,
     BaseCommandTask,
-    CancelAfterOthersTask,
     Command,
     CommandDeltaArgName,
     CommandDeltaArgName2TypeMap,
@@ -23,7 +21,6 @@ from .command import (
     CommandTaskState,
     CommandToken,
     CommandTokenSeq,
-    CommandType,
     CommandWrapper,
     PyCommand,
     make_command_group,

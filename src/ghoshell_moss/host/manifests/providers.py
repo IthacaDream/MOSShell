@@ -1,7 +1,7 @@
 from typing import Iterable, Any
 from ghoshell_container import Provider
 from ghoshell_moss.core.blueprint.manifests import ProviderInfo
-from ghoshell_moss.core.codex.discover import scan_package
+from ghoshell_moss.core.codex.discover import scan_package, ScanError
 import inspect
 
 ModuleFile = str
@@ -22,12 +22,17 @@ __all__ = [
 
 def search_provider_infos_from_package(
         package_import_path: str = MANIFEST_CONTRACTS_PATH,
+        *,
+        strict: bool = False,
+        errors: list[ScanError] | None = None,
 ) -> Iterable[ProviderInfo]:
     """
     search contract infos from a python package.
     """
     providers = set()
-    for found_file, found_path, provider in find_provider_infos_from_package(package_import_path):
+    for found_file, found_path, provider in find_provider_infos_from_package(
+        package_import_path, strict=strict, errors=errors,
+    ):
         if provider in providers:
             continue
         providers.add(provider)
@@ -36,15 +41,20 @@ def search_provider_infos_from_package(
             yield contract_info
 
 
-def find_provider_infos_from_package(package_import_path: str) -> Iterable[tuple[ModuleFile, ModulePath, Provider]]:
+def find_provider_infos_from_package(
+        package_import_path: str,
+        *,
+        strict: bool = False,
+        errors: list[ScanError] | None = None,
+) -> Iterable[tuple[ModuleFile, ModulePath, Provider]]:
     """
     实现方案：
     1. 递归扫描 package (depth=2 或更多，视你 manifests 目录层级而定)
-    2. 只对 module 内“原生定义”的对象进行检测（防止重复扫描 import 进来的对象）
+    2. 只对 module 内"原生定义"的对象进行检测（防止重复扫描 import 进来的对象）
     3. 过滤出所有 isinstance(obj, Provider) 的实例
     """
     # 扫描包下的所有模块
-    for manifest in scan_package(package_import_path, max_depth=2):
+    for manifest in scan_package(package_import_path, max_depth=2, strict=strict, errors=errors):
 
         # 谓词过滤：
         # a) 必须是该模块内定义的（is_native_to），避免重扫从 core 导入的 Provider
@@ -57,8 +67,11 @@ def find_provider_infos_from_package(package_import_path: str) -> Iterable[tuple
                     # 拼接 provider 的完整导入路径，例如 MOSS.manifests.contracts.zenoh:zenoh_provider
                     provider_import_path = f"{manifest.module_path}:{name}"
                     yield manifest.file_path, provider_import_path, obj
-        except Exception:
-            # 记录日志或跳过损坏的模块，确保 CLI 的鲁棒性
+        except Exception as e:
+            if strict:
+                raise
+            if errors is not None:
+                errors.append(ScanError(module_path=manifest.module_path, exception=e, stage="iterate"))
             continue
 
 

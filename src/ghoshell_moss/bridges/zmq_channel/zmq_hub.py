@@ -38,7 +38,7 @@ except ImportError:
 
 from ghoshell_moss.core.concepts.channel import Channel, ChannelName
 from ghoshell_moss.core.concepts.command import Command
-from ghoshell_moss.core.blueprint.states_channel import new_channel_from_state, ChannelState
+from ghoshell_moss.core.blueprint.states_channel import new_stateful_channel_from_main, ChannelState
 from ghoshell_moss.bridges.zmq_channel.zmq_channel import ZMQChannelProxy
 from ghoshell_moss.contracts import LoggerItf
 
@@ -118,7 +118,7 @@ class ManagedProcess:
                 self.logger.log(level, "[%s] %s", self.name, decoded)
 
         try:
-            await asyncio.gather(
+            _ = await asyncio.gather(
                 read_stream(self.process.stdout, logging.INFO),
                 read_stream(self.process.stderr, logging.ERROR),
             )
@@ -442,7 +442,7 @@ class ZMQHub:
         - context_messages: 展示节点状态
         """
         state = ZMQHubChannelState(hub=self)
-        return new_channel_from_state(state)
+        return new_stateful_channel_from_main(state)
 
 
 # ------------------------------------------------------------------

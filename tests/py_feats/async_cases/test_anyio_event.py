@@ -5,6 +5,7 @@ import anyio
 from anyio import create_memory_object_stream
 from anyio import to_thread
 import pytest
+from exceptiongroup import ExceptionGroup
 
 
 @pytest.mark.asyncio

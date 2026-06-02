@@ -1,7 +1,7 @@
-from ghoshell_moss import ChannelProvider
+from ghoshell_moss.core.concepts.channel import ChannelProvider
 from ghoshell_moss.core.concepts.channel import ChannelProxy
 from ghoshell_moss.core.duplex import BridgeTestSuite
-from ghoshell_common.helpers import uuid
+from ghoshell_moss.message import unique_id
 import zenoh
 from ._provider import ZenohChannelProvider
 from ._proxy import ZenohProxyChannel
@@ -18,7 +18,7 @@ class ZenohBridgeTestSuite(BridgeTestSuite):
     def create(self, proxy_name: str = "proxy") -> tuple[ChannelProvider, ChannelProxy]:
         self._session = zenoh.open(zenoh.Config())
         node_name = "test/zenoh"
-        session_id = uuid()
+        session_id = unique_id()
         provider = ZenohChannelProvider(zenoh_session=self._session, address=node_name, session_scope=session_id)
         proxy = ZenohProxyChannel(
             name=proxy_name,

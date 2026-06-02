@@ -15,7 +15,7 @@ __all__ = [
 ]
 
 
-def prepare_kwargs_by_signature(sig: inspect.Signature, args: tuple, kwargs: dict) -> tuple[tuple, dict]:
+def prepare_kwargs_by_signature(sig: inspect.Signature, args: tuple, kwargs: dict, name: str = '') -> tuple[tuple, dict]:
     """
     parse args and kwargs into a dict of kwargs.
     Written with help from deepseek:v3
@@ -24,7 +24,7 @@ def prepare_kwargs_by_signature(sig: inspect.Signature, args: tuple, kwargs: dic
     try:
         bound_args = sig.bind(*args, **kwargs)
     except TypeError as e:
-        raise TypeError(f"invalid params, args {args}, kwargs {kwargs} for {sig}")
+        raise TypeError(f"invalid params, args {args}, kwargs {kwargs} for {name}{sig}")
 
     # 应用默认值
     bound_args.apply_defaults()
@@ -75,7 +75,7 @@ class FunctionReflection:
     comments: str
 
     def prepare_kwargs(self, *args, **kwargs) -> tuple[tuple, dict[str, Any]]:
-        return prepare_kwargs_by_signature(self.signature, args, kwargs)
+        return prepare_kwargs_by_signature(self.signature, args, kwargs, name=self.name)
 
     def to_interface(self, name: str = "", doc: str = "", comments: str = "") -> str:
         def_syntax = "async def" if self.is_coroutine_function else "def"

@@ -1,5 +1,7 @@
+from typing import Iterable, Type
+
 from ghoshell_common.contracts import LoggerItf, config_logger_from_yaml
-from ghoshell_container import Provider, IoCContainer
+from ghoshell_container import Provider, IoCContainer, INSTANCE
 from .workspace import Workspace
 from logging import handlers
 import logging
@@ -58,6 +60,10 @@ class WorkspaceLoggerProvider(Provider[LoggerItf]):
 
     def singleton(self) -> bool:
         return True
+
+    def aliases(self) -> Iterable[Type[INSTANCE]]:
+        # 同时可以被 logging.Logger 作为 Contract
+        yield logging.Logger
 
     def factory(self, con: IoCContainer) -> LoggerItf:
         workspace = con.get(Workspace)

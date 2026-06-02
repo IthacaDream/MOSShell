@@ -19,9 +19,8 @@ async def test_interpreter_baseline():
     queue = deque()
     interpreter = CTMLInterpreter(
         kind="",
-        commands=make_command_group(PyCommand(foo)),
+        commands=make_command_group('', PyCommand(foo)),
         stream_id="test",
-        speech=MockSpeech(),
         callback=queue.append,
         # logger=logger,
     )
@@ -56,9 +55,8 @@ async def test_interpreter_cancel():
     queue = deque()
     interpreter = CTMLInterpreter(
         kind="",
-        commands=make_command_group(PyCommand(foo)),
+        commands=make_command_group("", PyCommand(foo)),
         stream_id="test",
-        speech=MockSpeech(),
         callback=queue.append,
     )
 

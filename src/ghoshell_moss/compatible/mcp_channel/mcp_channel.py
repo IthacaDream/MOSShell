@@ -4,7 +4,7 @@ from typing import Any, Optional, TypeVar
 
 from jsonschema import Draft202012Validator, Draft201909Validator, Draft7Validator, Draft6Validator
 
-from ghoshell_moss import CommandError, CommandErrorCode
+from ghoshell_moss.core.concepts.errors import CommandError, CommandErrorCode
 from ghoshell_moss.compatible.mcp_channel.utils import mcp_call_tool_result_to_message
 
 try:
@@ -13,7 +13,7 @@ try:
 except ImportError:
     raise ImportError("Could not import mcp. Please install ghoshell-moss[mcp].")
 
-from ghoshell_common.helpers import uuid
+from ghoshell_moss.message import unique_id
 from ghoshell_container import IoCContainer
 
 from ghoshell_moss.core.concepts.channel import Channel, ChannelMeta, ChannelRuntime
@@ -29,13 +29,14 @@ from ghoshell_moss.core.runtime import AbsChannelRuntime
 R = TypeVar("R")  # 泛型结果类型
 
 
+# todo: 用 ChannelState 方式重构.
 class MCPChannel(Channel):
     """对接MCP服务的Channel"""
 
     def __init__(self, *, name: str, description: str, mcp_client: mcp.ClientSession, blocking: bool = False):
         self._name = name
         self._desc = description
-        self._id = uuid()
+        self._id = unique_id()
         self._mcp_client = mcp_client
         self._runtime: Optional[MCPChannelRuntime] = None
         self._blocking = blocking
@@ -56,7 +57,7 @@ class MCPChannel(Channel):
             raise RuntimeError("MCPChannel not bootstrapped")
         return self._runtime
 
-    def bootstrap(self, container: Optional[IoCContainer] = None) -> ChannelRuntime:
+    def materialize(self, container: IoCContainer) -> ChannelRuntime:
         if self._runtime is not None and self._runtime.is_running():
             raise RuntimeError(f"Channel {self} has already been started.")
 
@@ -129,7 +130,7 @@ class MCPChannelRuntime(AbsChannelRuntime[MCPChannel]):
         # 该 runtime 不依赖内部任务队列；仅等待退出。
         await self._closing_event.wait()
 
-    async def _consume_task_with_paths(self, paths: list[str], task: CommandTask) -> None:
+    async def _consume_compiled_task_with_paths(self, paths: list[str], task: CommandTask) -> None:
         # 兼容 ChannelRuntime 的任务调度：直接执行并 resolve/fail。
         if len(paths) > 0:
             task.fail(CommandErrorCode.NOT_FOUND.error(f"MCPChannel has no sub channel: {'.'.join(paths)}"))
@@ -323,7 +324,6 @@ class MCPChannelRuntime(AbsChannelRuntime[MCPChannel]):
                 CommandMeta(
                     name=tool_name,
                     description=description or "",
-                    chan=self._name,
                     interface=interface,
                     available=True,
                     json_schema=tool.inputSchema,

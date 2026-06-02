@@ -9,7 +9,7 @@ from ghoshell_common.contracts import LoggerItf
 from ghoshell_container import IoCContainer, get_container
 from PIL import Image
 
-from ghoshell_moss import PyChannel
+from ghoshell_moss.core import PyChannel
 from ghoshell_moss.message import Base64Image, Message, Text
 
 

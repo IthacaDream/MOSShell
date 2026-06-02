@@ -1,113 +1,147 @@
-# Channels — AI 开发指南
+# Channels — 正式能力模块
 
-## 1. Quick Start: 三个文件理解 Channel 体系
+本目录是 MOSS 随包分发的正式 Channel 类型。通过 `moss codex channeltypes` 索引。
 
-按顺序读:
+## 1. 模块约定
 
-1. `src/ghoshell_moss/core/ctml/prompts/v1_0_0.zh.md` — CTML 语法规范。理解 Channel 是什么、命令如何调度、时间第一公民。
-2. `src/ghoshell_moss/core/blueprint/channel_builder.py` — Builder API。理解如何注册命令、instruction、context、生命周期。
-   ```bash
-   moss --ai codex get-interface ghoshell_moss.core.blueprint.channel_builder
-   ```
-3. `tests/ghoshell_moss/core/ctml/v1_0/test_ctml_v1.py` — 测试即文档。所有核心语义（并行、occupy、scope、timeout、流式参数）都有可运行的用例。
+### 1.1 Docstring 范式
 
-## 2. 本目录的开发范式
+每个模块第一行 docstring 采用机器可解析格式：
 
-本目录存放 channel 原型。既是实现，也是案例。
-
-### 两种封装策略
-
-**Channel Interface** — 先定义接口，再注册。
-
-类自身声明命令方法，在 `bootstrap()` 中通过 `Builder.command()` 注册。`Builder.command()` 的 `interface` 参数更进一步：可以给模型看一个虚拟函数签名，实际执行另一个实现体。
-
-原型: `speech_channel.py` — `SpeechChannel.say()` 定义接口，`bootstrap()` 中用 `chan.build.command()(self.say)` 注册。mac_channel.py — `run()` 函数定义 JXA 执行接口，`new_mac_control_channel()` 中注册。
-
-**As Channel** — 外部已有的事物包装为 Channel。
-
-把 module、CLI、API、设备等外部能力反射/封装为 channel command，不要求被包装者感知 Channel 的存在。
-
-原型: `module_channel.py` — 反射任意 Python module 的函数。`typer_channel.py` — 把 Typer CLI 包装为 Channel。
-
-### 当前原型
-
-| 文件 | 策略 | 亮点 |
-|------|------|------|
-| `module_channel.py` | As Channel | L0: 零手工，一行反射 module |
-| `mac_channel.py` | Channel Interface | L1: Builder 装饰器注册单个命令 |
-| `speech_channel.py` | Channel Interface | L2: 继承 Channel ABC，封装 contract |
-| `typer_channel.py` | As Channel | L1+: instruction + context_messages + 经验记忆 |
-
-### 零依赖原则
-
-本目录下的原型只用 MOSS core + Python stdlib。额外依赖留给 app (独立 `pyproject.toml`) 处理。
-
-## 3. 高阶抽象: StatefulChannel
-
-当 Channel 需要在运行时切换状态（不同状态有不同命令集、指令、上下文）时，用 `states_channel.py`。
-
-```bash
-moss --ai codex get-interface ghoshell_moss.core.blueprint.states_channel
+```python
+"""一句话功能描述 | 功能类型 | 状态
+"""
 ```
 
-核心概念:
+- `功能类型` 从下文的类型体系取值
+- `状态` 从下文的 status 取值
+- 由 `ast.get_docstring` 读取，对接 `moss codex channeltypes` 的索引表
 
-- `ChannelState` — 一个运行时状态。有 `own_commands()`、`get_instruction()`、`get_context_messages()`、生命周期钩子。
-- `ChannelStateBuilder` — 既是 `Builder` 又是 `ChannelState`，支持 `add_virtual_channel()` / `remove_virtual_channel()` 运行时增减子通道。
-- `StatefulChannel` — 持有多个 `ChannelState`，通过 `with_state()` 注册，运行时切换。
-- `PrimeChannel` — `StatefulChannel + MutableChannel`，全能。
+### 1.2 Example 段
 
-工厂函数: `new_state_builder()`, `new_channel_from_state()`, `new_stateful_channel()`, `new_prime_channel()`.
+docstring 后续段落可追加 Example 段，只给**一种**推荐集成方式：
 
-## 4. 封装策略选择
+```python
+"""反射 Python 模块为 Channel 命令集 | 集成 | beta
 
-| 你要做的事 | 策略 | 层级 |
-|-----------|------|------|
-| 反射已有 Python module 的函数 | As Channel | L0 `new_module_channel()` |
-| 包装 CLI / API / 外部能力 | As Channel | L1 `new_channel()` + Builder |
-| 定义新能力，手工控制接口签名 | Channel Interface | L1-L2 Builder 或继承 ABC |
-| 封装外部 contract (TTS、播放器等) | Channel Interface | L2 继承 Channel ABC |
-| 运行时切换能力集 | 任一策略 + State | L3 StatefulChannel |
-| 全部能力 | 任一策略 + Prime | L4 PrimeChannel |
+Example:
+    from ghoshell_moss import new_shell_main_channel
+    from ghoshell_moss.channels.module_channel import new_module_channel
+    import math
+    main = new_shell_main_channel()
+    main.import_channels(new_module_channel(math))
+"""
+```
 
-`Builder.command()` 的关键参数决定了函数级驱动的丰富程度:
+Example 不执行，只为 code as prompt —— 让读代码的模型一眼知道如何接入 main channel。
 
-- `name` — 重命名
-- `doc` / `comments` / `interface` — 控制模型看到的签名（interface 可指向虚拟函数）
-- `blocking` — 是否阻塞同通道后续命令
-- `available` — 动态可用性
-- `call_soon` / `priority` — 抢占调度
+### 1.3 observe 约定
 
-## 5. 开发规范
+每个命令必须显式标注 `always_observe`。规则：
 
-### 测试
+| always_observe | 适用场景 | 示例 |
+|---|---|---|
+| True | 结果是"信息"，模型需基于内容做下一步推理 | read、list、query、exec |
+| False | 结果是"确认"，只需知成败 | write、delete、start、stop、say |
 
-单测路径: `tests/ghoshell_moss/channels/`
+不依赖 Builder 的默认值。
 
-参考 `tests/ghoshell_moss/core/channels/test_py_channel.py` 的模式:
+## 2. Type 体系
 
-- `chan.bootstrap()` 上下文管理器获取 runtime
-- `runtime.get_command("name")` 验证命令存在性
-- `runtime.execute_command("name", args=(...))` 验证执行正确性
-- `runtime.self_meta()` / `runtime.metas()` 验证元信息
+功能导向分类，在此文件维护（单一事实源）。随着 channel 增多演进。
 
-只测本模块的职责。CTML 解析、调度时序、caller name 格式等问题由各自模块的测试覆盖。
+| Type | 含义 | 示例 |
+|------|------|------|
+| `系统管理` | MOSS 架构级组件生命周期管理 | app_store_channel |
+| `通讯桥接` | 跨进程/跨运行时通讯连接与路由 | fractal_hub |
+| `交互能力` | 向外部世界的输出或感知 | speech_channel |
+| `集成` | 将已有外部能力封装为 Channel | module_channel, typer_channel |
+| `系统控制` | 操作系统级别控制 | mac_channel |
+| `认知模块` | 对文件系统等资源的动态结构化认知 | notebook_channel |
 
-### 提交
+*此分类为草拟（2026-06-02），随 channel 增多自然演进。新 channel 的类型可以追加，无需修改已有。*
 
-遵循项目 Git 提交规范。FEATURE.md 与代码同 commit。
+## 3. Status
 
-### 深入调研
+三态，线性推进：
+
+```
+alpha → beta → active
+```
+
+| Status | 含义 |
+|--------|------|
+| `alpha` | 原型/草图，无测试，接口随意改 |
+| `beta` | 功能可用，接口可能变动，需要更多实际使用验证 |
+| `active` | 正式维护，有测试覆盖，接口兼容承诺，跟随项目 semver |
+
+- 当前 `active` 的模块：app_store_channel、fractal_hub
+- 进入 `active` 后，接口变更需跟随项目的语义化版本号
+
+## 4. 构建梯度
+
+现有 channel 覆盖不同的构建层级，可作为新 channel 开发的参考起点：
+
+| 层级 | API | 场景 | 参考 |
+|------|-----|------|------|
+| L0 | `new_module_channel()` | 纯函数模块，零手工反射 | module_channel |
+| L1 | `new_channel()` + Builder | 需 instruction/context/生命周期 | notebook_channel, typer_channel |
+| L2 | 继承 Channel ABC | 复杂运行时，封装 contract | speech_channel |
+| L3 | StatefulChannel | 运行时切换状态/能力集 | app_store_channel |
+| L4 | PrimeChannel | 全能：stateful + mutable + builder | — |
+
+## 5. 封装策略
+
+两种互不排斥的策略，可在同一模块内混用：
+
+**Channel Interface** — 先定义接口，再注册。类自身声明命令方法，在 `bootstrap()`/`materialize()` 中注册。`Builder.command(interface=...)` 可以给模型看虚拟函数签名，实际执行另一实现体。参考：speech_channel。
+
+**As Channel** — 外部已有的事物包装为 Channel。把 module、CLI、API、设备等外部能力反射/封装，不要求被包装者感知 Channel 的存在。参考：module_channel、typer_channel。
+
+## 6. 发现与使用
 
 ```bash
-# 查看本目录的历史实现和演进
-git log -- src/ghoshell_moss/channels/
+# 列出所有正式 channel 类型
+moss codex channeltypes
 
-# 查看某个文件的变更轨迹
-git log -p -- src/ghoshell_moss/channels/module_channel.py
+# 反射单个 channel 的完整接口
+moss codex channeltypes app_store_channel
+
+# 带依赖反射
+moss codex channeltypes app_store_channel --deps
+```
+
+运行时环境的能力视图用 `moss manifests channels`，不是 codex。二者的区别：
+
+| | `codex channeltypes` | `manifests channels` |
+|---|---|---|
+| 视角 | 开发时——有哪些预制能力可用 | 运行时——当前环境的 Channel 树 |
+| 来源 | `ghoshell_moss.channels` 包 | workspace manifests |
+| 使用者 | 开发新功能/新 app 前查阅 | 调试/理解当前运行环境 |
+
+## 7. 测试
+
+单测路径：`tests/ghoshell_moss/channels/`
+
+参考模式：
+- `chan.bootstrap()` 上下文管理器获取 runtime
+- `runtime.get_command("name")` 验证命令存在
+- `runtime.execute_command("name", args=(...))` 验证执行正确
+- `runtime.self_meta()` / `runtime.metas()` 验证元信息
+
+只测本模块职责。CTML 解析、调度时序等问题由各自模块的测试覆盖。
+
+## 8. 深入调研
+
+```bash
+# 查看本目录的历史演进
+git log -- src/ghoshell_moss/channels/
 
 # 结合 feature 记录理解设计决策
 moss --ai features specification
-```
 
-本目录下的代码既是实现，也是案例。新原型可以参考已有原型的模式，选择最接近的作为起点。
+# 核心抽象
+moss codex get-interface ghoshell_moss.core.concepts.channel:Channel
+moss codex get-interface ghoshell_moss.core.blueprint.channel_builder:Builder
+moss codex get-interface ghoshell_moss.core.blueprint.states_channel
+```

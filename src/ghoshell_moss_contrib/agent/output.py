@@ -6,7 +6,7 @@ from ghoshell_moss_contrib.agent.depends import check_agent
 
 if check_agent():
     from ghoshell_moss_contrib.agent.chat.console import ConsoleChat
-from ghoshell_common.helpers import uuid
+from ghoshell_moss.message import unique_id
 
 from ghoshell_moss.contracts.speech import Speech, SpeechStream
 
@@ -92,7 +92,7 @@ class ChatRenderSpeech(Speech):
         self._closed_event = asyncio.Event()
 
     def new_stream(self, *, batch_id: Optional[str] = None) -> SpeechStream:
-        batch_id = batch_id or uuid()
+        batch_id = batch_id or unique_id()
         last_stream_close_event = self.last_stream_close_event
         new_close_event = asyncio.Event()
         self.last_stream_close_event = new_close_event

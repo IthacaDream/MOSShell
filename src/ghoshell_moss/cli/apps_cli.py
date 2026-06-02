@@ -100,6 +100,50 @@ def show_app(
         console.print(f"[dim]App store: {host.apps().app_store_directory}[/dim]")
 
 
+@app_store_app.command(name="create")
+def create_app(
+        fullname: str = typer.Argument(..., help="App fullname as group/name (e.g., 'my_group/my_app')"),
+        description: str = typer.Option("", "-d", "--description", help="App description"),
+        json_out: bool = typer.Option(False, "--json", help="Output raw JSON."),
+        verbose: bool = typer.Option(False, "-v", "--verbose", help="Verbose mode."),
+        mode: str = typer.Option(
+            None,
+            "-m",
+            "--mode",
+            help="moss mode name",
+        )
+):
+    """
+    Create a new app from the stub template.
+
+    Creates the app directory under apps/<group>/<name> with:
+    - APP.md (metadata declaration)
+    - main.py (entry point)
+    - CLAUDE.md (AI developer context)
+    """
+    host = Host(mode=mode)
+    if verbose:
+        print_host_mode_info(host)
+
+    result = host.apps().init_app(fullname, description)
+
+    if result.startswith("Error"):
+        console.print(f"[red]{result}[/red]")
+        raise typer.Exit(code=1)
+
+    if json_out:
+        console.json(data={"status": "ok", "fullname": fullname, "message": result})
+        return
+
+    console.print(f"[green]{result}[/green]")
+    # Extract path from result message for the hint
+    if " at " in result:
+        target_path = result.split(" at ")[-1]
+        console.print(f"\n[dim]Next: cd {target_path}  # edit main.py[/dim]")
+        console.print(f"[dim]  MCP (runtime): <apps:start fullname=\"{fullname}\"/>[/dim]")
+        console.print(f"[dim]  Debug (standalone): moss apps test {fullname}[/dim]")
+
+
 def _display_app_table(apps: List[AppInfo], is_filtered: bool):
     """展示 App 概览表格"""
     title = "MOSS App Store"
@@ -193,8 +237,7 @@ def test_app(
     try:
         # 使用 shlex.split 确保命令解析安全（处理空格等）
         # 继承当前环境并注入 Host 特有的 env (如果有)
-        env = host.env.dump_moss_env(cell_address=app.address, for_child_process=True, with_os_env=False)
-        # 这里可以根据需要注入 host.env_vars() 等信息
+        env = host.env.dump_moss_env(cell_address=app.address, for_child_process=True, with_os_env=True)
 
         console.print("[dim]—— Process Started (Ctrl+C to stop) ——[/dim]\n")
 

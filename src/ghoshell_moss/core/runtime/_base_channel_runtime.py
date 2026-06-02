@@ -2,7 +2,7 @@ import contextlib
 
 import asyncio
 from abc import ABC, abstractmethod
-from typing import Optional, Iterable, TypeVar, Generic, Callable, Coroutine
+from typing import Optional, Iterable, TypeVar, Generic, Callable, Coroutine, Literal
 
 import janus
 from typing_extensions import Self
@@ -11,6 +11,8 @@ from ghoshell_container import IoCContainer, Container
 
 from ghoshell_moss.core.concepts.command import (
     CommandTask,
+    BaseCommandTask,
+    CommandMeta,
 )
 from ghoshell_moss.core.concepts.channel import (
     ChannelCtx,
@@ -20,17 +22,221 @@ from ghoshell_moss.core.concepts.channel import (
     ChannelRuntime,
     ChannelFullPath,
     ChannelPaths,
+    ChannelScope,
+    ChannelScopeType,
+    ChannelScopeDefaultType,
 )
 from ghoshell_moss.core.concepts.errors import CommandErrorCode
 from ghoshell_moss.core.helpers import ThreadSafeEvent
 from ghoshell_common.contracts import LoggerItf
 from .tree import BaseChannelTree
 import logging
+import threading
 
-__all__ = ["AbsChannelRuntime"]
+__all__ = [
+    "AbsChannelRuntime",
+]
 
 _ChannelId = str
 CHANNEL = TypeVar("CHANNEL", bound=Channel)
+
+
+class ChannelScopeImpl(ChannelScope):
+
+    def __init__(
+            self,
+            task: CommandTask,
+            scope_id: str,
+            loop: asyncio.AbstractEventLoop,
+            timeout: float | None,
+            until: str,
+    ):
+        self._scope_id: str = scope_id
+        self._channel: str = task.chan
+        self._loop = loop
+        self._committed: bool = False
+        self._future = BaseCommandTask(
+            chan=task.chan,
+            meta=CommandMeta(name="__scope__"),
+            func=None,
+            tokens='',
+            args=[],
+            kwargs={},
+        )
+        # 预计 future 结束时, 清空所有的子任务.
+        self._future.add_done_callback(self._clear_all_sub_tasks)
+        self._sub_task_group: set[CommandTask] = set()
+        self._timeout: float | None = timeout
+        self._until: str = until
+        self._tick_until_done_task: asyncio.Task | None = None
+        self._stop_reason: str | None = None
+
+        # 保证 task 和 scope 的生命周期同步.
+        self._bind_task_to_scope(task)
+        # 保证 scope 能在 task 被取消时感知到.
+        task.add_done_callback(self._on_enter_and_exit_task_done_check)
+        task.scope_id = self._scope_id
+
+    @staticmethod
+    def parse_kwargs(kwargs: dict) -> tuple[str, float | None]:
+        until = kwargs.get("until", ChannelScopeDefaultType)
+        if until not in ['flow', 'all', 'any']:
+            raise ValueError(f"invalid until: {until}")
+        timeout = kwargs.get("timeout", None)
+        if timeout is not None:
+            timeout = float(timeout)
+        return until, timeout
+
+    def add_sub_scope(self, scope: 'ChannelScopeImpl') -> None:
+        self.add_task(scope._future)
+
+    # bind enter task
+    def _on_enter_and_exit_task_done_check(self, _task: CommandTask) -> None:
+        if self.is_closed():
+            return
+        if _task.cancelled():
+            self.close(stop_reason="Scope Cancelled")
+        elif _task.is_critical_failed():
+            self.close("Scope failed to start")
+
+    @property
+    def scope_id(self) -> str:
+        return self._scope_id
+
+    def add_task(self, task: CommandTask) -> CommandTask:
+        bound = self._bind_task_to_scope(task)
+        if not bound:
+            return task
+        self._sub_task_group.add(task)
+        if self._until == 'any':
+            self._ensure_any_task_done_then_cancel_the_scope(task)
+        return task
+
+    def _bind_task_to_scope(self, scope_task: CommandTask) -> bool:
+        if scope_task.done():
+            return False
+        if self._future.done() or self._committed:
+            if not scope_task.done():
+                scope_task.cancel("Scope Closed")
+            return False
+
+        def _on_scope_close_clear_sub_task(_ft: CommandTask):
+            nonlocal scope_task
+            if not scope_task.done():
+                scope_task.cancel("Scope Closed")
+
+        self._future.add_done_callback(_on_scope_close_clear_sub_task)
+        # 反向绑定, 如果发生致命异常, 就清空  scope
+        scope_task.add_done_callback(self._on_sub_future_critical_error)
+        scope_task.scope_id = self._scope_id
+        return True
+
+    def _on_sub_future_critical_error(self, _ft: CommandTask) -> None:
+        if _ft.is_critical_failed() and not self._future.done():
+            self._future.fail(CommandErrorCode.CRITICAL.error("Sub Scope critical failed"))
+
+    def _ensure_any_task_done_then_cancel_the_scope(self, task: CommandTask) -> None:
+        if task.done() or self.is_closed():
+            return
+
+        def _on_any_sub_task_done(_task: CommandTask) -> None:
+            # make sure future is done
+            self.close(stop_reason="Scope closed on task done")
+
+        task.add_done_callback(_on_any_sub_task_done)
+
+    def commit(self, task: CommandTask) -> CommandTask:
+        if not self._committed:
+            task.add_done_callback(self._on_enter_and_exit_task_done_check)
+            task.scope_id = self._scope_id
+            self._committed = True
+        else:
+            # 理论上永不发生, 做容错.
+            task.cancel("Scope already committed")
+        task.scope_id = self._scope_id
+        return task
+
+    def is_commited(self) -> bool:
+        return self._committed
+
+    async def tick(self, *, until: ChannelScopeType, timeout: float | None = None) -> None:
+        """启动 scope 的生命周期检查. """
+        if not until in ['flow', 'all', 'any']:
+            raise ValueError(f"invalid argument until=`{until}`")
+        elif timeout is not None:
+            # raise type error or value error?
+            timeout = float(timeout)
+        # 完成赋值.
+        self._timeout = timeout
+        self._until = until
+        if self._until == 'any':
+            # 检查一下是否有已经完成的 task, 如果是直接 close.
+            for task in self._sub_task_group:
+                if task.done():
+                    self.close()
+                    return
+
+        if self._timeout is not None and self._timeout > 0:
+            async def _tick_until_done() -> None:
+                await asyncio.sleep(timeout)
+                if not self.is_closed():
+                    self.close("Scope Timeout")
+
+            # 正式开始计时.
+            asyncio.create_task(_tick_until_done())
+
+    async def wait_close(self) -> str | None:
+        """等待 scope 运行结束"""
+        if self.is_closed():
+            return self._stop_reason
+        try:
+            wait_group = []
+            if self._until == 'any':
+                for task in self._sub_task_group:
+                    if task.done():
+                        return None
+                    wait_group.append(task)
+            elif self._until == 'flow':
+                for task in self._sub_task_group:
+                    if task.chan == self._channel:
+                        wait_group.append(task)
+                if len(wait_group) == 0:
+                    # 容错逻辑.
+                    wait_group = self._sub_task_group.copy()
+            else:
+                wait_group = self._sub_task_group.copy()
+
+            if len(wait_group) > 0:
+                if self._until == 'any':
+                    await asyncio.wait(wait_group, return_when=asyncio.FIRST_COMPLETED)
+                    return self._stop_reason
+                else:
+                    _ = await asyncio.gather(*wait_group, return_exceptions=True)
+                    return self._stop_reason
+            return None
+        finally:
+            self.close()
+
+    def is_closed(self) -> bool:
+        return self._future.done()
+
+    def close(self, stop_reason: str = '') -> None:
+        if not self._future.done():
+            self._stop_reason = stop_reason or None
+            if stop_reason:
+                self._future.cancel(self._stop_reason or '')
+            else:
+                self._future.resolve(None)
+
+    def _clear_all_sub_tasks(self, _ft) -> None:
+        """自身 scope 结束时, 清空所有的状态."""
+        if self._tick_until_done_task is not None:
+            self._tick_until_done_task.cancel()
+        sub_task_group = self._sub_task_group.copy()
+        self._sub_task_group.clear()
+        for task in sub_task_group:
+            if not task.done():
+                task.cancel()
 
 
 class AbsChannelRuntime(Generic[CHANNEL], ChannelRuntime, ABC):
@@ -48,7 +254,7 @@ class AbsChannelRuntime(Generic[CHANNEL], ChannelRuntime, ABC):
         self._channel: CHANNEL = channel
         self._name = channel.name()
         self._uid = channel.id()
-        container: IoCContainer = container or Container(name="Channel/%s/%s" % (self._name, self._uid))
+        container: IoCContainer = container or self.create_raw_container(self._name, self._uid)
         self._container = self.prepare_container(container)
         self._logger: LoggerItf | None = logger
         # import lib 是最重要的.
@@ -73,7 +279,7 @@ class AbsChannelRuntime(Generic[CHANNEL], ChannelRuntime, ABC):
         # maintain a task group for cancel them during runtime.
         self._runtime_asyncio_task_group: set[asyncio.Task] = set()
         # register task done callback
-        self._task_done_callbacks: list[TaskDoneCallback] = []
+        self._on_task_done_callbacks: list[TaskDoneCallback] = []
 
         # compiling loop
         self._compiling_loop_task: asyncio.Task | None = None
@@ -84,6 +290,84 @@ class AbsChannelRuntime(Generic[CHANNEL], ChannelRuntime, ABC):
         # log_prefix
         self.log_prefix = "<Channel `%s` cls=%s id=%s name=%s>" % (
             self._name, self.__class__.__name__, self._uid, self.name
+        )
+        self._channel_scopes: dict[str, ChannelScopeImpl] = {}
+        self._channel_scope_change_lock = threading.Lock()
+        self._uncommitted_scopes: list[str] = []
+
+    def __repr__(self):
+        return self.log_prefix
+
+    @classmethod
+    def create_raw_container(cls, name: str, uid: str = '') -> Container:
+        return Container(name="Channel/%s/%s" % (name, uid or 'uid-missed'))
+
+    def open_scope(self, task: CommandTask) -> None:
+        if not self.is_running():
+            task.fail(CommandErrorCode.NOT_RUNNING.error("channel is not running"))
+            return
+        try:
+            until, timeout = ChannelScopeImpl.parse_kwargs(task.kwargs)
+            task.kwargs["until"] = until
+            task.kwargs["timeout"] = timeout
+            new_scope = ChannelScopeImpl(task, scope_id=task.cid, loop=self._loop, until=until, timeout=timeout)
+        except Exception as e:
+            task.fail(e)
+            self._logger.exception(
+                "%s failed to open scope for task %s, %s, error: %e",
+                self.log_prefix, task.caller_name(), task.cid, e
+            )
+            return
+        last = self.get_active_scope(None, pop=False)
+        if last is not None:
+            last.add_sub_scope(new_scope)
+        with self._channel_scope_change_lock:
+            self._channel_scopes[task.cid] = new_scope
+            self._uncommitted_scopes.append(new_scope.scope_id)
+        self._logger.info(
+            "%s open scope for task %s, scope_id=%s",
+            self.log_prefix, task.caller_name(), new_scope.scope_id,
+        )
+
+    def get_active_scope(self, scope_id: str | None, pop: bool) -> ChannelScopeImpl | None:
+        if scope_id is None:
+            with self._channel_scope_change_lock:
+                if len(self._uncommitted_scopes) > 0:
+                    scope_id = self._uncommitted_scopes[-1]
+        if scope_id is None:
+            return None
+        if pop:
+            # 同步轻逻辑.
+            with self._channel_scope_change_lock:
+                if scope_id in self._channel_scopes:
+                    scope = self._channel_scopes.pop(scope_id)
+                    return scope
+            return None
+        else:
+            return self._channel_scopes.get(scope_id, None)
+
+    def commit_scope(self, task: CommandTask) -> None:
+        scope_id = None
+        with self._channel_scope_change_lock:
+            if len(self._uncommitted_scopes) > 0:
+                scope_id = self._uncommitted_scopes.pop()
+        if scope_id is None:
+            task.cancel("Scope Closed")
+            self._logger.info(
+                "%s failed to commit scope %s with task %s, cid=%s",
+                self.log_prefix, scope_id, task.caller_name(), task.cid,
+            )
+            return
+        with self._channel_scope_change_lock:
+            scope = self._channel_scopes.get(scope_id, None)
+        if scope is None:
+            task.cancel("Scope Closed")
+            return
+        scope.commit(task)
+        task.scope_id = scope.scope_id
+        self._logger.info(
+            "%s commit scope %s with task %s, cid=%s",
+            self.log_prefix, scope_id, task.caller_name(), task.cid,
         )
 
     @property
@@ -162,14 +446,7 @@ class AbsChannelRuntime(Generic[CHANNEL], ChannelRuntime, ABC):
         """
         pass
 
-    def push_task(self, *tasks: CommandTask) -> None:
-        for task in tasks:
-            paths = Channel.split_channel_path_to_names(task.chan)
-            self.push_task_with_paths(paths, task)
-
-    def push_task_with_paths(self, paths: ChannelPaths, task: CommandTask) -> None:
-        if not self.is_running():
-            return None
+    def _enqueue_task_with_paths(self, paths: ChannelPaths, task: CommandTask) -> None:
         self._on_compile_task_queue.sync_q.put_nowait((paths, task))
         return None
 
@@ -194,19 +471,19 @@ class AbsChannelRuntime(Generic[CHANNEL], ChannelRuntime, ABC):
 
     # --- on task done --- #
 
-    def _parse_task(self, task: CommandTask) -> CommandTask | None:
+    def _parse_runtime_status_for_task(self, task: CommandTask) -> CommandTask:
         if task is None:
-            return None
+            raise RuntimeError(f"received task is None")
         if task.done():
-            return None
+            return task
         elif not self.is_running():
             self.logger.error(
                 "%s failed task %s: not running",
                 self.log_prefix,
                 task.cid,
             )
-            task.fail(CommandErrorCode.NOT_RUNNING.error(f"channel {self.name} not running"))
-            return None
+            task.fail(CommandErrorCode.NOT_RUNNING.error(f"channel `{self.name}` is not running"))
+            return task
         elif not self.is_connected():
             self.logger.info(
                 "%s failed task %s: not connected",
@@ -214,7 +491,7 @@ class AbsChannelRuntime(Generic[CHANNEL], ChannelRuntime, ABC):
                 task.cid,
             )
             task.fail(CommandErrorCode.NOT_CONNECTED.error(f"channel {self.name} not connected"))
-            return None
+            return task
         elif not self.is_available():
             self.logger.info(
                 "%s failed task %s: not available",
@@ -222,23 +499,29 @@ class AbsChannelRuntime(Generic[CHANNEL], ChannelRuntime, ABC):
                 task.cid,
             )
             task.fail(CommandErrorCode.NOT_AVAILABLE.error(f"channel {self.name} not available"))
-            return None
+            return task
         return task
 
-    async def _on_task_compile_loop(self) -> None:
+    async def _compiled_task_loop(self) -> None:
         while not self._closing_event.is_set():
             try:
                 queue = self._on_compile_task_queue.async_q
                 paths, task = await queue.get()
-                task = self._parse_task(task)
+                if task is None:
+                    continue
+                task = self._parse_runtime_status_for_task(task)
                 if task is None or task.done():
                     continue
                 self._compiling_task = task
                 self._add_task_done_callback(task)
-                task.on_compiled()
+                if task is None:
+                    # the task is not registered, shall raise invalid error to it.
+                    continue
+                if not task.is_bare_task():
+                    # 只有非 bare 才执行 on compiled.
+                    task.on_compiled()
                 # prepare to send
-                await self._consume_task_with_paths(paths, task)
-                await asyncio.sleep(0.0)
+                await self._consume_compiled_task_with_paths(paths, task)
 
             except janus.AsyncQueueShutDown:
                 # shutdown the old queue.
@@ -253,7 +536,7 @@ class AbsChannelRuntime(Generic[CHANNEL], ChannelRuntime, ABC):
         self.logger.info("%s compile task finished", self.log_prefix)
 
     @abstractmethod
-    async def _consume_task_with_paths(self, paths: ChannelPaths, task: CommandTask) -> None:
+    async def _consume_compiled_task_with_paths(self, paths: ChannelPaths, task: CommandTask) -> None:
         """
         push the task to the real handling loop with paths
         """
@@ -261,26 +544,25 @@ class AbsChannelRuntime(Generic[CHANNEL], ChannelRuntime, ABC):
 
     def on_task_done(self, callback: TaskDoneCallback) -> None:
         # 注册 task 回调.
-        self._task_done_callbacks.append(callback)
+        self._on_task_done_callbacks.append(callback)
 
     def _add_task_done_callback(self, task: CommandTask) -> None:
-        if len(self._task_done_callbacks) > 0:
+        if len(self._on_task_done_callbacks) > 0:
             task.add_done_callback(self._task_done_callback)
 
     def _task_done_callback(self, task: CommandTask) -> None:
-        import inspect
-
         if not self.is_running():
             return
-        if len(self._task_done_callbacks) == 0:
+        if len(self._on_task_done_callbacks) == 0:
             return
-        for callback in self._task_done_callbacks:
-            if inspect.iscoroutinefunction(callback):
-                # todo: 似乎要考虑线程安全.
-                self.create_asyncio_task(callback(task))
-            else:
-                # 同步运行.
-                self._loop.run_in_executor(None, callback, task)
+        for callback in self._on_task_done_callbacks:
+            try:
+                callback(task)
+            except Exception as exc:
+                self.logger.exception(
+                    "%s on task done callback %s failed: %s",
+                    self.log_prefix, callback, exc,
+                )
 
     async def clear_own(self) -> None:
         # shutdown the compiling loop.
@@ -299,6 +581,14 @@ class AbsChannelRuntime(Generic[CHANNEL], ChannelRuntime, ABC):
         if self._compiling_task is not None:
             if not self._compiling_task.done():
                 self._compiling_task.fail(cleared_err)
+        if len(self._channel_scopes) > 0:
+            with self._channel_scope_change_lock:
+                self._uncommitted_scopes.clear()
+                scopes = self._channel_scopes.copy()
+                self._channel_scopes.clear()
+            if len(scopes) > 0:
+                for scope in scopes.values():
+                    scope.close('Scope Cleared')
         await self._clear_own()
 
     @abstractmethod
@@ -377,7 +667,7 @@ class AbsChannelRuntime(Generic[CHANNEL], ChannelRuntime, ABC):
     @contextlib.asynccontextmanager
     async def _main_loop_ctx(self):
         try:
-            self._compiling_loop_task = self._loop.create_task(self._on_task_compile_loop())
+            self._compiling_loop_task = self._loop.create_task(self._compiled_task_loop())
             self._main_loop_task = self._loop.create_task(self._main_loop())
             yield
         finally:
@@ -504,6 +794,6 @@ class AbsChannelRuntime(Generic[CHANNEL], ChannelRuntime, ABC):
 
     def destroy(self) -> None:
         # 防止互相持有.
-        self._task_done_callbacks.clear()
+        self._on_task_done_callbacks.clear()
         self._channel = None
         self._importlib = None

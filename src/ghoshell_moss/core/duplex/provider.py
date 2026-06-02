@@ -3,12 +3,15 @@ import contextlib
 import logging
 import threading
 from typing import Callable, Coroutine, Optional, AsyncIterator
-from ghoshell_common.helpers import uuid
+from ghoshell_moss.message import unique_id
 from ghoshell_container import Container, IoCContainer
 from pydantic import ValidationError
 
 from ghoshell_moss.core.concepts.channel import Channel, ChannelProvider, ChannelRuntime
-from ghoshell_moss.core.concepts.command import BaseCommandTask, CommandTask, CommandToken, CommandTaskState, Command
+from ghoshell_moss.core.concepts.command import (
+    BaseCommandTask, CommandTask, CommandToken, CommandTaskState, Command,
+    CommandMeta,
+)
 from ghoshell_moss.core.concepts.errors import FatalError, CommandErrorCode
 from ghoshell_common.contracts import LoggerItf
 from ghoshell_moss.core.helpers.asyncio_utils import ThreadSafeEvent
@@ -22,6 +25,8 @@ from ghoshell_moss.core.helpers.stream import (
 from .connection import Connection, ConnectionClosedError, ConnectionNotAvailable
 from .protocol import (
     ChannelEvent,
+    ChannelEventModel,
+    ChannelEventSerializedError,
     ChannelMetaUpdateEvent,
     ClearEvent,
     CommandCallEvent,
@@ -47,8 +52,18 @@ ChannelEventHandler = Callable[[Channel, ChannelEvent], Coroutine[None, None, bo
 ProxyEventCallback = Callable[[ChannelEvent], None]
 
 
+# 关于 duplex:
+# 作者在还不熟悉 python asyncio 时实现的 duplex + proxy
+# 所以做的架构决策是所有 duplex 的实现屏蔽在抽象下, 并且不暴露协议, 用单元测试固熵.
+# 这样在 duplex 体系可以稳定运行的情况下, 未来可以百分之百重构.
+
 class ProviderTopicService(QueueBasedTopicService):
-    """专门为 provider 准备的 topic."""
+    """
+    专门为 provider 准备的 topic.
+
+    当 topic service 本身未定义时, provider 通过协议来解决点对点 topic 广播. 但不是正规的做法.
+    如果想要正确的组网通讯, 仍需要提供协议范围内的 topic service.
+    """
 
     def __init__(
             self,
@@ -94,7 +109,7 @@ class DuplexChannelProvider(ChannelProvider):
             reconnect_interval_seconds: float = 0.5,
             container: Container = None,
     ):
-        self._uid = uuid()
+        self._uid = unique_id()
         self._container = Container(
             name=f"moss.duplex_provider.{self.__class__.__name__}",
             parent=container,
@@ -103,6 +118,7 @@ class DuplexChannelProvider(ChannelProvider):
 
         self._connection = provider_connection
         """从外面传入的 Connection, Channel provider 不关心参数, 只关心交互逻辑. """
+        self._error_callback: Callable[[Exception], None] | None = None
 
         self._proxy_event_handlers: dict[str, ChannelEventHandler] = proxy_event_handlers or {}
         """注册的事件管理."""
@@ -195,8 +211,8 @@ class DuplexChannelProvider(ChannelProvider):
         finally:
             try:
                 await self._connection.close()
-            except Exception as exc:
-                self.logger.exception("%s close connection failed: %s", self._log_prefix, exc)
+            except (ConnectionClosedError, ConnectionNotAvailable):
+                pass
 
     @contextlib.asynccontextmanager
     async def _bootstrap_main_loop_stack(self) -> AsyncIterator[None]:
@@ -212,8 +228,6 @@ class DuplexChannelProvider(ChannelProvider):
                 await self._main_loop_task
             except asyncio.CancelledError:
                 pass
-            except Exception as exc:
-                self.logger.exception("%s close main loop task failed: %s", self._log_prefix, exc)
 
     @contextlib.asynccontextmanager
     async def arun_channel_runtime(self, runtime: ChannelRuntime):
@@ -267,10 +281,10 @@ class DuplexChannelProvider(ChannelProvider):
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            self.logger.exception("%s close channel task failed: %s", self._log_prefix, exc)
+            self.logger.exception("%s close channel provider on exception: %s", self._log_prefix, exc)
             raise exc
         except KeyboardInterrupt:
-            self.logger.info("%s stop channel task on keyboardInterrupt", self._log_prefix)
+            self.logger.info("%s stop channel provider on keyboardInterrupt", self._log_prefix)
             raise
         finally:
             self._closed_event.set()
@@ -353,7 +367,7 @@ class DuplexChannelProvider(ChannelProvider):
 
     async def _sync_connection(self, new: bool) -> None:
         if new or not self._connection_id:
-            self._connection_id = uuid()
+            self._connection_id = unique_id()
             self._connection_creating_event.clear()
         try:
             listening_topics = []
@@ -364,15 +378,30 @@ class DuplexChannelProvider(ChannelProvider):
                 # 提供当前正在监听的事件.
                 listening_topics=listening_topics,
             ).to_channel_event()
+            # 这里如果抛出异常, 就不会走到 connection creating event set
             await self._send_event_to_proxy(event)
             self._connection_creating_event.set()
         except asyncio.CancelledError:
             pass
         except (ConnectionNotAvailable, ConnectionClosedError):
-            pass
+            # 清除连接状态避免脏 id 残留, 并等待重试间隔避免空转.
+            await self._clear_connection_status()
+            await asyncio.sleep(self._reconnect_interval_seconds)
 
     def on_proxy_event(self, callback: Callable[[ChannelEvent], None]):
         self._proxy_event_callbacks.append(callback)
+
+    def on_error(self, callback: Callable[[Exception], None]):
+        self._error_callback = callback
+
+    def _report_duplex_captured_error(self, err: Exception) -> None:
+        """双工运行时中被吞掉的异常都做通知. """
+        if self._error_callback is not None:
+            try:
+                self._error_callback(err)
+            except Exception as exc:
+                self._logger.exception(
+                    "%s report_duplex_runtime_error failed: %s", self._log_prefix, exc)
 
     def _callback_proxy_event(self, event: ChannelEvent) -> None:
         if len(self._proxy_event_callbacks) > 0:
@@ -449,7 +478,7 @@ class DuplexChannelProvider(ChannelProvider):
                 # 2. 本地运行一个 Shell, 消费 command token 生成命令.
                 # 3. 本地的 shell 走独立的调度逻辑.
                 # 有的是阻塞的, 有的不是阻塞的.
-                await self._consume_single_event(event)
+                await self._handle_single_event(event)
             except asyncio.CancelledError:
                 self.logger.warning("%s consume runtime event loop is cancelled", self._log_prefix)
                 # 中断循环.
@@ -463,26 +492,13 @@ class DuplexChannelProvider(ChannelProvider):
                 break
             except Exception as e:
                 self.logger.exception("%s consume runtime event loop failed: %s", self._log_prefix, e)
+                self._report_duplex_captured_error(e)
                 provider_error = ProviderErrorEvent(
                     connection_id=self._connection_id or '',
                     errcode=-1,
                     errmsg=f"provider error: {e}",
                 )
-                await self._send_event_to_proxy(provider_error.to_channel_event())
-
-    async def _consume_single_event(self, event: ChannelEvent) -> None:
-        """消费单一事件. 这一层解决 task 生命周期管理."""
-        try:
-            self.logger.info("%s Received event: %s", self._log_prefix, event)
-            handle_task = asyncio.create_task(self._handle_single_event(event))
-            wait_close = asyncio.create_task(self._stopping_event.wait())
-            done, pending = await asyncio.wait([handle_task, wait_close], return_when=asyncio.FIRST_COMPLETED)
-            for t in pending:
-                t.cancel()
-            await handle_task
-        except Exception as e:
-            self.logger.exception("%s Handle event %s task failed: %s", self._log_prefix, event, e)
-            raise e
+                await self._send_event_model_to_proxy(provider_error)
 
     async def _handle_single_event(self, event: ChannelEvent) -> None:
         """做单个事件的异常管理, 理论上不要抛出任何异常."""
@@ -496,25 +512,27 @@ class DuplexChannelProvider(ChannelProvider):
                 if not go_on:
                     return
             # 运行系统默认的 event 处理.
-            await self._handle_default_event(event)
+            await self._handle_default_single_event(event)
 
         except asyncio.CancelledError:
             pass
         except FatalError as e:
             self.logger.exception("%s fatal error while handling event: %s", self._log_prefix, e)
             self._stopping_event.set()
+            raise e
         except Exception as e:
+            self._report_duplex_captured_error(e)
             self.logger.exception("%s Unhandled error while handling event: %s", self._log_prefix, e)
 
-    async def _handle_default_event(self, event: ChannelEvent) -> None:
+    async def _handle_default_single_event(self, event: ChannelEvent) -> None:
         # system event
         try:
             if model := CommandCallEvent.from_channel_event(event):
-                # 异步运行 command call.
-                _ = self._loop.create_task(self._handle_command_call(model))
+                # 同步运行 command call. 到确认入队.
+                self._enqueue_command_call(model)
 
             elif model := CommandCancelEvent.from_channel_event(event):
-                _ = self._loop.create_task(self._handle_command_cancel(model))
+                self._handle_command_cancel(model)
 
             elif model := SyncChannelMetasEvent.from_channel_event(event):
                 await self._handle_sync_channel_meta(model)
@@ -527,8 +545,9 @@ class DuplexChannelProvider(ChannelProvider):
                 await self._handle_proxy_topic(model)
             else:
                 self.logger.info("%s unknown event: %s", self._log_prefix, event)
-        except ValidationError:
+        except ValidationError as e:
             self.logger.exception("%s received invalid event: %s", self._log_prefix, event)
+            self._report_duplex_captured_error(e)
         except Exception as e:
             self.logger.exception("%s handle default event failed: %s", self._log_prefix, e)
             raise e
@@ -559,6 +578,23 @@ class DuplexChannelProvider(ChannelProvider):
             self.logger.exception("%s Clear channel failed: %s", self._log_prefix, e)
             raise e
 
+    async def _send_event_model_to_proxy(
+            self,
+            model: ChannelEventModel,
+            connection_id: str = '',
+            throw: bool = True,
+    ) -> None:
+        try:
+            await self._send_event_to_proxy(model.to_channel_event(), connection_id)
+        except ChannelEventSerializedError as e:
+            self._logger.exception("%s send event model %s serialized error: %s", self._log_prefix, model, e)
+            self._report_duplex_captured_error(e)
+        except Exception as e:
+            if throw:
+                raise e
+            self.logger.exception("%s send event model %s failed %s", self._log_prefix, model, e)
+            self._report_duplex_captured_error(e)
+
     async def _send_event_to_proxy(self, event: ChannelEvent, connection_id: str = "") -> None:
         """做好事件发送的异常管理."""
         try:
@@ -578,6 +614,7 @@ class DuplexChannelProvider(ChannelProvider):
         except Exception as e:
             self.logger.exception("%s Send event %s failed %s", self._log_prefix, event, e)
             # 不抛出异常.
+            self._report_duplex_captured_error(e)
 
     async def _handle_sync_channel_meta(self, event: SyncChannelMetasEvent) -> None:
         try:
@@ -592,11 +629,11 @@ class DuplexChannelProvider(ChannelProvider):
                 metas=metas.copy(),
                 root_chan=self._channel.name(),
             )
-            await self._send_event_to_proxy(response.to_channel_event())
+            await self._send_event_model_to_proxy(response)
         except asyncio.CancelledError:
             pass
 
-    async def _handle_command_cancel(self, event: CommandCancelEvent) -> None:
+    def _handle_command_cancel(self, event: CommandCancelEvent) -> None:
         cid = event.command_id
         task = self._running_command_tasks.get(cid, None)
         if task is not None:
@@ -617,63 +654,83 @@ class DuplexChannelProvider(ChannelProvider):
         else:
             sender.commit()
 
-    async def _handle_command_call(self, call_event: CommandCallEvent) -> None:
-        """执行一个命令运行的逻辑."""
-        # 获取真实的 command 对象.
+    def _enqueue_command_call(self, call_event: CommandCallEvent) -> None:
         unique_name = Command.make_unique_name(call_event.chan, call_event.name)
         command = self._root_runtime.get_command(unique_name)
-        if command is None:
+        if command:
+            if not command.is_available():
+                response = call_event.not_available(f"Command {unique_name} not available in provider")
+                self._loop.create_task(self._send_event_model_to_proxy(response, throw=False))
+                return
+            task = BaseCommandTask.from_command(
+                command,
+                chan_=call_event.chan,
+                tokens_=call_event.tokens,
+                args=call_event.args,
+                kwargs=call_event.kwargs,
+                cid=call_event.command_id,
+                context=call_event.context,
+                call_id=call_event.call_id,
+                scope_id=call_event.scope_id,
+            )
+        elif Command.is_magic_command(call_event.name):
+            # 魔法函数允许到执行期才做检查.
+            task = BaseCommandTask(
+                chan=call_event.chan,
+                meta=CommandMeta(name=call_event.name),
+                func=None,
+                tokens=call_event.tokens,
+                args=call_event.args,
+                kwargs=call_event.kwargs,
+                cid=call_event.command_id,
+                context=call_event.context,
+                call_id=call_event.call_id,
+                scope_id=call_event.scope_id,
+            )
+        else:
             response = call_event.not_available(f"Command {unique_name} not found at provider")
-            await self._send_event_to_proxy(response.to_channel_event())
+            self._loop.create_task(self._send_event_model_to_proxy(response))
             return
 
-        elif not command.is_available():
-            response = call_event.not_available(f"Command {unique_name} not available in provider")
-            await self._send_event_to_proxy(response.to_channel_event())
-            return
-
-        task = BaseCommandTask(
-            chan=call_event.chan,
-            meta=command.meta(),
-            func=command.__call__,
-            tokens=call_event.tokens,
-            args=call_event.args,
-            kwargs=call_event.kwargs,
-            cid=call_event.command_id,
-            context=call_event.context,
-            call_id=call_event.call_id,
-        )
         # 真正执行这个 task.
+        enqueued = False
         try:
-            # 多余的, 没什么用.
+            # 做一个简单的状态标记.
             task.set_state(CommandTaskState.executing.value)
             task.add_done_callback(self._remove_running_task)
-            await self._add_running_task(task)
+            self._add_running_task(task)
+            self._loop.create_task(self._ensure_task_done(call_event, task))
             self._root_runtime.push_task(task)
+            enqueued = True
+        finally:
+            if not enqueued:
+                response = call_event.not_available(f"Command {unique_name} not available in provider")
+                self._loop.create_task(self._send_event_model_to_proxy(response, throw=False))
+
+    async def _ensure_task_done(self, call_event: CommandCallEvent, task: CommandTask) -> None:
+        try:
+            await asyncio.sleep(0.0)
+            # 做一个简单的状态标记.
             await task
-        except asyncio.CancelledError:
-            task.cancel("cancelled")
-            pass
         except Exception as e:
-            self.logger.exception("Execute command failed")
+            self.logger.exception(
+                "%s Execute command %s failed: %r",
+                self._log_prefix, task.caller_name(), e,
+            )
             task.fail(e)
         finally:
             if not task.done():
                 task.cancel()
-            result = task.task_result().serializable() if task.success() else None
+            result = task.task_result().serializable_copy() if task.success() else None
             response = call_event.done(result, task.errcode, task.errmsg)
-            await self._send_event_to_proxy(response.to_channel_event())
+            await self._send_event_model_to_proxy(response)
 
-    async def _add_running_task(self, task: CommandTask) -> None:
-        await self._running_command_tasks_lock.acquire()
-        try:
-            if task.meta.delta_arg is not None and task.meta.delta_arg not in task.kwargs:
-                sender, receiver = create_sender_and_receiver()
-                task.kwargs[task.meta.delta_arg] = receiver
-                self._running_command_delta_stream[task.cid] = (sender, receiver)
-            self._running_command_tasks[task.cid] = task
-        finally:
-            self._running_command_tasks_lock.release()
+    def _add_running_task(self, task: CommandTask) -> None:
+        if task.meta.delta_arg is not None and task.meta.delta_arg not in task.kwargs:
+            sender, receiver = create_sender_and_receiver()
+            task.kwargs[task.meta.delta_arg] = receiver
+            self._running_command_delta_stream[task.cid] = (sender, receiver)
+        self._running_command_tasks[task.cid] = task
 
     def _remove_running_task(self, task: CommandTask) -> None:
         cid = task.cid

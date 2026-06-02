@@ -59,8 +59,8 @@ def get_example_speech(
     """
     from ghoshell_moss.core.speech import BaseTTSSpeech
     from ghoshell_moss.core.speech.mock import MockSpeech
-    from ghoshell_moss.core.speech.player.pyaudio_player import PyAudioStreamPlayer
-    from ghoshell_moss.core.speech.volcengine_tts import VolcengineTTS, VolcengineTTSConf
+    from ghoshell_moss.host.speech.player.pyaudio_player import PyAudioStreamPlayer
+    from ghoshell_moss.host.speech.volcengine_tts import VolcengineTTS, VolcengineTTSConf
 
     container = container or get_container()
     use_voice = os.environ.get("USE_VOICE_SPEECH", "no") == "yes"

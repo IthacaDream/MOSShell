@@ -3,7 +3,7 @@ import json
 
 from pydantic import ValidationError
 
-from ghoshell_moss import ChannelCtx, CommandErrorCode, PyChannel
+from ghoshell_moss.core import ChannelCtx, CommandErrorCode, PyChannel
 from ghoshell_moss_contrib.prototypes.ros2_robot.abcd import MOSSRobotManager, RobotController
 from ghoshell_moss_contrib.prototypes.ros2_robot.models import Animation, Pose, Trajectory
 

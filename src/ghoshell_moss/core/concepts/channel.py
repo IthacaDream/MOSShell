@@ -13,12 +13,14 @@ from typing import (
     Optional,
     Annotated,
     Callable,
-    Coroutine,
+    Coroutine, Literal,
+    List, TYPE_CHECKING,
 )
 
 from ghoshell_container import INSTANCE, IoCContainer, get_container
 from pydantic import BaseModel, Field, AwareDatetime
 from typing_extensions import Self
+
 from ghoshell_moss.core.concepts.command import (
     BaseCommandTask,
     Command,
@@ -41,10 +43,12 @@ from ghoshell_common.contracts import LoggerItf
 from datetime import datetime
 from dateutil import tz
 
+if TYPE_CHECKING:
+    from PIL.Image import Image
+
 __all__ = [
-    "Channel",
+    "Channel", "ChannelState",
     "TaskDoneCallback",
-    "RefreshMetaCallback",
     "ChannelRuntime",
     "ChannelTree",
     "ChannelFullPath",
@@ -53,12 +57,11 @@ __all__ = [
     "ChannelProvider",
     "ChannelProxy",
     "ChannelCtx",
-    "ChannelInterface",
     "ChannelName",
     "ChannelNamePattern",
+    # scope 语法
+    "ChannelScope", "ChannelScopeType", "ChannelScopeDefaultType",
 ]
-
-__description__ = "Use Tree-like structure to manage all the Commands of MOSS for AI."
 
 
 class ChannelMeta(BaseModel):
@@ -75,7 +78,8 @@ class ChannelMeta(BaseModel):
     commands: list[CommandMeta] = Field(default_factory=list, description="The list of commands.")
     states: dict[str, str] = Field(default_factory=dict, description="The states of the channel.")
     current_state: str = Field(default="", description="The current state of the channel.")
-    proxy: list[str] = Field(default_factory=list, description="the proxy children names")
+    modules: list[str] = Field(default_factory=list, description="Permanent capability module names (for debug).")
+    proxy: bool = Field(default=False, description="Whether the channel is proxy, not local one.")
 
     # about instructions / context messages
     # ModelContext is built by many messages blocks, we believe the blocks should be :
@@ -142,7 +146,8 @@ ChannelName = Annotated[str, Field(pattern=ChannelNamePattern)]
 
 class ChannelCtx:
     """
-    在 Channel 的运行过程中, 方便一个 Command 或者 Lifecycle Function 可以拿到调用它的 Runtime.
+    在 Channel 的运行过程的 Command 或者 Lifecycle Function 可以使用的模块.
+    通过 contextvars Context 来传递相关上下文.
     """
 
     def __init__(
@@ -231,13 +236,122 @@ class ChannelCtx:
         return item
 
 
+class ChannelState(ABC):
+    """
+    Channel 的运行时状态, 用来快速构建一个 StateChannel.
+
+    运行过程中要使用 IoC 容器, 可以通过 bootstrap 函数被调用时获取并持有依赖
+    或者 channel_builder.CommandUtil.get_contract 在每个 command 和生命周期函数被调用时获取.
+    """
+
+    @abstractmethod
+    def name(self) -> str:
+        """
+        return name of the state
+        """
+        pass
+
+    @abstractmethod
+    def description(self) -> str:
+        """
+        return description of the state
+        """
+        pass
+
+    @abstractmethod
+    def is_available(self) -> bool:
+        """
+        if the state is available
+        """
+        pass
+
+    def is_dynamic(self) -> bool:
+        """
+        if the state is dynamic, need to refresh each time.
+        """
+        # 既然是有状态的 Channel, 默认是动态的.
+        return True
+
+    async def get_instruction(self) -> str:
+        """
+        return instruction provided by the state
+        """
+        return ''
+
+    async def get_context_messages(self) -> "List[Message | str | Image]":
+        """
+        return the context messages from the state.
+        """
+        return []
+
+    async def on_startup(self) -> None:
+        """
+        when channel startup.
+        """
+        return None
+
+    async def on_close(self) -> None:
+        """
+        when channel close.
+        """
+        return None
+
+    async def on_running(self) -> None:
+        """
+        when channel is running.
+        """
+        return None
+
+    async def on_idle(self) -> None:
+        """
+        when channel is idle, all the commands are done and the children are idle as well
+        """
+        return None
+
+    @abstractmethod
+    def own_commands(self) -> dict[str, Command]:
+        """
+        return the commands mapping by name
+        """
+        pass
+
+    @abstractmethod
+    def get_own_command(self, name: str) -> Command | None:
+        """
+        get a command by name
+        """
+        pass
+
+    def bootstrap(self, container: IoCContainer) -> None:
+        """
+        register something to the container. or get some contracts from it.
+        函数会被 ChannelRuntime 实例化后调用.
+        """
+        return
+
+    def get_children(self) -> dict[ChannelName, 'Channel']:
+        """
+        return the sustain children channel
+        """
+        return {}
+
+    def get_virtual_children(self) -> dict[ChannelName, 'Channel']:
+        """
+        return the virtual children that may be changed during runtime
+        """
+        return {}
+
+
 class Channel(ABC):
     """
     MOSS 架构本质上想构建一种面向模型使用的高级编程语言.
     它能把跨越各个进程的能力 (主要是函数), 全部通过双工通讯的办法, 提供给 AI 大模型调用.
 
     对应编程语言 Python 的 Module,  在 Shell 架构中定义了 Channel (中文: 经络)
+    Channel 实例本身应该是无副作用的, 只有在运行时通过 bootstrap 之后, 才会返回有作用的实例.
+    它的唯一性通过 channel.id 判断, 而不是实例本身.
     """
+    MAIN_CHANNEL_NAME = '__main__'
 
     @abstractmethod
     def name(self) -> ChannelName:
@@ -250,9 +364,12 @@ class Channel(ABC):
     @abstractmethod
     def id(self) -> str:
         """
-        Channel 实例也只能用 id 来判断唯一性.
+        Channel 实例用 id 来判断唯一性, 会与 Runtime 绑定.
         """
         pass
+
+    def __eq__(self, other):
+        return self.id() == other.id() and self.name() == other.name()
 
     @abstractmethod
     def description(self) -> str:
@@ -282,19 +399,81 @@ class Channel(ABC):
             return []
         return channel_path.split(".", limit)
 
-    @abstractmethod
     def bootstrap(self, container: Optional[IoCContainer] = None) -> "ChannelRuntime":
         """
         传入一个 IoC 容器, 创建 Channel 的 Runtime 实例.
         """
+        if container is None:
+            from ghoshell_container import Container
+            container = Container(name="channel/{name}{id}".format(name=self.name(), id=self.id()))
+        runtime_instance = self.materialize(container)
+        if isinstance(runtime_instance, ChannelRuntime):
+            return runtime_instance
+        elif isinstance(runtime_instance, ChannelState):
+            from ghoshell_moss.core.blueprint.states_channel import new_stateful_channel_from_main
+            return new_stateful_channel_from_main(runtime_instance, id=self.id()).bootstrap(container)
+        raise RuntimeError(f"invalid channel runtime instance: {runtime_instance}")
+
+    @abstractmethod
+    def materialize(self, container: IoCContainer) -> 'ChannelState | ChannelRuntime':
         pass
 
 
-ChannelInterface = dict[ChannelFullPath, ChannelMeta]
-""" 用于描述一个 Channel 能够提供给 AI 的所有能力. """
+TaskDoneCallback = Callable[[CommandTask], None]
 
-TaskDoneCallback = Callable[[CommandTask], None] | Callable[[CommandTask], Coroutine[None, None, None]]
-RefreshMetaCallback = Callable[[ChannelInterface], None] | Callable[[ChannelInterface], Coroutine[None, None, None]]
+ChannelScopeType = Literal['flow', 'all', 'any']
+ChannelScopeDefaultType = 'flow'
+
+
+class ChannelScope(ABC):
+    """
+    Channel 作用域语法.
+    用来管理同组作用域下所有的 CommandTask 生命周期.
+    """
+
+    @property
+    @abstractmethod
+    def scope_id(self) -> str:
+        """作用域的唯一id, 通常就是 task.cid """
+        pass
+
+    @abstractmethod
+    def add_task(self, task: CommandTask) -> CommandTask:
+        """将一个 task 绑定到作用域. 作用域关闭时, 所有添加的 task 都会被关闭."""
+        pass
+
+    @abstractmethod
+    def commit(self, task: CommandTask) -> CommandTask:
+        """结束作用域的注册. 之后绑定到这个 scope 上的任务都会失败."""
+        pass
+
+    @abstractmethod
+    def is_commited(self) -> bool:
+        pass
+
+    @abstractmethod
+    def is_closed(self) -> bool:
+        pass
+
+    @abstractmethod
+    async def tick(
+            self,
+            *,
+            until: ChannelScopeType,
+            timeout: float | None = None,
+    ) -> None:
+        """开始作用域的计时逻辑"""
+        pass
+
+    @abstractmethod
+    async def wait_close(self) -> str | None:
+        """等待作用域正常结束"""
+        pass
+
+    @abstractmethod
+    def close(self, reason: str = '') -> None:
+        """主动关闭作用域"""
+        pass
 
 
 class ChannelRuntime(ABC):
@@ -529,20 +708,119 @@ class ChannelRuntime(ABC):
         pass
 
     @abstractmethod
-    def push_task(self, *tasks: CommandTask) -> None:
-        """
-        将 task 推入 channel runtime 的执行栈.
-        """
-        for task in tasks:
-            paths = Channel.split_channel_path_to_names(task.chan)
-            self.push_task_with_paths(paths, task)
+    def open_scope(
+            self,
+            task: CommandTask,
+    ) -> None:
+        """开启一个作用域. 返回处理后的 CommandTask. """
+        pass
 
     @abstractmethod
+    def get_active_scope(self, scope_id: str | None, pop: bool) -> ChannelScope | None:
+        """获取作用域. scope_id 为None 的话返回最后一个 """
+        pass
+
+    @abstractmethod
+    def commit_scope(self, task: CommandTask) -> None:
+        """结束一个作用域的注册."""
+        pass
+
+    def push_task(self, *tasks: CommandTask) -> None:
+        """
+        将当前 ChannelRuntime 视作根节点, 将 task 推入 channel runtime 的执行栈.
+        根节点唯一入口. 包含根节点自身特殊逻辑.
+        这个函数的副作用, 不接受无序 tasks.
+        """
+        # 通过显式定义, 展示 CommandTask 体系处理的基本逻辑.
+        is_running = self.is_running()
+        for task in tasks:
+            if not is_running:
+                task.fail(CommandErrorCode.NOT_RUNNING.error('Channel Runtime not running'))
+                continue
+            # 作用域语法检查. 只有将 channel runtime 作为根路径使用时才会触发检查.
+            # 对于一个 Channel 树的入口而言, 有责任创建作用域体系. 同一个进程内只有一个入口要管理整体作用域.
+            # 跨进程通讯 (ChannelProxy) 的远程根节点入口会根据已有的标记完成重建.
+            command_name = task.meta.name
+            # ChannelRuntime 作用域语法.
+            if command_name == self.__scope_enter__.__name__:
+                # 开启一个新的作用域. 作用域关闭的话, 这个新作用域和它的所有task 都会关闭.
+                # 使用 task id 作为作用域标记. 给后续节点做染色.
+                # scope 体系是一个父子依赖的 stack, 父 scope 关闭时也会关闭子 stack.
+                task.func = self.__scope_enter__
+                self.open_scope(task)
+            elif command_name == self.__scope_exit__.__name__:
+                task.func = self.__scope_exit__
+                self.commit_scope(task)
+            elif last := self.get_active_scope(None, False):
+                # 做标记.
+                last.add_task(task)
+                task.scope_id = last.scope_id
+            else:
+                # 无任何作用域信息时, 和默认规则保持完全一致.
+                pass
+            # 作用域语法可能直接开启, 或关闭了 task 生命周期.
+            if task.done():
+                continue
+            paths = Channel.split_channel_path_to_names(task.chan)
+            # 真正入执行栈.
+            self.push_task_with_paths(paths, task)
+
     def push_task_with_paths(self, paths: ChannelPaths, task: CommandTask) -> None:
         """
-        将一个 Task 推入到执行栈中. 阻塞到完成入栈为止.
+        将一个 Task 推入到执行栈中.
+        *** 是 ChannelRuntime 有序执行 Task 的唯一合法入口 ***
+        :param paths: task 对于当前 ChannelRuntime 的相对路径, 为空表示为当前 ChannelRuntime.
+        :param task: command task
+        """
+        if task.done():
+            # 跳过已经 done 的不要入队.
+            return
+        if not self.is_connected():
+            task.fail(CommandErrorCode.NOT_CONNECTED.error('Channel Runtime not connected'))
+            return
+        elif not self.is_available():
+            task.fail(CommandErrorCode.NOT_AVAILABLE.error('Channel Runtime not available'))
+            return
+        # 对空函数做预处理, 允许传入 caller 本身.
+        is_self_task = len(paths) == 0
+        if is_self_task and task.is_bare_task():
+            # 对 bare task 做预处理.
+            own_command = self.get_own_command(task.meta.name)
+            if own_command:
+                # 优先用真实的 command, 包括魔法 command 来不足.
+                task.set_command(own_command)
+            elif task.is_magical():
+                task = self.partial_bare_magical_task(task)
+            else:
+                task.fail(CommandErrorCode.NOT_FOUND.error(f'Command {task.caller_name()} not found'))
+                return
+        if task.done():
+            return
+        # 最终入队. 保证入队后有序消费.
+        self._enqueue_task_with_paths(paths, task)
+
+    @abstractmethod
+    def _enqueue_task_with_paths(self, paths: ChannelPaths, task: CommandTask) -> None:
+        """
+        将相对路径的 task 入队.
+        不应直接调用.
         """
         pass
+
+    def partial_bare_magical_task(self, task: CommandTask) -> CommandTask:
+        """
+        基于约定的隐藏协议实现魔法命令的隐藏定义.
+
+        通常和 System Prompt 配合, 不走 Command 体系. 保留复杂逻辑 hack 的可能性.
+        """
+        if not task.is_bare_task():
+            return task
+        command_name = task.meta.name
+        # 使用约定的魔法函数.
+        if command_name == self.__content__.__name__:
+            task.func = self.__content__
+        # 默认魔法函数继续传递.
+        return task
 
     @abstractmethod
     def on_task_done(self, callback: TaskDoneCallback) -> None:
@@ -562,6 +840,7 @@ class ChannelRuntime(ABC):
     async def execute_task(self, task: CommandTask) -> None:
         """
         simple way to execute task in runtime without queue logic.
+        提示底层逻辑如何传入 ChannelCtx.
         """
         if not self.is_running():
             task.fail(CommandErrorCode.NOT_RUNNING.error(f"Channel {self.name} is not running"))
@@ -589,7 +868,7 @@ class ChannelRuntime(ABC):
         """
         example to create channel task
         通过 Runtime 创建一个新的的 CommandTask.
-        不会执行.
+        不会执行, 需要执行可以用 execute task | execute command
         """
         command = self.get_command(name)
         if command is None:
@@ -611,11 +890,15 @@ class ChannelRuntime(ABC):
             *,
             args: tuple | None = None,
             kwargs: dict | None = None,
+            timeout: float | None = None,
     ) -> Awaitable:
         """
-        执行命令并且阻塞等待拿到结果.
+        执行命令并且阻塞等待拿到结果. 通常用于调试.
+        正确的路径是走 push task 做阻塞.
         """
         task = self.create_command_task(name, args=args, kwargs=kwargs)
+        if timeout is not None:
+            task.timeout = timeout
         self.push_task(task)
         return task
 
@@ -705,11 +988,56 @@ class ChannelRuntime(ABC):
         """
         await self.tree.wait_channel_children_idle(self.channel)
 
-    def channel_path(self) -> ChannelFullPath:
+    def channel_path(self) -> ChannelFullPath | None:
         """
-        return the channel path in the tree
+        return the channel path in the tree, or None means not registered yet (which is an unnormal issue)
         """
-        return self.tree.get_channel_path(self.channel.id()) or self.channel.name()
+        return self.tree.get_channel_path(self.channel.id())
+
+    # --- default magic methods, 为后来的胶水层图灵完备语法做准备 --- #
+
+    @staticmethod
+    async def __content__(chunks__=None) -> None | str:
+        # 所有的 ChannelRuntime 均允许时序插入多端文本的 Command, 作为流式输入的基准函数.
+        # 当 __content__ 魔法 Command 不存在时, ChannelRuntime 会用空函数兜底. 这里是空函数的标准形式.
+        # 定义在 Channel Runtime 上提示这是系统级约定.
+        return None
+
+    async def __scope_enter__(
+            self,
+            *,
+            timeout: float | None = None,
+            until: ChannelScopeType = 'flow',
+    ) -> None:
+        """
+        scope enter command
+        """
+        # 当 scope enter task 执行的时候, 正式开始为 Scope 计时.
+        # scope 中所有 task 的交织关系是在 "编译器" 确定的, 正式运行则在 command 执行时计算.
+        task = ChannelCtx.task()
+        if task is None:
+            return
+        if not task.scope_id:
+            return
+        scope = self.get_active_scope(task.scope_id, False)
+        if scope is not None:
+            await scope.tick(timeout=timeout, until=until)
+        return
+
+    async def __scope_exit__(self) -> str | None:
+        task = ChannelCtx.task()
+        if task is None:
+            return None
+        if not task.scope_id:
+            return None
+        scope = self.get_active_scope(task.scope_id, True)
+        if scope is not None:
+            try:
+                return await scope.wait_close()
+            finally:
+                if not scope.is_closed():
+                    scope.close()
+        return None
 
 
 class ChannelTree(ABC):
@@ -804,6 +1132,7 @@ class ChannelTree(ABC):
 
     @abstractmethod
     def get_channel_path(self, channel_id: str) -> ChannelFullPath | None:
+        """从全局中重新定位当前 channel 的绝对路径."""
         pass
 
     async def clear(self, runtime: ChannelRuntime) -> None:
@@ -946,6 +1275,10 @@ class ChannelProvider(ABC):
         return thread
 
     def on_proxy_event(self, callback: Callable[[Any], None]):
+        """接受 proxy 发送事件的回调"""
+        pass
+
+    def on_error(self, callback: Callable[[Exception], None]):
         pass
 
     @abstractmethod

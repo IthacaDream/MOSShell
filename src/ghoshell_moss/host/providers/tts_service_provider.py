@@ -2,7 +2,7 @@ from typing import Literal
 from ghoshell_moss.contracts.speech import TTS
 from ghoshell_moss.contracts.logger import LoggerItf
 from ghoshell_moss.contracts.configs import ConfigType, ConfigStore
-from ghoshell_moss.core.speech.volcengine_tts import VolcengineTTSConf, VolcengineTTS
+from ghoshell_moss.host.speech.volcengine_tts import VolcengineTTSConf, VolcengineTTS
 from ghoshell_container import IoCContainer, Provider, INSTANCE
 from pydantic import Field
 

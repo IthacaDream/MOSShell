@@ -1,12 +1,19 @@
-import json
+"""语音交互：整合 TTS 与音频播放器 | 交互能力 | beta
+
+Example:
+    from ghoshell_moss.channels.speech_channel import SpeechChannel
+    chan = SpeechChannel(name='speech', description='语音交互通道', speech=tts_speech)
+"""
+
 from typing import Optional
 
 from ghoshell_container import IoCContainer
 
 from ghoshell_moss.contracts.speech import Speech, TTSSpeech, TTS, StreamAudioPlayer
 from ghoshell_moss.core import PyChannel, Channel, ChannelRuntime, ChannelCtx
-from ghoshell_moss.core.speech import BaseTTSSpeech
-from ghoshell_common.helpers import uuid
+
+from ghoshell_moss.core.speech import BaseTTSSpeech, SpeechChannelModule
+from ghoshell_moss.message import unique_id
 
 __all__ = ["SpeechChannel", "TTSSpeechChannel"]
 
@@ -18,16 +25,15 @@ class SpeechChannel(Channel):
     """
 
     def __init__(
-        self,
-        name: str,
-        description: str,
-        speech: TTSSpeech | Speech,
+            self,
+            name: str,
+            description: str,
+            speech: TTSSpeech | Speech,
     ):
         self._speech = speech
-        self._uid = uuid()
+        self._uid = unique_id()
         self._name = name
         self._description = description
-        self._runtime: Optional[ChannelRuntime] = None
 
     def name(self) -> str:
         return self._name
@@ -48,10 +54,7 @@ class SpeechChannel(Channel):
         stream = self._speech.new_stream(batch_id=batch_id)
         await stream.speak(chunks__)
 
-    def bootstrap(self, container: Optional[IoCContainer] = None) -> "ChannelRuntime":
-        if self._runtime and self._runtime.is_running():
-            raise RuntimeError(f"{self._name} already running")
-
+    def materialize(self, container: IoCContainer) -> "ChannelRuntime":
         channel = PyChannel(name=self._name, description=self._description, blocking=True)
 
         # 注册说话的命令. 可能被覆盖.
@@ -61,10 +64,9 @@ class SpeechChannel(Channel):
         channel.build.startup(self._speech.start)
         channel.build.close(self._speech.close)
 
-        if isinstance(self._speech, TTSSpeech):
-            # 注册 tts 原生 command
-            for command in self._speech.commands():
-                channel.build.add_command(command)
+        channel.with_module(
+            SpeechChannelModule(register_content=True)
+        )
 
         return channel.bootstrap(container=container)
 
@@ -75,12 +77,12 @@ class TTSSpeechChannel(SpeechChannel):
     """
 
     def __init__(
-        self,
-        *,
-        name: str,
-        description: str,
-        tts: TTS,
-        player: StreamAudioPlayer,
+            self,
+            *,
+            name: str,
+            description: str,
+            tts: TTS,
+            player: StreamAudioPlayer,
     ):
         speech = BaseTTSSpeech(tts=tts, player=player)
         super().__init__(

@@ -22,7 +22,7 @@ from miku_channels.head import head_chan
 from miku_channels.leg import left_leg_chan, right_leg_chan
 from miku_channels.necktie import necktie_chan
 
-from ghoshell_moss import Channel
+from ghoshell_moss.core import Channel
 from ghoshell_moss.bridges.zmq_channel import ZMQChannelProvider
 
 # 全局状态

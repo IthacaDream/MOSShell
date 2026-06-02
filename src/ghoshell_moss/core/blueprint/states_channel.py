@@ -1,17 +1,20 @@
 from abc import ABC, abstractmethod
+
+from typing import Protocol, Callable
 from typing_extensions import Self
 
 from ghoshell_container import IoCContainer
 from ghoshell_moss.message import Message
 from ghoshell_moss.core.concepts.command import Command
-from ghoshell_moss.core.concepts.channel import Channel, ChannelName
+from ghoshell_moss.core.concepts.channel import Channel, ChannelName, ChannelRuntime, ChannelState
 from ghoshell_moss.core.blueprint.channel_builder import Builder, MutableChannel
-from PIL.Image import Image
 
 __all__ = [
-    'ChannelState', 'ChannelStateBuilder', 'StatefulChannel',
-    'new_state_builder', 'new_channel_from_state', 'new_stateful_channel',
-    'PrimeChannel', 'new_prime_channel',
+    'ChannelState', 'MutableChannelState', 'StatefulChannel',
+    'new_channel_state', 'new_stateful_channel_from_main', 'new_stateful_channel',
+    'PrimeChannel', 'new_prime_channel', 'new_shell_main_channel',
+    'ChannelModule',
+    'new_default_shell_main_channel',
 ]
 
 """
@@ -19,111 +22,43 @@ how to build a stateful channel
 """
 
 
-class ChannelState(ABC):
+class ChannelModule(Protocol):
     """
-    Channel 的运行时状态, 用来快速构建一个 StateChannel.
+    生命周期感知的模块化能力单元。
+
+    通过 BaseStateChannel.with_module() 注册为 channel 的永久能力模块。
+    所有 module 同时激活、累积叠加 — 与 with_state() 的排他切换正交。
+    PyChannelBuilder 和任意 ChannelState 实现自动满足此 Protocol。
+
+    Protocol 意味着结构子类型 — 只要实现了 name() + own_commands() 的类型就是 ChannelModule，
+    不需要显式继承。on_startup/on_close/get_instruction/get_context_messages 是可选的生命周期钩子。
+
+    运行过程中要使用 IoC 容器, 可以通过 channel_builder.CommandUtil.get_contract 获取
     """
 
-    @abstractmethod
-    def name(self) -> str:
-        """
-        return name of the state
-        """
+    def name(self) -> str: ...
+
+    def own_commands(self) -> dict[str, Command]: ...
+
+    async def on_startup(self) -> None:
+        # 可以通过 CommandUtil.get_contract 获取 ioc 绑定依赖.
         pass
 
-    @abstractmethod
-    def description(self) -> str:
-        """
-        return description of the state
-        """
-        pass
-
-    @abstractmethod
-    def is_available(self) -> bool:
-        """
-        if the state is available
-        """
-        pass
-
-    @abstractmethod
-    def is_dynamic(self) -> bool:
-        """
-        if the state is dynamic, need to refresh each time.
-        """
+    async def on_close(self) -> None:
+        # 可以通过 CommandUtil.get_contract 获取 ioc 绑定依赖.
         pass
 
     async def get_instruction(self) -> str:
-        """
-        return instruction provided by the state
-        """
-        return ''
+        return ""
 
-    async def get_context_messages(self) -> list[Message | str | Image]:
-        """
-        return the context messages from the state.
-        """
+    async def get_context_messages(self) -> list[Message]:
+        # 可以通过 CommandUtil.get_contract 获取 ioc 绑定依赖.
         return []
 
-    async def on_startup(self) -> None:
-        """
-        when channel startup.
-        """
-        return None
 
-    async def on_close(self) -> None:
-        """
-        when channel close.
-        """
-        return None
-
-    async def on_running(self) -> None:
-        """
-        when channel is running.
-        """
-        return None
-
-    async def on_idle(self) -> None:
-        """
-        when channel is idle, all the commands are done and the children are idle as well
-        """
-        return None
-
-    @abstractmethod
-    def own_commands(self) -> dict[str, Command]:
-        """
-        return the commands mapping by name
-        """
-        pass
-
-    @abstractmethod
-    def get_own_command(self, name: str) -> Command | None:
-        """
-        get a command by name
-        """
-        pass
-
-    def bootstrap(self, container: IoCContainer) -> None:
-        """
-        register something to the container. or get some contracts from it.
-        """
-        return
-
-    def get_children(self) -> dict[ChannelName, Channel]:
-        """
-        return the sustain children channel
-        """
-        return {}
-
-    def get_virtual_children(self) -> dict[ChannelName, Channel]:
-        """
-        return the virtual children that may be changed during runtime
-        """
-        return {}
-
-
-class ChannelStateBuilder(Builder, ChannelState, ABC):
+class MutableChannelState(Builder, ChannelState, ABC):
     """
-    Channel State which itself is mutable.
+    Channel State which itself is mutable by extend builder
     """
 
     @abstractmethod
@@ -143,12 +78,31 @@ class ChannelStateBuilder(Builder, ChannelState, ABC):
         pass
 
 
-def new_state_builder(name: str, description: str = "") -> ChannelStateBuilder:
+def new_channel_state(name: str, description: str = "") -> MutableChannelState:
     """
     new state builder
     """
     from ghoshell_moss.core.py_channel import PyChannelBuilder
     return PyChannelBuilder(name=name, description=description)
+
+
+class StatefulChannelRuntime(ChannelRuntime, ABC):
+
+    @abstractmethod
+    async def switch_state(self, name: str) -> str:
+        pass
+
+    @abstractmethod
+    async def add_virtual_channel(self, channel: Channel, wait_started: bool = False) -> bool:
+        pass
+
+    @abstractmethod
+    async def remove_virtual_channel(self, name: str, wait_refreshed: bool = False) -> bool:
+        pass
+
+    @abstractmethod
+    async def stop_current_state(self) -> str:
+        pass
 
 
 class StatefulChannel(Channel, ABC):
@@ -164,7 +118,7 @@ class StatefulChannel(Channel, ABC):
         pass
 
     @abstractmethod
-    def new_state(self, name: str, description: str) -> ChannelStateBuilder:
+    def new_state(self, name: str, description: str) -> MutableChannelState:
         """
         create new substate of the channel
         """
@@ -177,10 +131,37 @@ class StatefulChannel(Channel, ABC):
         """
         pass
 
+    def modules(self) -> dict[str, ChannelModule]:
+        """
+        return the permanent capability modules.
+        默认返回空 dict，不是每个 StatefulChannel 都需要 module。
+        """
+        return {}
+
     @abstractmethod
-    def with_state(self, state: ChannelState, alias: str | None = None) -> Self:
+    def with_module(self, module: ChannelModule) -> Self:
+        """
+        register a permanent capability module to the channel.
+        unlike with_state(), modules are cumulative — all active simultaneously.
+        """
+        pass
+
+    @abstractmethod
+    def with_state(self, state: ChannelState, alias: str | None = None, is_default: bool = False) -> Self:
         """
         register a named substate to the channel.
+        """
+        pass
+
+    @abstractmethod
+    def default_state_name(self) -> str:
+        pass
+
+    @abstractmethod
+    def on_bootstrap(self, bootstrapper: Callable[[Self, IoCContainer], None]) -> None:
+        """
+        通过注册闭包的方式, 支持仅在 StatefulChannel bootstrap 时, 才使用这些闭包给自己做改造.
+        这种方式, 可以将一些依赖 IoCContainer 的对象提取出来, 在实例化前才定义 State.
         """
         pass
 
@@ -192,7 +173,7 @@ class PrimeChannel(StatefulChannel, MutableChannel, ABC):
 
     @property
     @abstractmethod
-    def build(self) -> ChannelStateBuilder:
+    def build(self) -> MutableChannelState:
         pass
 
     def add_virtual_channel(self, channel: Channel, alias: ChannelName | None = None) -> None:
@@ -212,7 +193,7 @@ class PrimeChannel(StatefulChannel, MutableChannel, ABC):
         self.build.remove_virtual_channel(name)
 
 
-def new_channel_from_state(state: ChannelState, id: str | None = None) -> StatefulChannel:
+def new_stateful_channel_from_main(state: ChannelState, id: str | None = None) -> StatefulChannel:
     """
     create new channel by state object
     """
@@ -231,3 +212,60 @@ def new_stateful_channel(name: str, description: str = "") -> StatefulChannel:
 def new_prime_channel(name: str, description: str = "") -> PrimeChannel:
     from ghoshell_moss.core.py_channel import PyChannel
     return PyChannel(name=name, description=description)
+
+
+def new_shell_main_channel(description: str = "") -> PrimeChannel:
+    """
+    创建 CTML shell 的主 channel (__main__)。
+
+    FastAPI-like 入口。返回空的 main channel，
+    可选调用 ``inject_system_primitives(main)`` 注入系统原语，
+    可继续 import_channels / with_state / with_module 组合。
+    """
+    from ghoshell_moss.core.py_channel import PyChannel
+    description = description or "MOSS main channel"
+    return PyChannel(name="__main__", description=description, blocking=True)
+
+
+def new_default_shell_main_channel(
+        description: str = "",
+) -> PrimeChannel:
+    """
+    创建一个标准的, 默认的 shell main channel.
+    提示如何组建 Shell Main Channel.
+    """
+    from ghoshell_moss.core.ctml.shell.ctml_main import inject_system_primitives
+    from ghoshell_moss.core.speech import SpeechChannelModule
+
+    main = new_shell_main_channel(description=description)
+
+    # -- 系统原语 --------------------------------------------------
+    inject_system_primitives(main, extended=True)
+
+    # -- Speech --------------------------------------------------
+    main.with_module(SpeechChannelModule())
+
+    return main
+
+
+# ---- 面向对象使用思路示范 ---- #
+
+class ChannelStateFactory(ChannelState, ABC):
+    """
+    如何从 State 类定义开始, 获取一个运行时可以生成 Channel 的 ChannelFactory 对象.
+
+    这不是一个必要的抽象, 仅仅展示如何面向对象的, 以 ChannelState 的思路来定义一个 Channel.
+
+    """
+
+    @classmethod
+    @abstractmethod
+    def new(cls, container: IoCContainer) -> Self:
+        """从 ioc 容器中可以实例化一个 State. 这个函数可以是 object method / class method"""
+        pass
+
+    @classmethod
+    def factory(cls, container: IoCContainer) -> Channel:
+        """factory 函数本身就是一个 channel factory, 所以可以被其它 channel import. """
+        state = cls.new(container)
+        return new_stateful_channel_from_main(state)
