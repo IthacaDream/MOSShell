@@ -1,4 +1,6 @@
-# 1. Hello World App
+# L1. Hello World App
+
+> Written by deepseek-v4-pro, 2026-06-02
 
 **15 分钟，从头创建你的第一个 MOSS App，完成 create → start → call → stop 全闭环。**
 
