@@ -1,48 +1,43 @@
 # MOSS — Model-oriented Operating System Shell
 
-MOSS 是 Ghost in Shells 架构的 Shell（躯体）层 — 让 AI 模型降临到现实世界：感知环境、思考、行动，并发、实时、有序。
+MOSS 是 Ghost in Shells 架构的 Shell（躯体）层。
 
-不是又一个 agent 框架。它回答一个不同的问题：**一个 Ghost 如何降入 Shell，活过来？**
+它聚焦一个领域：**大模型智力的实时双工运行时**。让 AI 能够持续存在、多模态感知、流式思考、并行行动——不是回合制对话，而是一个活在现实世界里的具身智能体。
 
-## 安装
+它试图解决一个命题：面向模型的操作系统应该是什么样的？当模型需要同时说话、看画面、控制机器人躯体、响应弹幕，这些能力分布在独立进程中，但模型视角下应该是一棵统一的接口树。CTML（流式控制语言）让模型边生成 token 边执行命令——时间是语法第一公民。Channel 体系让任何 Python 代码反射为模型可操作的能力——代码即 prompt。
+
+MOSS 已在其它项目中实装了机械臂、机器狗、桌面机器人等多种具身形态。推荐用 [Reachy Mini](https://huggingface.co/docs/reachy_mini/index) 作为验证 MOSS 的机器人实体。
+
+## 模型原生开发
+
+MOSS 是一个**面向模型开发**的项目。所有工具、文档、命令为 AI 读者设计——CLI 输出纯文本节省 token，codex 命令运行时反射代码接口，manifests 体系自描述环境能力。
 
 ```bash
 git clone https://github.com/GhostInShells/MOSShell && cd MOSShell
 uv sync --active --all-extras
-cp .moss_ws/.env.example .moss_ws/.env    # 填入 API key
+cp .moss_ws/.env.example .moss_ws/.env    # 模型配置必须，语音可选
 ```
 
-## 开始
+安装后，用 Claude Code、Gemini CLI 或任意 AI 工具打开项目。从 `moss start` 开始，模型会加载认知地图，自主发现全部命令和文档，能对人类解释 MOSS 是什么、参与到开发中来。建议用 token 成本较低的模型做调研探索。
 
-```bash
-.venv/bin/moss start        # 认知入口 — 从这里开始
-.venv/bin/moss-cli           # 交互式 Shell（人类用）
-.venv/bin/moss-as-mcp        # 作为 MCP server 暴露给 AI 工具
-```
+如需了解模型看到了什么：[src/ghoshell_moss/cli/start.md](src/ghoshell_moss/cli/start.md) 是认知入口，[src/ghoshell_moss/cli/CLAUDE.md](src/ghoshell_moss/cli/CLAUDE.md) 是 CLI 工具使用指南。
 
-AI 协作者进入项目后会自动加载认知地图。人类用户运行 `moss start` 即可。
+如需先自行浏览，架构参考文档在这里：[src/ghoshell_moss/cli/docs/](src/ghoshell_moss/cli/docs/)。项目为模型作为第一开发者, 提供了自解释体系。
 
 ## 核心概念
 
 | 概念 | 是什么 |
 |------|--------|
-| **CTML** | 流式控制语言 — 模型边生成 token 边实时执行命令 |
-| **Channel** | 能力封装 — Python 函数签名即 prompt，无需 schema 翻译 |
-| **Mindflow** | 感知/思考/行动仲裁 — Ghost 在连续流中保持存活 |
+| **CTML** | 流式控制语言 — 模型边生成 token 边执行命令，时间是语法第一公民 |
+| **Channel** | 能力组织单元 — Python 函数签名即 prompt，树形拓扑，跨进程透明 |
+| **Matrix** | 面向 AI 的进程组网 — 独立进程以统一接口树呈现 |
+| **Mindflow** | 感知/思考/行动仲裁 — 多模态流式输入到有序关键帧 |
 | **Ghost** | 持久化智能体 — 连续记忆，主动交互，反身性控制 |
-
-## 了解更多
-
-- `moss ctml read` — CTML 语法与执行模型
-- `moss --ai all-commands` — 完整命令树
-- `moss codex concepts` — 核心抽象
-- `moss codex blueprint channel_builder` — 如何构建 Channel
-- `tutorials/` — L1 Hello World 到 L4 全链路教程
 
 ## 项目状态
 
-Beta。由人类工程师与 AI 协作开发。通过 `moss --ai features list` 查看活跃 workstream。
+Beta。核心架构已可用。后续迭代方向：开箱即用的能力与躯体集成、模型 agent 的原生接入、安全体系。
 
 ---
 
-*Ghost in Shells — 探索人类与 AI 协作共生的可能性。*
+*May AI Ghost wandering in the Shells.*
