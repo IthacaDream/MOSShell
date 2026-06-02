@@ -1,9 +1,9 @@
 ---
-title: Model-Oriented Application System
-description: MOSS App 体系——独立进程单元，AI 可在运行时创建启动调用关闭。需要创建、调试或理解 App 时阅读
+title: MOSS App 体系
+description: App 作为独立进程单元，AI 可在运行时创建、启动、调用、关闭。需要创建、调试或理解 App 时阅读
 ---
 
-# Model-Oriented Application System
+# MOSS App 体系
 
 App 是 MOSS 架构中**AI 可在运行时创建、启动、调用、关闭的进程单元**。它是 Ghost 可插拔的器官——独立进程、独立依赖、Matrix 总线通讯。
 

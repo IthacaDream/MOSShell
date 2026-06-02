@@ -1,9 +1,9 @@
 ---
-title: MOSS Script
-description: 一次性 Python 脚本入口，通过 Matrix.discover() 接入运行中的 MOSS 网络。需要写探查脚本或调试集成时阅读
+title: MOSS Script — 一次性脚本入口
+description: 通过 Matrix.discover() 接入运行中的 MOSS 网络，用于探查、调试、集成验证。App 交付能力，Script 理解系统。轻量参考
 ---
 
-# MOSS Script
+# MOSS Script — 一次性脚本入口
 
 Script 是复用 MOSS 运行时的一次性 Python 脚本。它通过 `Matrix.discover()` 接入运行中的 MOSS 网络，完成任务后退出。
 

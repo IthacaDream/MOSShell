@@ -177,7 +177,7 @@ bringup_apps:
 
 ## 深入路径
 
-- App 体系完整论述：`moss docs read model-oriented-application-system.md`
+- App 体系完整论述：`moss docs read app-system.md`
 - Channel 构建：`moss codex get-interface ghoshell_moss.core.blueprint.channel_builder`
 - Matrix API：`moss codex get-interface ghoshell_moss.core.blueprint.matrix`
 - App 抽象定义：`moss codex get-interface ghoshell_moss.core.blueprint.app`
