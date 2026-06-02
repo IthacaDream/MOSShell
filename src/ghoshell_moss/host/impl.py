@@ -116,7 +116,7 @@ class Host(MossHost):
     @property
     def scan_errors(self) -> list[ScanError]:
         """Aggregated scan errors from manifests, modes, and ghosts discovery."""
-        return list(self._scan_ghost_errors)
+        return self._scan_manifest_errors + self._scan_ghost_errors
 
     def all_modes(self) -> dict[str, Mode]:
         if self._env_modes is None:

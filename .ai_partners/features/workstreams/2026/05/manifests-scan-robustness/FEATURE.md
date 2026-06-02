@@ -1,14 +1,17 @@
 ---
-title: Manifests Scan Robustness
-status: draft
-priority: P1
 created: 2026-05-29
-updated: 2026-05-29
 depends: []
-milestone:
-description: >-
-  Add strict mode, error collection, and timeout to the manifests/modes/ghosts scan pipeline.
-  Eliminate silent error swallowing while preserving full backward compatibility.
+description: Add strict mode, error collection, and timeout to the manifests/modes/ghosts
+  scan pipeline. Eliminate silent error swallowing while preserving full backward
+  compatibility.
+milestone: null
+priority: P1
+status: completed
+status_note: '2026-06-02: core implementation done in 29b72d4. CLI display gap fixed:
+  shared display_scan_errors in utils.py, manifests_cli shows errors, Host.scan_errors
+  now includes manifest errors.'
+title: Manifests Scan Robustness
+updated: '2026-06-02'
 ---
 
 # Manifests Scan Robustness
