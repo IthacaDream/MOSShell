@@ -1,41 +1,52 @@
 ---
 created: 2026-06-02
 depends: []
-description: 将核心知识体系随包分发：CLI 自导引命令（moss guide）+ Channels 模块正式化（docstring 约定、codex
+description: 将核心知识体系随包分发：CLI 自导引命令（moss start）+ Channels 模块正式化（docstring 约定、codex
   channeltypes、observe 治理）。
 milestone: null
 priority: P1
 status: completed
-title: Moss Guide — CLI 自导引与 Channels 正式化
+title: Moss Start — CLI 认知入口与 Channels 正式化
 updated: '2026-06-02'
 ---
 
-# Moss Guide — CLI 自导引系统
+# Moss Start — CLI 认知入口
 
 ## Motivation
 
 当前 `moss` CLI 的介绍体系完全依赖源码仓库中的 `CLAUDE.md`。通过 PyPI 安装后，`moss --help` 只有 Click 自动生成的干瘪命令树，核心讯息（AI 使用指南、命令体系导览、核心概念速览、快速开始路径）对用户不可见。
 
-CLI 工具作为产品，应该自包含导引能力。`moss guide` 就是所有命令使用的开端。
+CLI 工具作为产品，应该自包含导引能力。`moss start` 就是每个 MOSS 会话的认知入口——像 CLAUDE.md 为 AI 加载项目上下文一样，`moss start` 为使用者加载 MOSS 的认知地图。
 
 ## Design Index
 
-- 源码位置: `src/ghoshell_moss/cli/` (新增 `guide_cli.py`)
-- 文档内容源: `src/ghoshell_moss/cli/docs/ai/` (随包分发的 AI 可读文档)
-- CLAUDE.md 集成: 通过 `@` 引用语法指向 guide 文档，保持 CLAUDE.md 精简
+- 源码位置: `src/ghoshell_moss/cli/` (新增 `start_cli.py`)
+- 文档内容源: `src/ghoshell_moss/cli/start.md` (随包分发)
+- CLAUDE.md 集成: 通过 `@` 引用语法指向 start 文档，保持 CLAUDE.md 精简
 
 ## Key Decisions
 
-### K1: 命令命名为 `moss guide`
+### K1: 命令命名为 `moss start`（原名 `moss guide`）
 
-候选: `intro`, `tour`, `start`, `about`。选择 `guide` 因为：
-- 暗示"跟着走就能了解全局"，是行动导向而非一次性介绍
-- 生态常见 (`npm guide` 等)，用户预期明确
-- 可扩展子命令 (`moss guide commands`, `moss guide concepts`)
+最初命名为 `moss guide`（2026-06-02），实施中发现 `guide` 在 AI 模型中被污染——每个实例都将其理解为"打开一份文档目录"，而非 CLI flow 的第一个 kickoff。
+
+2026-06-02 讨论后改为 `moss start`：
+- `start` 是 CLI 生态中最强的"入口"约定（`npm start`、`docker start`）
+- 自带动作感——不是打开手册，是"从这里跑起来"
+- 在 `moss --help` 中无需上下文即可理解其作为入口的角色
+- 短，单一单词，行业约定清晰
 
 ### K2: 文档随包分发，作为 package_data
 
-guide 的 markdown 内容放在 `src/ghoshell_moss/cli/docs/ai/` 下，通过 `pyproject.toml` 的 `package-data` 随包安装。CLI 命令读取自身包内文档，不依赖外部文件。
+start 的 markdown 内容放在 `src/ghoshell_moss/cli/start.md`，通过 `pyproject.toml` 的 `package-data` 随包安装。CLI 命令读取自身包内文档，不依赖外部文件。
+
+### K2.1: 单一文档，不走 MarkdownKnowledgeBase
+
+start 是 CLI 的认知入口，一个文件承载完整的引导叙事流。与 docs/how-tos 不同：
+- docs/how-tos 是多文档知识库，需要 list/read/recall，适合 mkb
+- start 是单次阅读的行动流，直接读文件渲染，零依赖
+
+`moss start` 无参数时显示文档全文。后续可扩展 `moss start <topic>`。
 
 ### K3: 面向双读者：人类 + AI
 
@@ -43,7 +54,7 @@ guide 的 markdown 内容放在 `src/ghoshell_moss/cli/docs/ai/` 下，通过 `p
 
 ### K4: 内容从 CLAUDE.md 迁移，做结构化重写
 
-不是简单搬运，而是按 guide 的定位重新组织：
+不是简单搬运，而是按 start 的定位重新组织：
 - 命令体系导览（何时用什么，不只是列表）
 - AI 使用指南（`--ai` flag、`codex get-interface` vs 读源码的决策逻辑）
 - 核心概念速览（channel, matrix, ghost 是什么）
@@ -53,13 +64,14 @@ guide 的 markdown 内容放在 `src/ghoshell_moss/cli/docs/ai/` 下，通过 `p
 
 ### K5: CLAUDE.md 用 `@` 引用保持单一事实源
 
-CLAUDE.md 中不再重复 guide 内容，用 `@src/ghoshell_moss/cli/docs/ai/guide.md` 引入。Claude Code 支持此语法，最多 4 层嵌套。
+CLAUDE.md 中不再重复 start 内容，用 `@src/ghoshell_moss/cli/start.md` 引入。Claude Code 支持此语法，最多 4 层嵌套。
 
 ## Channels 正式化 (2026-06-02)
 
-`ghoshell_moss.channels` 目录从原型阶段进入正式模块。四个平行任务：
+K6-K8 已在另一会话完成 (deepseek-v4-pro)，当前工作区有未提交 diff。本会话聚焦 moss start。
+K9 待完成。
 
-### K6: 模块级 docstring 约定
+### K6: 模块级 docstring 约定 ✅ (另一会话)
 
 ```python
 """一句话功能描述 | 功能类型 | 状态
@@ -100,14 +112,14 @@ Status 三态：`alpha`（原型/无测试/接口随意改）→ `beta`（可用
 
 ## Implementation Notes
 
-- 实现参考现有的 `docs_cli.py` 或 `howto_cli.py` 的 read 模式
-- guide 内容第一版由 AI 起草，人类二稿，AI review，两轮后交付
-- `moss guide` 无参数时显示总览索引；后续可扩展 `moss guide <topic>` 子命令
+- `start_cli.py` 已完成 (2026-06-02)，直接读 `cli/start.md` 渲染，不依赖 mkb
+- start.md 由人类工程师写骨架，AI 用已有的 CLI 知识补完内容
+- 后续可扩展 `moss start <topic>` 子命令
 
 ## Delivery Flow
 
-1. AI 实现 `guide_cli.py` 命令
-2. AI 起草 guide 文档一稿
-3. 人类二稿修改
-4. AI review
+1. ✅ AI 实现 `start_cli.py` 命令，注册到 `main.py`
+2. 🔧 人类写 `start.md` 骨架 → AI 补完内容
+3. AI review 最终内容
+4. CLAUDE.md 用 `@` 引用指向 `start.md`
 5. 修改定稿后整体交付，status → completed

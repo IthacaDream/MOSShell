@@ -11,7 +11,7 @@ from ghoshell_moss.cli.utils import (
 from ghoshell_moss.cli import (
     codex_cli, workspace_cli, manifests_cli, apps_cli,
     modes_cli, ctml_cli, howto_cli, features_cli, docs_cli,
-    ghosts_cli, scripts_cli,
+    ghosts_cli, scripts_cli, start_cli,
 )
 from typer.main import get_command
 from typer.models import DefaultPlaceholder
@@ -26,6 +26,8 @@ app = typer.Typer(
     rich_markup_mode=None,  # 如果你将来想用 rich，可以改为 "rich"
     no_args_is_help=True  # 没传子命令时自动显示帮助
 )
+
+app.add_typer(start_cli.start_app, name="start", short_help="Orient yourself — loads the MOSS cognitive map")
 
 app.add_typer(codex_cli.codex_app, name="codex", short_help="Runtime introspection and code evaluation tools")
 app.add_typer(workspace_cli.workspace_app, name="workspace", short_help="MOSS Workspace tools")
