@@ -88,7 +88,7 @@ cat $(moss workspace where 2>/dev/null | grep "Expect Root" | cut -d'|' -f3 | xa
 更深入的内核知识（父子容器隔离、Bootstrapper 生命周期、provide 语法糖）属于内核开发者范畴：
 
 ```bash
-moss how-tos read get-moss-design/how-ioc-container-work-in-moss.md
+moss howtos read get-moss-design/how-ioc-container-work-in-moss.md
 ```
 
 ## 文档目标

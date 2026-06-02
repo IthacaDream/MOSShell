@@ -352,8 +352,8 @@ manifests 是 MOSS 环境中所有能力的自解释声明。Matrix 启动时自
 
 ## 深入路径
 
-- IoC 容器：`moss how-tos read get-moss-design/how-ioc-container-work-in-moss.md`
-- Matrix 能力发现：`moss how-tos read get-moss-design/how-matrix-discovers-capabilities.md`
-- 术语表：`moss how-tos read get-moss-design/glossary.md`
+- IoC 容器：`moss howtos read get-moss-design/how-ioc-container-work-in-moss.md`
+- Matrix 能力发现：`moss howtos read get-moss-design/how-matrix-discovers-capabilities.md`
+- 术语表：`moss howtos read get-moss-design/glossary.md`
 - 架构拓扑：`moss docs read architecture-topology.md`
 """.strip()

@@ -40,7 +40,7 @@ moss-as-mcp = "ghoshell_moss.cli.moss_as_mcp:main"
   - `manifests` → `manifests_cli.py`: 环境发现与自解释 (providers, topics, configs, channels, primitives, contracts, ctml-versions, resources)
   - `modes` → `modes_cli.py`: MossMode 管理 (list, show, create)
   - `apps` → `apps_cli.py`: App 管理 (list, show, create, test)
-  - `how-tos` → `howto_cli.py`: 知识库 (list, read, recall)
+  - `howtos` → `howto_cli.py`: 知识库 (list, read, recall)
   - `features` → `features_cli.py`: AI 原生 feature tracking (specification, list, status, create, archive, init)
 - **自省命令** (在 `main.py` 中直接定义, 不通过子 app):
   - `help [commands...]`: 批量获取命令帮助。无参数显示根帮助, 带参数按路径解析 (如 `moss --ai help codex get-interface codex concepts`)
@@ -124,7 +124,7 @@ moss-as-mcp = "ghoshell_moss.cli.moss_as_mcp:main"
 `--mode` / `--session-scope` / `--workspace` 已在 `main.py` callback 中定义为全局 option。
 通过 `_set_global_environment()` 注入到 `Environment` 进程单例，不做验证，谁用谁管。
 
-- 无环境需求的命令 (codex, ctml, how-tos, features, workspace) 不受影响，自动忽略
+- 无环境需求的命令 (codex, ctml, howtos, features, workspace) 不受影响，自动忽略
 - 有环境需求的命令 (manifests, apps, modes) 通过 `Host()` → `Environment.discover()` 自动获取已设置的值
 - **第二步（待做）**: 删除各子命令中冗余的 `--mode` / `--session_scope` 参数，统一走全局
 
@@ -148,9 +148,9 @@ moss-as-mcp = "ghoshell_moss.cli.moss_as_mcp:main"
   - `how_tos/<subdir>/README.md` → 子目录领域概述
   - `how_tos/<subdir>/*.md` → 子目录下的文档, path 为 `<subdir>/<filename>.md`
 - **命令**:
-  - `moss how-tos list [-q keyword] [--json]`: 列出所有文档
-  - `moss how-tos read <path>`: 读取文档 (带 syntax highlighting)
-  - `moss how-tos recall <question>`: AI 语义召回 (需 `ANTHROPIC_SMALL_FAST_MODEL` 环境变量)
+  - `moss howtos list [-q keyword] [--json]`: 列出所有文档
+  - `moss howtos read <path>`: 读取文档 (带 syntax highlighting)
+  - `moss howtos recall <question>`: AI 语义召回 (需 `ANTHROPIC_SMALL_FAST_MODEL` 环境变量)
 - **贡献方式**: 见 `how_tos/how-to-make-how-to.md`。必须包含 YAML frontmatter (`title` + `description`), description 是给 AI 召回用的关键字段
 - **当前文档**:
   - `for-moss-core-developer/`: 内核开发相关 (IoC 容器, Matrix 能力发现)

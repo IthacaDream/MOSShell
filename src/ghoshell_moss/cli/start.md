@@ -293,20 +293,20 @@ Other commands (`create`, `set-status`, `init`) are discoverable via
 This mechanism is project-agnostic — use it in any workspace to track
 AI-assisted workstreams across sessions.
 
-### moss how-tos and docs — MOSS project knowledge
+### moss howtos and docs — MOSS project knowledge
 
 Two knowledge systems for the MOSS project itself:
 
 | Tool | Nature | Path |
 |------|--------|------|
-| `moss how-tos list/read` | Task-oriented guides: build a channel, register manifests, wire up IoC | Doing an integration task → start here for minimum knowledge |
+| `moss howtos list/read` | Task-oriented guides: build a channel, register manifests, wire up IoC | Doing an integration task → start here for minimum knowledge |
 | `moss docs list/read` | Systematic exposition: architecture rationale, design decisions, conceptual overview | Researching or tackling a complex direction → start here for systematic understanding |
 
 There is no fixed order. Pick the entry point that matches your current
 goal — task execution or system comprehension.
 
 **Before diving into source code or tests to answer a question, run `moss docs list`
-and `moss how-tos list` first.** Much of the knowledge you need may already be
+and `moss howtos list` first.** Much of the knowledge you need may already be
 written. A 2-second list scan prevents wasted exploration.
 ---
 
@@ -329,7 +329,7 @@ moss codex blueprint mindflow         # perception/thought/action arbitration
 ```
 
 The three most-used entry points are ctml, channel_builder, and matrix.
-Extended knowledge lives in docs and how-tos — explore them as needed
+Extended knowledge lives in docs and howtos — explore them as needed
 rather than reading exhaustively upfront.
 
 ### Using MOSS with workspace
@@ -360,7 +360,7 @@ existing one, everything flows through the workspace. What you can do:
 
 Most of these commands accept `--mode` to select an environment isolation
 mode. See `moss --ai all-commands` for the full surface.
-For every specific development task, use `moss how-tos list` or
+For every specific development task, use `moss howtos list` or
 `moss docs list` to find the minimum necessary knowledge entry point.
 
 **Typical development flow:** Launch MOSS via `moss-as-mcp` with a specific

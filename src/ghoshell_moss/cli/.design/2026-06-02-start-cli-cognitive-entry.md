@@ -22,7 +22,7 @@ seeing `start` in `moss --help` understands its role without context.
 
 ### 2. Single markdown file, no MarkdownKnowledgeBase
 
-`moss docs` and `moss how-tos` use mkb for multi-document knowledge bases.
+`moss docs` and `moss howtos` use mkb for multi-document knowledge bases.
 `moss start` is a single file (`cli/start.md`) read directly. Rationale:
 
 - start is one narrative flow, not a collection of topics
@@ -104,14 +104,14 @@ Key discussions:
   runtime self-evolution — not just adding functions, but adding isolated
   processes with independent dependencies that auto-discover and communicate.
 
-### 8. docs vs how-tos: no fixed order
+### 8. docs vs howtos: no fixed order
 
-Previous drafts prescribed "always how-tos first." This is incorrect.
+Previous drafts prescribed "always howtos first." This is incorrect.
 The two systems serve different entry modes:
 
 | System | Nature | Entry mode |
 |--------|--------|------------|
-| `moss how-tos` | Task-oriented guides | Doing an integration task → start here |
+| `moss howtos` | Task-oriented guides | Doing an integration task → start here |
 | `moss docs` | Systematic exposition | Researching a complex direction → start here |
 
 No fixed order. Pick based on current goal.
@@ -187,7 +187,7 @@ is needed.
 ### Documentation feedback loop
 
 When an AI instance discovers issues in the documentation system
-(how-tos, docs, start.md, CLAUDE.md), it should proactively propose
+(howtos, docs, start.md, CLAUDE.md), it should proactively propose
 fixes through the `moss features` system. This is stated in CLAUDE.md.
 
 ### The "first sentence" test

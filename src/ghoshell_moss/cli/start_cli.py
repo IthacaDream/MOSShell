@@ -56,5 +56,5 @@ def start(ctx: typer.Context):
     echo("")
     echo("Next:")
     echo("  moss --ai all-commands      See everything MOSS can do")
-    echo("  moss how-tos list            Task-oriented knowledge base")
+    echo("  moss howtos list            Task-oriented knowledge base")
     echo("  moss docs list               Architecture reference docs")

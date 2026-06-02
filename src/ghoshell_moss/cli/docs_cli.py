@@ -3,7 +3,7 @@ Docs CLI — AI reference documentation via MarkdownKnowledgeBase.
 
 Systematic architecture reference docs. Low frequency — use when you need to
 understand design rationale, not when you need to get something done.
-For daily task-oriented knowledge, use `moss how-tos`.
+For daily task-oriented knowledge, use `moss howtos`.
 """
 import asyncio
 import typer
@@ -26,14 +26,14 @@ kb = _load_kb(DOCS_ROOT)
 docs_app = typer.Typer(
     name="docs",
     help="Systematic architecture reference docs (low frequency). "
-         "For daily task-oriented knowledge, use `moss how-tos`.",
+         "For daily task-oriented knowledge, use `moss howtos`.",
     no_args_is_help=False,
     invoke_without_command=True,
 )
 
 
 def _howto_hint():
-    return "Task-oriented knowledge: moss how-tos list"
+    return "Task-oriented knowledge: moss howtos list"
 
 
 # ---------------------------------------------------------------------------
@@ -46,7 +46,7 @@ def docs_callback(ctx: typer.Context):
 
     \b
     Low frequency — use when you need to understand design rationale.
-    For daily task-oriented knowledge, use `moss how-tos`.
+    For daily task-oriented knowledge, use `moss howtos`.
 
     \b
     moss docs list             list all reference docs

@@ -35,7 +35,7 @@ def load_markdown_knowledge_base(_path: Path):
 kb = load_markdown_knowledge_base(HOW_TO_ROOT)
 
 howto_app = typer.Typer(
-    name="how-tos",
+    name="howtos",
     # Use README first line as help, falling back to a default
     help=[m.description for m in kb.metas if m.path == "README.md"][0]
     if any(m.path == "README.md" for m in kb.metas)
@@ -92,7 +92,7 @@ def read_doc(
     item = asyncio.run(kb.get(path))
     if item is None:
         print_error(f"Document not found: {path}")
-        print_info("Use 'moss how-tos list' to see available documents.")
+        print_info("Use 'moss howtos list' to see available documents.")
         raise typer.Exit(code=1)
 
     text = asyncio.run(item.get())

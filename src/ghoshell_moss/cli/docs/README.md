@@ -1,19 +1,19 @@
 ---
 title: MOSS AI Reference Docs
-description: 系统化的 MOSS 架构参考文档。日常开发请用 moss how-tos
+description: 系统化的 MOSS 架构参考文档。日常开发请用 moss howtos
 ---
 
 # MOSS AI Reference Docs
 
-系统化架构参考文档——当 how-tos 的操作步骤不够，需要理解"为什么这么设计"时来这里。
+系统化架构参考文档——当 howtos 的操作步骤不够，需要理解"为什么这么设计"时来这里。
 
 覆盖范围：架构拓扑推演、核心系统参考（Channel / Matrix / App / Ghost）、语言语法（CTML / Logos）、开发环境（Workspace / Mode / Script）。
 
-**docs 不是开发入口**。日常任务导向知识在 `moss how-tos`。docs 使用频率应低于 how-tos。
+**docs 不是开发入口**。日常任务导向知识在 `moss howtos`。docs 使用频率应低于 howtos。
 
-## docs vs how-tos
+## docs vs howtos
 
-| | docs | how-tos |
+| | docs | howtos |
 |---|---|---|
 | 定位 | 系统化知识，理解设计 | 任务导向，完成操作 |
 | 频率 | 低——需要深度理解时 | 高——日常开发 |

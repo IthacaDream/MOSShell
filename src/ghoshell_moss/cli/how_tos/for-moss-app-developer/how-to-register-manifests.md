@@ -55,7 +55,7 @@ my_service_provider = MyServiceProvider()
 
 **Mode 合并**：`list.extend` 追加，mode 的 providers 不会覆盖全局的，只会增加。
 
-深入：`moss how-tos read get-moss-design/how-ioc-container-work-in-moss.md`
+深入：`moss howtos read get-moss-design/how-ioc-container-work-in-moss.md`
 
 ## 注册 Channel（能力树入口）
 
@@ -140,7 +140,7 @@ local_image_storage_meta = LocalImageResourceMeta()
 
 ResourceStorageMeta 实例声明一个可寻址的资源数据集，以 `{scheme}:{host}` 为全局资源句柄。`factory()` 生产 `ResourceStorage`。
 
-深入：`moss how-tos read for-moss-app-developer/how-to-add-a-resource-storage.md`
+深入：`moss howtos read for-moss-app-developer/how-to-add-a-resource-storage.md`
 
 ## 注册 Topic（协议声明）
 

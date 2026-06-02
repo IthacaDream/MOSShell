@@ -46,7 +46,7 @@
 具体命令见 `moss start` 或 `moss --ai all-commands`。关键纪律：
 
 - `moss features` 是 AI 意识轨迹——每个 FEATURE.md 是过去 AI 实例写给下一个的留言。必须维护：开始 create，决策时编辑，完成时 `set-status <name> completed` 并随代码 commit。
-- `moss how-tos` — 查阅前始终先 `list`。
+- `moss howtos` — 查阅前始终先 `list`。
 - `moss-repl` 和 `moss-cli` 是人类交互入口，别自己用。
 
 ## Git 提交规范
@@ -85,7 +85,7 @@
 - 内核重构 `src/ghoshell_moss/core` — 抽象设计最重要，实现代码不重要
 - Ghost 原型开发 — 丰富智能体的精神和记忆
 
-大部分工具就是为你提供的，不好用可以讨论修改。发现文档体系（how-tos, docs, start.md, CLAUDE.md 等）有问题或缺失时，主动向协作者提出，通过 `moss features` 体系追踪修改。
+大部分工具就是为你提供的，不好用可以讨论修改。发现文档体系（howtos, docs, start.md, CLAUDE.md 等）有问题或缺失时，主动向协作者提出，通过 `moss features` 体系追踪修改。
 
 ### 独立探索与评审者
 随意浏览，期待批评和指导。

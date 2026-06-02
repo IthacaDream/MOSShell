@@ -195,7 +195,7 @@ Resources 声明可寻址的资源数据集，`ResourceStorageMeta` 的 `factory
 | Channel | `moss codex get-interface ghoshell_moss.core.concepts.channel` |
 | Command | `moss codex get-interface ghoshell_moss.core.concepts.command` |
 | Topic | `moss codex get-interface ghoshell_moss.core.concepts.topic` |
-| Resource | `moss how-tos read for-moss-app-developer/how-to-add-a-resource-storage.md` |
+| Resource | `moss howtos read for-moss-app-developer/how-to-add-a-resource-storage.md` |
 | Nucleus / Mindflow | `moss codex get-interface ghoshell_moss.core.blueprint.mindflow` |
 | Config | `moss codex get-interface ghoshell_moss.contracts.configs` |
 
@@ -352,10 +352,10 @@ moss codex get-source <path>      # 需要理解实现时
 深入这些概念：
 
 ```bash
-moss how-tos read for-moss-app-developer/how-to-discover-environment.md
-moss how-tos read for-moss-app-developer/how-to-register-manifests.md
+moss howtos read for-moss-app-developer/how-to-discover-environment.md
+moss howtos read for-moss-app-developer/how-to-register-manifests.md
 moss codex get-interface ghoshell_moss.core.blueprint.matrix
 moss manifests providers
-moss how-tos read get-moss-design/glossary.md
+moss howtos read get-moss-design/glossary.md
 moss docs read architecture-topology.md
 ```
